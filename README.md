@@ -1,0 +1,103 @@
+# GitLab Watcher
+
+Monitor GitLab projects and automatically process issues and merge requests.
+
+## Installation
+
+```bash
+# From source (development mode)
+cd ~/.claude/scripts/gitlab-watcher
+pip install -e .
+
+# Or from GitLab (when published)
+pip install git+https://git.gyengus.hu/...
+```
+
+## Usage
+
+```bash
+# Default config location
+gitlab-watcher
+
+# Custom config
+gitlab-watcher -c /path/to/config.conf
+
+# Verbose mode
+gitlab-watcher --verbose
+```
+
+## Configuration
+
+Create `~/.claude/config/gitlab.conf`:
+
+```bash
+# Project directories to monitor
+PROJECT_DIRS=(
+  "/path/to/project1"
+  "/path/to/project2"
+)
+
+# GitLab connection
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="your-token"
+
+# Discord notifications (optional)
+DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+
+# Workflow labels
+LABEL_IN_PROGRESS="In progress"
+LABEL_REVIEW="Review"
+
+# GitLab user to monitor
+GITLAB_USERNAME="claude"
+
+# Polling interval in seconds
+POLL_INTERVAL=30
+```
+
+Each project must have a `CLAUDE.md` file with a Project ID:
+
+```markdown
+Project ID: 31
+```
+
+## What the Watcher Does
+
+### Issue Processing (Automatic)
+
+When an issue is assigned to the configured user without workflow labels:
+
+1. Adds "In progress" label
+2. Creates branch `<issue-id>-<slug>` from master
+3. Runs Claude CLI with the issue description
+4. Pushes changes and creates merge request
+5. Moves issue to "Review" label
+
+### MR Comment Processing (Automatic)
+
+When a new comment appears on an open MR (not from the bot user):
+
+1. Checks out the MR's source branch
+2. Runs Claude CLI with the comment as feedback
+3. Pushes the changes to the remote branch
+
+### Post-Merge Cleanup (Automatic)
+
+When an MR is merged:
+
+1. Updates master branch
+2. Deletes the merged feature branch
+3. Sends Discord notification
+
+## Development
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Run tests with coverage
+pytest --cov=gitlab_watcher
+```
