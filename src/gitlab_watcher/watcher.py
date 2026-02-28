@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from pathlib import Path
+from typing import Optional
 
 from .config import Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
@@ -20,12 +21,21 @@ class Watcher:
         self,
         config_path: str = "~/.claude/config/gitlab.conf",
         verbose: bool = False,
+        *,
+        gitlab: Optional[GitLabClient] = None,
+        discord: Optional[DiscordWebhook] = None,
+        processor: Optional[Processor] = None,
+        state: Optional[StateManager] = None,
     ) -> None:
         """Initialize watcher.
 
         Args:
             config_path: Path to configuration file
             verbose: Enable verbose logging
+            gitlab: Optional GitLab client (for testing)
+            discord: Optional Discord webhook (for testing)
+            processor: Optional processor (for testing)
+            state: Optional state manager (for testing)
         """
         self.config = load_config(config_path)
         self.verbose = verbose
@@ -42,8 +52,8 @@ class Watcher:
         self.work_dir = Path("/tmp/gitlab-watcher")
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize components
-        self.state = StateManager(self.work_dir)
+        # Initialize or use injected state manager
+        self.state = state or StateManager(self.work_dir)
 
         # Get GitLab credentials
         gitlab_url = self.config.gitlab_url
@@ -57,9 +67,10 @@ class Watcher:
         if not gitlab_url or not gitlab_token:
             raise ValueError("GitLab URL and token must be set in config or git remote")
 
-        self.gitlab = GitLabClient(url=gitlab_url, token=gitlab_token)
-        self.discord = DiscordWebhook(webhook_url=self.config.discord_webhook)
-        self.processor = Processor(
+        # Initialize or use injected dependencies
+        self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
+        self.discord = discord or DiscordWebhook(webhook_url=self.config.discord_webhook)
+        self.processor = processor or Processor(
             gitlab=self.gitlab,
             discord=self.discord,
             state=self.state,
@@ -176,6 +187,9 @@ class Watcher:
         notes = self.gitlab.get_notes(project.project_id, mr.iid)
         latest_note = notes[0] if notes else None
 
+        # Save the old note_id BEFORE updating state
+        old_note_id = state.last_note_id
+
         # Update state
         self.state.update_mr_state(
             project.project_id,
@@ -188,7 +202,7 @@ class Watcher:
         # Check for new comments (not by Claude)
         if (
             latest_note
-            and latest_note.id != state.last_note_id
+            and latest_note.id != old_note_id
             and latest_note.author_username != self.config.gitlab_username
         ):
             self._log(project.project_id, f"New comment on MR !{mr.iid}: {latest_note.body}")
