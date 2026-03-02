@@ -130,7 +130,7 @@ PROJECT_DIRS=(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create config file
-        config_file = Path(tmpdir) / "gitlab.conf"
+        config_file = Path(tmpdir) / "gitlab_watcher.conf"
         config_file.write_text(config_content)
 
         # Create project directory with CLAUDE.md

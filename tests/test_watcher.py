@@ -40,7 +40,7 @@ PROJECT_DIRS=(
   "{project_dir}"
 )
 '''
-    config_path = tmp_path / "gitlab.conf"
+    config_path = tmp_path / "gitlab_watcher.conf"
     config_path.write_text(config_content)
     return config_path
 
