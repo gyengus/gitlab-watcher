@@ -2,6 +2,7 @@
 
 import click
 
+from .config import DEFAULT_CONFIG_PATH
 from .watcher import Watcher
 
 
@@ -9,7 +10,7 @@ from .watcher import Watcher
 @click.option(
     "--config",
     "-c",
-    default="~/.claude/config/gitlab_watcher.conf",
+    default=DEFAULT_CONFIG_PATH,
     help="Path to config file",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")

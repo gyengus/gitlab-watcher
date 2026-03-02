@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+# Default configuration file path
+DEFAULT_CONFIG_PATH = "~/.claude/config/gitlab_watcher.conf"
+
 
 @dataclass
 class ProjectConfig:

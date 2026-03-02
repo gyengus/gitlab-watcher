@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .config import Config, ProjectConfig, load_config
+from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient
@@ -19,7 +19,7 @@ class Watcher:
 
     def __init__(
         self,
-        config_path: str = "~/.claude/config/gitlab_watcher.conf",
+        config_path: str = DEFAULT_CONFIG_PATH,
         verbose: bool = False,
         *,
         gitlab: Optional[GitLabClient] = None,
