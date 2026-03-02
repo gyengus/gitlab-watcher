@@ -19,7 +19,7 @@ class Watcher:
 
     def __init__(
         self,
-        config_path: str = "~/.claude/config/gitlab.conf",
+        config_path: str = "~/.claude/config/gitlab_watcher.conf",
         verbose: bool = False,
         *,
         gitlab: Optional[GitLabClient] = None,

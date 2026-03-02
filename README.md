@@ -28,7 +28,7 @@ gitlab-watcher --verbose
 
 ## Configuration
 
-Create `~/.claude/config/gitlab.conf`:
+Create `~/.claude/config/gitlab_watcher.conf`:
 
 ```bash
 # Project directories to monitor

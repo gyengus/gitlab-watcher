@@ -9,7 +9,7 @@ from .watcher import Watcher
 @click.option(
     "--config",
     "-c",
-    default="~/.claude/config/gitlab.conf",
+    default="~/.claude/config/gitlab_watcher.conf",
     help="Path to config file",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
