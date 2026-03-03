@@ -30,6 +30,8 @@ class Config:
     label_review: str = "Review"
     gitlab_username: str = "claude"
     poll_interval: int = 30
+    claude_mode: str = "ollama"
+    claude_custom_command: str = ""
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
 
@@ -176,6 +178,8 @@ def load_config(config_path: str) -> Config:
         label_review=str(raw_config.get("LABEL_REVIEW", "Review")),
         gitlab_username=str(raw_config.get("GITLAB_USERNAME", "claude")),
         poll_interval=int(raw_config.get("POLL_INTERVAL", "30")),
+        claude_mode=str(raw_config.get("CLAUDE_MODE", "ollama")),
+        claude_custom_command=str(raw_config.get("CLAUDE_CUSTOM_COMMAND", "")),
     )
 
     # Get project directories

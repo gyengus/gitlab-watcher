@@ -1,5 +1,6 @@
 """Issue and MR processing logic."""
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,8 @@ class Processor:
         gitlab_username: str,
         label_in_progress: str,
         label_review: str,
+        claude_mode: str = "ollama",
+        claude_custom_command: str = "",
     ) -> None:
         """Initialize processor.
 
@@ -31,6 +34,8 @@ class Processor:
             gitlab_username: GitLab username for filtering comments
             label_in_progress: Label for in-progress issues
             label_review: Label for issues under review
+            claude_mode: Claude CLI mode ("ollama", "direct", or "custom")
+            claude_custom_command: Custom command for Claude CLI (used when mode is "custom")
         """
         self.gitlab = gitlab
         self.discord = discord
@@ -38,9 +43,11 @@ class Processor:
         self.gitlab_username = gitlab_username
         self.label_in_progress = label_in_progress
         self.label_review = label_review
+        self.claude_mode = claude_mode
+        self.claude_custom_command = claude_custom_command
 
     def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
-        """Run Claude CLI with a prompt.
+        """Run Claude CLI with a prompt based on configured mode.
 
         Args:
             prompt: The prompt for Claude
@@ -49,16 +56,29 @@ class Processor:
         Returns:
             Tuple of (success, output)
         """
+        # Build command based on mode
+        if self.claude_mode == "ollama":
+            cmd = ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits", prompt]
+        elif self.claude_mode == "direct":
+            cmd = ["claude", "-p", "--permission-mode", "acceptEdits", prompt]
+        elif self.claude_mode == "custom":
+            if not self.claude_custom_command:
+                return False, "CLAUDE_CUSTOM_COMMAND not set for custom mode"
+            # Split first, then substitute to preserve multi-word values
+            cmd_parts = shlex.split(self.claude_custom_command)
+            cmd = [part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)) for part in cmd_parts]
+        else:
+            return False, f"Unknown CLAUDE_MODE: {self.claude_mode}"
+
         try:
-            # Unset CLAUDECODE to avoid conflicts
             env = {"CLAUDECODE": ""}
             result = subprocess.run(
-                ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits", prompt],
+                cmd,
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=600,  # 10 minute timeout
+                timeout=600,
             )
             return result.returncode == 0, result.stdout + result.stderr
         except subprocess.TimeoutExpired:

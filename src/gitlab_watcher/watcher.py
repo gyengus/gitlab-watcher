@@ -77,6 +77,8 @@ class Watcher:
             gitlab_username=self.config.gitlab_username,
             label_in_progress=self.config.label_in_progress,
             label_review=self.config.label_review,
+            claude_mode=self.config.claude_mode,
+            claude_custom_command=self.config.claude_custom_command,
         )
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, str | None]:
