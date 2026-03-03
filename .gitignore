@@ -77,6 +77,3 @@ dmypy.json
 # Project specific
 .claude_session
 .worktrees/
-
-# Git worktrees
-.worktrees/
