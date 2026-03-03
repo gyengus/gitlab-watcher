@@ -53,6 +53,13 @@ GITLAB_USERNAME="claude"
 
 # Polling interval in seconds
 POLL_INTERVAL=30
+
+# Claude CLI mode: ollama (default), direct, or custom
+CLAUDE_MODE=ollama
+
+# Custom command template (only for CLAUDE_MODE=custom)
+# Available placeholders: {prompt}, {cwd}
+CLAUDE_CUSTOM_COMMAND="my-ai --prompt {prompt} --workspace {cwd}"
 ```
 
 Each project must have a `CLAUDE.md` file with a Project ID:
