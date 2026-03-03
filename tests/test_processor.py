@@ -154,6 +154,150 @@ class TestProcessorRunClaude:
         assert "not found" in output.lower()
 
 
+class TestProcessorClaudeModes:
+    """Tests for different Claude CLI modes."""
+
+    @patch("subprocess.run")
+    def test_run_claude_ollama_mode(
+        self,
+        mock_run: Mock,
+        gitlab_client: GitLabClient,
+        discord_webhook: DiscordWebhook,
+        state_manager: StateManager,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test ollama mode uses 'ollama launch claude' command."""
+        mock_run.return_value = Mock(returncode=0, stdout="Done", stderr="")
+
+        processor = Processor(
+            gitlab=gitlab_client,
+            discord=discord_webhook,
+            state=state_manager,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            claude_mode="ollama",
+        )
+
+        success, output = processor._run_claude("Fix the bug", project_config.path)
+
+        assert success is True
+        args = mock_run.call_args[0][0]
+        assert args[0] == "ollama"
+        assert args[1] == "launch"
+        assert args[2] == "claude"
+
+    @patch("subprocess.run")
+    def test_run_claude_direct_mode(
+        self,
+        mock_run: Mock,
+        gitlab_client: GitLabClient,
+        discord_webhook: DiscordWebhook,
+        state_manager: StateManager,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test direct mode uses 'claude' command directly."""
+        mock_run.return_value = Mock(returncode=0, stdout="Done", stderr="")
+
+        processor = Processor(
+            gitlab=gitlab_client,
+            discord=discord_webhook,
+            state=state_manager,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            claude_mode="direct",
+        )
+
+        success, output = processor._run_claude("Fix the bug", project_config.path)
+
+        assert success is True
+        args = mock_run.call_args[0][0]
+        assert args[0] == "claude"
+        assert args[1] == "-p"
+        assert "ollama" not in args
+
+    @patch("subprocess.run")
+    def test_run_claude_custom_mode(
+        self,
+        mock_run: Mock,
+        gitlab_client: GitLabClient,
+        discord_webhook: DiscordWebhook,
+        state_manager: StateManager,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test custom mode uses configured command."""
+        mock_run.return_value = Mock(returncode=0, stdout="Done", stderr="")
+
+        processor = Processor(
+            gitlab=gitlab_client,
+            discord=discord_webhook,
+            state=state_manager,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            claude_mode="custom",
+            claude_custom_command="my-ai --prompt {prompt} --dir {cwd}",
+        )
+
+        success, output = processor._run_claude("Fix the bug", project_config.path)
+
+        assert success is True
+        args = mock_run.call_args[0][0]
+        assert args[0] == "my-ai"
+        assert args[1] == "--prompt"
+        assert args[2] == "Fix the bug"
+        assert args[3] == "--dir"
+        assert str(project_config.path) in args
+
+    def test_run_claude_custom_mode_missing_command(
+        self,
+        gitlab_client: GitLabClient,
+        discord_webhook: DiscordWebhook,
+        state_manager: StateManager,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test custom mode returns error when command not set."""
+        processor = Processor(
+            gitlab=gitlab_client,
+            discord=discord_webhook,
+            state=state_manager,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            claude_mode="custom",
+            claude_custom_command="",
+        )
+
+        success, output = processor._run_claude("Fix the bug", project_config.path)
+
+        assert success is False
+        assert "CLAUDE_CUSTOM_COMMAND" in output
+
+    def test_run_claude_invalid_mode(
+        self,
+        gitlab_client: GitLabClient,
+        discord_webhook: DiscordWebhook,
+        state_manager: StateManager,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test invalid mode returns error."""
+        processor = Processor(
+            gitlab=gitlab_client,
+            discord=discord_webhook,
+            state=state_manager,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            claude_mode="invalid",
+        )
+
+        success, output = processor._run_claude("Fix the bug", project_config.path)
+
+        assert success is False
+        assert "Unknown CLAUDE_MODE" in output
+
+
 class TestProcessorProcessIssue:
     """Tests for the process_issue method."""
 
