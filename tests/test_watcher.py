@@ -245,6 +245,28 @@ class TestWatcherInit:
         with pytest.raises(FileNotFoundError):
             Watcher(config_path="/nonexistent/config.conf")
 
+    def test_watcher_passes_claude_mode_to_processor(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that Watcher passes claude_mode to Processor."""
+        # Update config to include CLAUDE_MODE
+        content = config_file.read_text()
+        content = content.replace('GITLAB_TOKEN="test-token"', 'GITLAB_TOKEN="test-token"\nCLAUDE_MODE="direct"')
+        config_file.write_text(content)
+
+        watcher = Watcher(
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            state=state_manager,
+        )
+
+        assert watcher.processor.claude_mode == "direct"
+
 
 class TestWatcherCheckIssues:
     """Tests for check_issues method."""
