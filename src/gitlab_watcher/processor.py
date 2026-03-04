@@ -139,7 +139,7 @@ class Processor:
 Issue description:
 {issue.description}
 
-Please complete this task. Make the necessary changes, then commit and push them.
+Please complete this task. Make the necessary changes and commit them.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits."""
@@ -231,7 +231,7 @@ Branch: {mr.source_branch}
 A reviewer left this feedback:
 {comment}
 
-Please address this feedback. Make the necessary changes, then commit and push them to the remote branch.
+Please address this feedback. Make the necessary changes and commit them.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits."""
@@ -240,6 +240,8 @@ Do not add Co-Authored-By signature to commits."""
         success, output = self._run_claude(prompt, project.path)
 
         if success:
+            # Push changes
+            git.push("origin", mr.source_branch)
             self.discord.notify_changes_applied(
                 project.name,
                 mr.title,
