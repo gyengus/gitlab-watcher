@@ -126,6 +126,9 @@ class TestStateManager:
         state.last_branch = "feature-branch"
         state_manager.save(42)
 
+        # Force save to ensure file is written (debounced save may delay)
+        state_manager.force_save(42)
+
         new_manager = StateManager(temp_work_dir)
         loaded = new_manager.load(42)
 
@@ -185,6 +188,87 @@ class TestStateManager:
 
         state_manager.set(42, "last_mr_iid", 5)
         assert state_manager.get(42, "last_mr_iid") == 5
+
+    def test_force_save_immediately(self, temp_work_dir: Path) -> None:
+        """Test force_save writes immediately."""
+        state_manager = StateManager(temp_work_dir, save_delay=10.0)
+
+        state = state_manager.load(42)
+        state.last_mr_iid = 99
+        state_manager.force_save(42)
+
+        # Should be saved immediately without waiting
+        new_manager = StateManager(temp_work_dir)
+        loaded = new_manager.load(42)
+        assert loaded.last_mr_iid == 99
+
+    def test_force_save_all(self, temp_work_dir: Path) -> None:
+        """Test force_save_all writes all dirty states."""
+        state_manager = StateManager(temp_work_dir, save_delay=10.0)
+
+        state_manager.set(1, "last_mr_iid", 10)
+        state_manager.set(2, "last_mr_iid", 20)
+
+        # Force save all
+        state_manager.force_save_all()
+
+        # Verify both were saved
+        new_manager = StateManager(temp_work_dir)
+        assert new_manager.load(1).last_mr_iid == 10
+        assert new_manager.load(2).last_mr_iid == 20
+
+
+class TestStateManagerDebounced:
+    """Tests for debounced state saving."""
+
+    def test_debounced_save_delays_write(self, temp_work_dir: Path) -> None:
+        """Test that save() delays the write."""
+        import time
+
+        state_manager = StateManager(temp_work_dir, save_delay=0.5)
+
+        state = state_manager.load(42)
+        state.last_mr_iid = 1
+        state_manager.save(42)
+
+        # Check immediately - should not be saved yet
+        new_manager = StateManager(temp_work_dir)
+        loaded = new_manager.load(42)
+        assert loaded.last_mr_iid is None
+
+        # Wait for debounce
+        time.sleep(0.6)
+
+        # Now it should be saved
+        new_manager2 = StateManager(temp_work_dir)
+        loaded2 = new_manager2.load(42)
+        assert loaded2.last_mr_iid == 1
+
+    def test_multiple_saves_coalesced(self, temp_work_dir: Path) -> None:
+        """Test that multiple saves are coalesced into one write."""
+        import time
+
+        state_manager = StateManager(temp_work_dir, save_delay=0.3)
+
+        state = state_manager.load(42)
+        state.last_mr_iid = 1
+        state_manager.save(42)
+
+        # Update again before save happens
+        state.last_mr_iid = 2
+        state_manager.save(42)
+
+        # Update third time
+        state.last_mr_iid = 3
+        state_manager.save(42)
+
+        # Wait for all debounced saves
+        time.sleep(0.5)
+
+        # Only the final value should be saved
+        new_manager = StateManager(temp_work_dir)
+        loaded = new_manager.load(42)
+        assert loaded.last_mr_iid == 3
 
 
 class TestGitOps:

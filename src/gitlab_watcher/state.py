@@ -1,9 +1,14 @@
 """State management for tracking processed items."""
 
 import json
+import threading
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
+
+
+# Default delay for debounced saves
+DEFAULT_SAVE_DELAY = 1.0
 
 
 @dataclass
@@ -18,17 +23,22 @@ class ProjectState:
 
 
 class StateManager:
-    """Manages state for multiple projects."""
+    """Manages state for multiple projects with debounced saving."""
 
-    def __init__(self, work_dir: Path) -> None:
+    def __init__(self, work_dir: Path, save_delay: float = DEFAULT_SAVE_DELAY) -> None:
         """Initialize state manager.
 
         Args:
             work_dir: Directory to store state files
+            save_delay: Delay in seconds for debounced saves
         """
         self.work_dir = work_dir
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self._states: dict[int, ProjectState] = {}
+        self._dirty: set[int] = set()
+        self._save_timer: Optional[threading.Timer] = None
+        self._save_delay = save_delay
+        self._lock = threading.Lock()
 
     def _state_file(self, project_id: int) -> Path:
         """Get the state file path for a project."""
@@ -60,6 +70,33 @@ class StateManager:
 
         return state
 
+    def _schedule_save(self, project_id: int) -> None:
+        """Schedule a debounced save operation."""
+        with self._lock:
+            self._dirty.add(project_id)
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+            self._save_timer = threading.Timer(
+                self._save_delay,
+                self._flush_dirty,
+            )
+            self._save_timer.start()
+
+    def _flush_dirty(self) -> None:
+        """Save all dirty states."""
+        with self._lock:
+            for project_id in self._dirty:
+                self._save_sync(project_id)
+            self._dirty.clear()
+            self._save_timer = None
+
+    def _save_sync(self, project_id: int) -> None:
+        """Synchronous save to file."""
+        if project_id not in self._states:
+            return
+        state_file = self._state_file(project_id)
+        state_file.write_text(json.dumps(asdict(self._states[project_id]), indent=2))
+
     def load(self, project_id: int) -> ProjectState:
         """Load state for a project, returning cached state if available.
 
@@ -82,16 +119,30 @@ class StateManager:
         """
         state = self._load_from_file(project_id, reset_processing=True)
         self._states[project_id] = state
-        self.save(project_id)
+        self._save_sync(project_id)
         return state
 
     def save(self, project_id: int) -> None:
-        """Save state for a project."""
+        """Save state for a project (debounced)."""
         if project_id not in self._states:
             return
+        self._schedule_save(project_id)
 
-        state_file = self._state_file(project_id)
-        state_file.write_text(json.dumps(asdict(self._states[project_id]), indent=2))
+    def force_save(self, project_id: int) -> None:
+        """Immediately save state for a project."""
+        with self._lock:
+            self._dirty.discard(project_id)
+            self._save_sync(project_id)
+
+    def force_save_all(self) -> None:
+        """Immediately save all dirty states."""
+        with self._lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+            for project_id in self._dirty:
+                self._save_sync(project_id)
+            self._dirty.clear()
+            self._save_timer = None
 
     def get(self, project_id: int, key: str) -> Optional[str | int | bool]:
         """Get a state value."""
@@ -139,3 +190,6 @@ class StateManager:
         """Reset state for a project."""
         self._states[project_id] = ProjectState()
         self.save(project_id)
+
+
+__all__ = ["StateManager", "ProjectState", "DEFAULT_SAVE_DELAY"]
