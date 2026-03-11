@@ -17,6 +17,7 @@ class ProjectConfig:
     project_id: int
     path: Path
     name: str
+    default_branch: str = "master"
 
 
 @dataclass
@@ -32,6 +33,7 @@ class Config:
     poll_interval: int = 30
     claude_mode: str = "ollama"
     claude_custom_command: str = ""
+    default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
 
@@ -223,3 +225,13 @@ def load_config(config_path: str) -> Config:
         raise ValueError("No valid projects found in configuration")
 
     return config
+
+
+__all__ = [
+    "DEFAULT_CONFIG_PATH",
+    "ProjectConfig",
+    "Config",
+    "parse_bash_config",
+    "extract_project_id",
+    "load_config",
+]

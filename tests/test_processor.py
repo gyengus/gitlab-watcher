@@ -301,12 +301,10 @@ class TestProcessorClaudeModes:
 class TestProcessorProcessIssue:
     """Tests for the process_issue method."""
 
-    @patch("gitlab_watcher.processor.GitOps")
     @patch("subprocess.run")
     def test_process_issue_success(
         self,
         mock_run: Mock,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_issue: Issue,
@@ -315,14 +313,25 @@ class TestProcessorProcessIssue:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = True
-        mock_git_ops_class.return_value = mock_git
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
 
         # Mock Claude CLI
         mock_run.return_value = Mock(returncode=0, stdout="Done", stderr="")
 
         # Mock GitLab client methods
-        processor.gitlab.update_issue_labels = Mock(return_value=True)
-        processor.gitlab.create_merge_request = Mock(
+        processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
+        processor_with_git.gitlab.create_merge_request = Mock(
             return_value=MergeRequest(
                 iid=1,
                 title="Fix the bug",
@@ -333,20 +342,18 @@ class TestProcessorProcessIssue:
         )
 
         # Initialize state
-        processor.state.init_state(project_config.project_id)
+        processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor.process_issue(project_config, sample_issue)
+        result = processor_with_git.process_issue(project_config, sample_issue)
 
         assert result is True
-        processor.gitlab.update_issue_labels.assert_called()
+        processor_with_git.gitlab.update_issue_labels.assert_called()
         mock_git.checkout.assert_called()
         mock_git.push.assert_called()
-        processor.gitlab.create_merge_request.assert_called()
+        processor_with_git.gitlab.create_merge_request.assert_called()
 
-    @patch("gitlab_watcher.processor.GitOps")
     def test_process_issue_branch_creation_fails(
         self,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_issue: Issue,
@@ -355,24 +362,33 @@ class TestProcessorProcessIssue:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = False
-        mock_git_ops_class.return_value = mock_git
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
 
         # Mock GitLab client methods
-        processor.gitlab.update_issue_labels = Mock(return_value=True)
+        processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
 
         # Initialize state
-        processor.state.init_state(project_config.project_id)
+        processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor.process_issue(project_config, sample_issue)
+        result = processor_with_git.process_issue(project_config, sample_issue)
 
         assert result is False
 
-    @patch("gitlab_watcher.processor.GitOps")
     @patch("subprocess.run")
     def test_process_issue_claude_fails(
         self,
         mock_run: Mock,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_issue: Issue,
@@ -381,18 +397,29 @@ class TestProcessorProcessIssue:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = True
-        mock_git_ops_class.return_value = mock_git
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
 
         # Mock Claude CLI failure
         mock_run.return_value = Mock(returncode=1, stdout="", stderr="Error")
 
         # Mock GitLab client methods
-        processor.gitlab.update_issue_labels = Mock(return_value=True)
+        processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
 
         # Initialize state
-        processor.state.init_state(project_config.project_id)
+        processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor.process_issue(project_config, sample_issue)
+        result = processor_with_git.process_issue(project_config, sample_issue)
 
         assert result is False
 
@@ -400,12 +427,10 @@ class TestProcessorProcessIssue:
 class TestProcessorProcessComment:
     """Tests for the process_comment method."""
 
-    @patch("gitlab_watcher.processor.GitOps")
     @patch("subprocess.run")
     def test_process_comment_success(
         self,
         mock_run: Mock,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_mr: MergeRequest,
@@ -414,24 +439,33 @@ class TestProcessorProcessComment:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = True
-        mock_git_ops_class.return_value = mock_git
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
 
         # Mock Claude CLI
         mock_run.return_value = Mock(returncode=0, stdout="Done", stderr="")
 
         # Initialize state
-        processor.state.init_state(project_config.project_id)
+        processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor.process_comment(project_config, sample_mr, "Fix this bug")
+        result = processor_with_git.process_comment(project_config, sample_mr, "Fix this bug")
 
         assert result is True
         mock_git.checkout.assert_called_with("1-fix-the-bug")
         mock_git.pull.assert_called()
 
-    @patch("gitlab_watcher.processor.GitOps")
     def test_process_comment_checkout_fails(
         self,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_mr: MergeRequest,
@@ -440,21 +474,30 @@ class TestProcessorProcessComment:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = False
-        mock_git_ops_class.return_value = mock_git
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
 
         # Initialize state
-        processor.state.init_state(project_config.project_id)
+        processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor.process_comment(project_config, sample_mr, "Fix this bug")
+        result = processor_with_git.process_comment(project_config, sample_mr, "Fix this bug")
 
         assert result is False
 
-    @patch("gitlab_watcher.processor.GitOps")
     @patch("subprocess.run")
     def test_process_comment_claude_fails(
         self,
         mock_run: Mock,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_mr: MergeRequest,
@@ -463,7 +506,28 @@ class TestProcessorProcessComment:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = True
-        mock_git_ops_class.return_value = mock_git
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        # Mock Claude CLI failure
+        mock_run.return_value = Mock(returncode=1, stdout="", stderr="Error")
+
+        # Initialize state
+        processor_with_git.state.init_state(project_config.project_id)
+
+        result = processor_with_git.process_comment(project_config, sample_mr, "Fix this bug")
+
+        assert result is False
 
         # Mock Claude CLI failure
         mock_run.return_value = Mock(returncode=1, stdout="", stderr="Error")
@@ -479,21 +543,30 @@ class TestProcessorProcessComment:
 class TestProcessorCleanup:
     """Tests for the cleanup_after_merge method."""
 
-    @patch("gitlab_watcher.processor.GitOps")
     def test_cleanup_after_merge(
         self,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
     ) -> None:
         """Test cleanup after merge."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git_ops_class.return_value = mock_git
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
 
         # Initialize state
-        processor.state.init_state(project_config.project_id)
-        processor.state.update_mr_state(
+        processor_with_git.state.init_state(project_config.project_id)
+        processor_with_git.state.update_mr_state(
             project_config.project_id,
             mr_iid=1,
             mr_state="merged",
@@ -501,7 +574,7 @@ class TestProcessorCleanup:
             branch="1-fix-the-bug",
         )
 
-        processor.cleanup_after_merge(
+        processor_with_git.cleanup_after_merge(
             project=project_config,
             branch="1-fix-the-bug",
             mr_title="Fix the bug",
@@ -512,19 +585,28 @@ class TestProcessorCleanup:
         mock_git.pull.assert_called()
         mock_git.delete_branch.assert_called_with("1-fix-the-bug", force=True)
 
-    @patch("gitlab_watcher.processor.GitOps")
     def test_cleanup_after_merge_no_branch(
         self,
-        mock_git_ops_class: Mock,
         processor: Processor,
         project_config: ProjectConfig,
     ) -> None:
         """Test cleanup when no branch is provided."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git_ops_class.return_value = mock_git
 
-        processor.cleanup_after_merge(
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        processor_with_git.cleanup_after_merge(
             project=project_config,
             branch="",
             mr_title="Fix the bug",
@@ -533,3 +615,128 @@ class TestProcessorCleanup:
 
         mock_git.checkout.assert_called_with("master")
         mock_git.delete_branch.assert_not_called()
+
+
+class TestProcessorSanitizePrompt:
+    """Tests for the _sanitize_prompt method."""
+
+    def test_sanitize_prompt_valid(self, processor: Processor) -> None:
+        """Test valid prompt passes sanitization."""
+        prompt = "Fix the bug in the authentication module"
+        result = processor._sanitize_prompt(prompt)
+        assert result == prompt
+
+    def test_sanitize_prompt_truncates_long_prompt(self, processor: Processor) -> None:
+        """Test long prompt is truncated."""
+        from gitlab_watcher.processor import MAX_PROMPT_LENGTH
+        long_prompt = "x" * (MAX_PROMPT_LENGTH + 100)
+        result = processor._sanitize_prompt(long_prompt)
+        assert len(result) == MAX_PROMPT_LENGTH
+
+    def test_sanitize_prompt_rejects_command_substitution(self, processor: Processor) -> None:
+        """Test prompt with command substitution is rejected."""
+        with pytest.raises(ValueError, match="forbidden pattern"):
+            processor._sanitize_prompt("Fix $(rm -rf /)")
+
+    def test_sanitize_prompt_rejects_backtick_command(self, processor: Processor) -> None:
+        """Test prompt with backtick command is rejected."""
+        with pytest.raises(ValueError, match="forbidden pattern"):
+            processor._sanitize_prompt("Fix `rm -rf /`")
+
+    def test_sanitize_prompt_rejects_variable_expansion(self, processor: Processor) -> None:
+        """Test prompt with variable expansion is rejected."""
+        with pytest.raises(ValueError, match="forbidden pattern"):
+            processor._sanitize_prompt("Fix ${PATH}")
+
+    def test_sanitize_prompt_rejects_variable_reference(self, processor: Processor) -> None:
+        """Test prompt with variable reference is rejected."""
+        with pytest.raises(ValueError, match="forbidden pattern"):
+            processor._sanitize_prompt("Fix $HOME")
+
+
+class TestProcessorValidateIssueTitle:
+    """Tests for the _validate_issue_title method."""
+
+    def test_validate_issue_title_valid(self, processor: Processor) -> None:
+        """Test valid title passes validation."""
+        title = "Fix the authentication bug"
+        result = processor._validate_issue_title(title)
+        assert result == title
+
+    def test_validate_issue_title_empty(self, processor: Processor) -> None:
+        """Test empty title is rejected."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            processor._validate_issue_title("")
+
+    def test_validate_issue_title_whitespace_only(self, processor: Processor) -> None:
+        """Test whitespace-only title is rejected."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            processor._validate_issue_title("   ")
+
+    def test_validate_issue_title_truncates_long_title(self, processor: Processor) -> None:
+        """Test long title is truncated."""
+        from gitlab_watcher.processor import MAX_TITLE_LENGTH
+        long_title = "x" * (MAX_TITLE_LENGTH + 100)
+        result = processor._validate_issue_title(long_title)
+        assert len(result) == MAX_TITLE_LENGTH
+
+    def test_validate_issue_title_removes_control_characters(self, processor: Processor) -> None:
+        """Test control characters are removed."""
+        title = "Fix\nthe\tbug"
+        result = processor._validate_issue_title(title)
+        assert "\n" not in result
+        assert "\t" not in result
+
+    def test_validate_issue_title_strips_whitespace(self, processor: Processor) -> None:
+        """Test title is stripped of leading/trailing whitespace."""
+        title = "  Fix the bug  "
+        result = processor._validate_issue_title(title)
+        assert result == "Fix the bug"
+
+
+class TestProcessorValidateBranchName:
+    """Tests for the _validate_branch_name method."""
+
+    def test_validate_branch_name_valid(self, processor: Processor) -> None:
+        """Test valid branch name passes validation."""
+        branch = "123-fix-the-bug"
+        result = processor._validate_branch_name(branch)
+        assert result == branch
+
+    def test_validate_branch_name_empty_returns_default(self, processor: Processor) -> None:
+        """Test empty branch name returns default."""
+        result = processor._validate_branch_name("")
+        assert result == "auto-branch"
+
+    def test_validate_branch_name_whitespace_returns_default(self, processor: Processor) -> None:
+        """Test whitespace-only branch name returns default."""
+        result = processor._validate_branch_name("   ")
+        assert result == "auto-branch"
+
+    def test_validate_branch_name_removes_special_chars(self, processor: Processor) -> None:
+        """Test special characters are removed."""
+        branch = "123-fix@the#bug!"
+        result = processor._validate_branch_name(branch)
+        assert "@" not in result
+        assert "#" not in result
+        assert "!" not in result
+
+    def test_validate_branch_name_removes_consecutive_hyphens(self, processor: Processor) -> None:
+        """Test consecutive hyphens are removed."""
+        branch = "123--fix---bug"
+        result = processor._validate_branch_name(branch)
+        assert "--" not in result
+
+    def test_validate_branch_name_removes_leading_trailing_hyphens(self, processor: Processor) -> None:
+        """Test leading/trailing hyphens are removed."""
+        branch = "-123-fix-bug-"
+        result = processor._validate_branch_name(branch)
+        assert not result.startswith("-")
+        assert not result.endswith("-")
+
+    def test_validate_branch_name_truncates_long_name(self, processor: Processor) -> None:
+        """Test long branch name is truncated."""
+        from gitlab_watcher.processor import MAX_BRANCH_LENGTH
+        long_branch = "x" * (MAX_BRANCH_LENGTH + 100)
+        result = processor._validate_branch_name(long_branch)
+        assert len(result) <= MAX_BRANCH_LENGTH

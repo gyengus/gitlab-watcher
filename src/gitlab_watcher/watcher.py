@@ -10,6 +10,7 @@ from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient
+from .logging_utils import SensitiveDataFilter
 from .processor import Processor
 from .state import StateManager
 
@@ -47,6 +48,12 @@ class Watcher:
             format="%(asctime)s [%(levelname)s] %(message)s",
         )
         self.logger = logging.getLogger(__name__)
+
+        # Add sensitive data filter to prevent token leakage in logs
+        sensitive_filter = SensitiveDataFilter()
+        self.logger.addFilter(sensitive_filter)
+        # Also add to root logger for comprehensive coverage
+        logging.getLogger().addFilter(sensitive_filter)
 
         # Create work directory
         self.work_dir = Path("/tmp/gitlab-watcher")
@@ -224,18 +231,28 @@ class Watcher:
         for project in self.config.projects:
             self.state.init_state(project.project_id)
 
-        # Main loop
-        while True:
-            try:
-                for project in self.config.projects:
-                    self.check_mr_status(project)
-                    self.check_issues(project)
+        try:
+            # Main loop
+            while True:
+                try:
+                    for project in self.config.projects:
+                        self.check_mr_status(project)
+                        self.check_issues(project)
 
-                time.sleep(self.config.poll_interval)
+                    time.sleep(self.config.poll_interval)
 
-            except KeyboardInterrupt:
-                print("\nShutting down...")
-                break
-            except Exception as e:
-                self.logger.error(f"Error in main loop: {e}")
-                time.sleep(self.config.poll_interval)
+                except KeyboardInterrupt:
+                    break
+                except Exception as e:
+                    self.logger.error(f"Error in main loop: {e}")
+                    time.sleep(self.config.poll_interval)
+        finally:
+            # Ensure all pending state is saved before shutdown
+            print("\nShutting down...")
+            self.state.force_save_all()
+
+
+__all__ = ["Watcher"]
+
+
+__all__ = ["Watcher"]
