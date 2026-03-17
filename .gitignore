@@ -77,3 +77,7 @@ dmypy.json
 # Project specific
 .claude_session
 .worktrees/
+
+# Aider cache and temporary files
+.aider*
+!.aider.conf.yml
