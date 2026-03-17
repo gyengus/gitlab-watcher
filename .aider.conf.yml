@@ -1,0 +1,76 @@
+# Aider configuration file
+# This allows aider to read and write all project files without explicit permission
+
+# Allow reading and writing all files in the project
+read:
+  - "src/**/*"
+  - "tests/**/*"
+  - "docs/**/*"
+  - "*.py"
+  - "*.md"
+  - "*.toml"
+  - "*.yml"
+  - "*.yaml"
+  - "*.txt"
+  - "*.conf"
+  - "*.json"
+  - "*.gitignore"
+  - "CLAUDE.md"
+  - "README.md"
+  - "pyproject.toml"
+  - ".gitlab-ci.yml"
+
+# Allow writing to all project files
+write:
+  - "src/**/*"
+  - "tests/**/*"
+  - "docs/**/*"
+  - "*.py"
+  - "*.md"
+  - "*.toml"
+  - "*.yml"
+  - "*.yaml"
+  - "*.txt"
+  - "*.conf"
+  - "*.json"
+  - "*.gitignore"
+  - "CLAUDE.md"
+  - "README.md"
+  - "pyproject.toml"
+  - ".gitlab-ci.yml"
+
+# Exclude certain files/directories from being read/written
+exclude:
+  - "__pycache__/**/*"
+  - "*.pyc"
+  - ".git/**/*"
+  - "dist/**/*"
+  - "build/**/*"
+  - "*.egg-info/**/*"
+  - ".pytest_cache/**/*"
+  - ".coverage"
+  - "htmlcov/**/*"
+  - ".mypy_cache/**/*"
+  - ".ruff_cache/**/*"
+  - "venv/**/*"
+  - "env/**/*"
+  - ".env"
+  - ".venv/**/*"
+
+# Default model for aider
+model: claude-3-5-sonnet-20241022
+
+# Enable git integration
+git: true
+
+# Auto-commit changes
+auto-commits: true
+
+# Show diffs before applying changes
+show-diffs: true
+
+# Enable pretty output
+pretty: true
+
+# Enable dark mode
+dark-mode: true
