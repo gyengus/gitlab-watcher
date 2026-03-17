@@ -443,14 +443,3 @@ __all__ = [
     "MAX_BRANCH_LENGTH",
     "CLAUDE_CLI_TIMEOUT_SECONDS",
 ]
-
-
-__all__ = [
-    "Processor",
-    "MAX_PROMPT_LENGTH",
-    "MAX_TITLE_LENGTH",
-    "MAX_DESCRIPTION_LENGTH",
-    "MAX_SLUG_LENGTH",
-    "MAX_BRANCH_LENGTH",
-    "CLAUDE_CLI_TIMEOUT_SECONDS",
-]
