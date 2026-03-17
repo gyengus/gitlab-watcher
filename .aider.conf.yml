@@ -58,7 +58,7 @@ exclude:
   - ".venv/**/*"
 
 # Default model for aider
-model: deepseek/deepseek-v3
+model: claude-3-5-sonnet-20241022
 
 # Enable git integration
 git: true
