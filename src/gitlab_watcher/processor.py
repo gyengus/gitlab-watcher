@@ -46,6 +46,8 @@ class Processor:
         label_review: str,
         claude_mode: str = "ollama",
         claude_custom_command: str = "",
+        aider_model: str = "gpt-4o",
+        aider_extra_args: str = "",
         default_branch: str = "master",
         git_factory: Callable[[Path], GitOperations] = GitOps,
     ) -> None:
@@ -58,10 +60,12 @@ class Processor:
             gitlab_username: GitLab username for filtering comments
             label_in_progress: Label for in-progress issues
             label_review: Label for issues under review
-            claude_mode: Claude CLI mode ("ollama", "direct", or "custom")
+            claude_mode: Claude CLI mode ("ollama", "direct", "custom", "aider", or "aider-custom")
             claude_custom_command: Custom command for Claude CLI (used when mode is "custom")
             default_branch: Default branch name (default: "master")
             git_factory: Factory function to create GitOperations instances (for dependency injection)
+            aider_model: Model to use with Aider (default: "gpt-4o")
+            aider_extra_args: Extra arguments for Aider command
         """
         self.gitlab = gitlab
         self.discord = discord
@@ -71,6 +75,8 @@ class Processor:
         self.label_review = label_review
         self.claude_mode = claude_mode
         self.claude_custom_command = claude_custom_command
+        self.aider_model = aider_model
+        self.aider_extra_args = aider_extra_args
         self.default_branch = default_branch
         self.git_factory = git_factory
         self.logger = logging.getLogger(__name__)
@@ -173,6 +179,17 @@ class Processor:
         elif self.claude_mode == "custom":
             if not self.claude_custom_command:
                 return False, "CLAUDE_CUSTOM_COMMAND not set for custom mode"
+            # Split first, then substitute to preserve multi-word values
+            cmd_parts = shlex.split(self.claude_custom_command)
+            cmd = [part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)) for part in cmd_parts]
+        elif self.claude_mode == "aider":
+            cmd = ["aider", "--model", self.aider_model, "--yes", "--no-git"]
+            if self.aider_extra_args:
+                cmd.extend(shlex.split(self.aider_extra_args))
+            cmd.extend(["--message", safe_prompt])
+        elif self.claude_mode == "aider-custom":
+            if not self.claude_custom_command:
+                return False, "CLAUDE_CUSTOM_COMMAND not set for aider-custom mode"
             # Split first, then substitute to preserve multi-word values
             cmd_parts = shlex.split(self.claude_custom_command)
             cmd = [part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)) for part in cmd_parts]

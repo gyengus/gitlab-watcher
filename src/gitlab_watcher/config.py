@@ -33,6 +33,8 @@ class Config:
     poll_interval: int = 30
     claude_mode: str = "ollama"
     claude_custom_command: str = ""
+    aider_model: str = "gpt-4o"
+    aider_extra_args: str = ""
     default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
@@ -182,6 +184,8 @@ def load_config(config_path: str) -> Config:
         poll_interval=int(raw_config.get("POLL_INTERVAL", "30")),
         claude_mode=str(raw_config.get("CLAUDE_MODE", "ollama")),
         claude_custom_command=str(raw_config.get("CLAUDE_CUSTOM_COMMAND", "")),
+        aider_model=str(raw_config.get("AIDER_MODEL", "gpt-4o")),
+        aider_extra_args=str(raw_config.get("AIDER_EXTRA_ARGS", "")),
     )
 
     # Get project directories
