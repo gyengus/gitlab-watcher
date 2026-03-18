@@ -16,11 +16,11 @@ from gitlab_watcher.config import (
 
 def test_parse_bash_config_simple() -> None:
     """Test parsing simple key=value lines."""
-    content = '''
+    content = """
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="secret-token"
 POLL_INTERVAL=30
-'''
+"""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
         f.write(content)
         f.flush()
@@ -34,12 +34,12 @@ POLL_INTERVAL=30
 
 def test_parse_bash_config_array() -> None:
     """Test parsing bash arrays."""
-    content = '''
+    content = """
 PROJECT_DIRS=(
   "/path/to/project1"
   "/path/to/project2"
 )
-'''
+"""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
         f.write(content)
         f.flush()
@@ -53,12 +53,12 @@ PROJECT_DIRS=(
 
 def test_parse_bash_config_comments() -> None:
     """Test that comments are ignored."""
-    content = '''
+    content = """
 # This is a comment
 GITLAB_URL="https://git.example.com"
 # Another comment
 POLL_INTERVAL=30
-'''
+"""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
         f.write(content)
         f.flush()
@@ -72,7 +72,7 @@ POLL_INTERVAL=30
 
 def test_extract_project_id() -> None:
     """Test extracting project ID from CLAUDE.md."""
-    content = '''
+    content = """
 # Project documentation
 
 Some text here.
@@ -80,7 +80,7 @@ Some text here.
 Project ID: 42
 
 More text.
-'''
+"""
     with tempfile.TemporaryDirectory() as tmpdir:
         claude_md = Path(tmpdir) / "CLAUDE.md"
         claude_md.write_text(content)
@@ -113,7 +113,7 @@ def test_extract_project_id_not_found() -> None:
 
 def test_load_config_integration() -> None:
     """Test full config loading integration."""
-    config_content = '''
+    config_content = """
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="secret"
 DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
@@ -125,7 +125,7 @@ POLL_INTERVAL=30
 PROJECT_DIRS=(
   "/tmp/test-project"
 )
-'''
+"""
     claude_md_content = "Project ID: 31\n\nSome documentation."
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -139,10 +139,9 @@ PROJECT_DIRS=(
         (project_dir / "CLAUDE.md").write_text(claude_md_content)
 
         # Update PROJECT_DIRS in config
-        config_file.write_text(config_content.replace(
-            '"/tmp/test-project"',
-            f'"{project_dir}"'
-        ))
+        config_file.write_text(
+            config_content.replace('"/tmp/test-project"', f'"{project_dir}"')
+        )
 
         config = load_config(str(config_file))
 
@@ -155,17 +154,19 @@ PROJECT_DIRS=(
 
 
 def test_load_config_with_claude_mode(tmp_path: Path) -> None:
-    """Test loading config with CLAUDE_MODE and CLAUDE_CUSTOM_COMMAND."""
+    """Test loading config with AI_TOOL_MODE and AI_TOOL_CUSTOM_COMMAND."""
     config_file = tmp_path / "gitlab_watcher.conf"
-    config_file.write_text("""
+    config_file.write_text(
+        """
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="test-token"
-CLAUDE_MODE="direct"
-CLAUDE_CUSTOM_COMMAND="my-tool {{prompt}}"
+AI_TOOL_MODE="direct"
+AI_TOOL_CUSTOM_COMMAND="my-tool {{prompt}}"
 PROJECT_DIRS=(
     "{}"
 )
-""".format(tmp_path / "project"))
+""".format(tmp_path / "project")
+    )
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -173,20 +174,22 @@ PROJECT_DIRS=(
 
     config = load_config(str(config_file))
 
-    assert config.claude_mode == "direct"
-    assert config.claude_custom_command == "my-tool {prompt}"
+    assert config.ai_tool_mode == "direct"
+    assert config.ai_tool_custom_command == "my-tool {prompt}"
 
 
 def test_load_config_default_claude_mode(tmp_path: Path) -> None:
-    """Test default CLAUDE_MODE is ollama."""
+    """Test default AI_TOOL_MODE is ollama."""
     config_file = tmp_path / "gitlab_watcher.conf"
-    config_file.write_text("""
+    config_file.write_text(
+        """
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="test-token"
 PROJECT_DIRS=(
     "{}"
 )
-""".format(tmp_path / "project"))
+""".format(tmp_path / "project")
+    )
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -194,5 +197,5 @@ PROJECT_DIRS=(
 
     config = load_config(str(config_file))
 
-    assert config.claude_mode == "ollama"
-    assert config.claude_custom_command == ""
+    assert config.ai_tool_mode == "ollama"
+    assert config.ai_tool_custom_command == ""

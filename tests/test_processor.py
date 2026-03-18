@@ -154,7 +154,7 @@ class TestProcessorRunClaude:
         assert "not found" in output.lower()
 
 
-class TestProcessorClaudeModes:
+class TestProcessorAIToolModes:
     """Tests for different Claude CLI modes."""
 
     @patch("subprocess.run")
@@ -176,7 +176,7 @@ class TestProcessorClaudeModes:
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
-            claude_mode="ollama",
+            ai_tool_mode="ollama",
         )
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
@@ -206,7 +206,7 @@ class TestProcessorClaudeModes:
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
-            claude_mode="direct",
+            ai_tool_mode="direct",
         )
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
@@ -236,8 +236,8 @@ class TestProcessorClaudeModes:
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
-            claude_mode="custom",
-            claude_custom_command="my-ai --prompt {prompt} --dir {cwd}",
+            ai_tool_mode="custom",
+            ai_tool_custom_command="my-ai --prompt {prompt} --dir {cwd}",
         )
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
@@ -265,14 +265,43 @@ class TestProcessorClaudeModes:
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
-            claude_mode="custom",
-            claude_custom_command="",
+            ai_tool_mode="custom",
+            ai_tool_custom_command="",
         )
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
 
         assert success is False
-        assert "CLAUDE_CUSTOM_COMMAND" in output
+        assert "AI_TOOL_CUSTOM_COMMAND" in output
+
+    @patch("subprocess.run")
+    def test_run_claude_opencode_mode(
+        self,
+        mock_run: Mock,
+        gitlab_client: GitLabClient,
+        discord_webhook: DiscordWebhook,
+        state_manager: StateManager,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test opencode mode uses 'opencode' command."""
+        mock_run.return_value = Mock(returncode=0, stdout="Done", stderr="")
+
+        processor = Processor(
+            gitlab=gitlab_client,
+            discord=discord_webhook,
+            state=state_manager,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            ai_tool_mode="opencode",
+        )
+
+        success, output = processor._run_claude("Fix the bug", project_config.path)
+
+        assert success is True
+        args = mock_run.call_args[0][0]
+        assert args[0] == "opencode"
+        assert args[1] == "Fix the bug"
 
     def test_run_claude_invalid_mode(
         self,
@@ -289,13 +318,13 @@ class TestProcessorClaudeModes:
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
-            claude_mode="invalid",
+            ai_tool_mode="invalid",
         )
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
 
         assert success is False
-        assert "Unknown CLAUDE_MODE" in output
+        assert "Unknown AI_TOOL_MODE" in output
 
 
 class TestProcessorProcessIssue:
@@ -458,7 +487,9 @@ class TestProcessorProcessComment:
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor_with_git.process_comment(project_config, sample_mr, "Fix this bug")
+        result = processor_with_git.process_comment(
+            project_config, sample_mr, "Fix this bug"
+        )
 
         assert result is True
         mock_git.checkout.assert_called_with("1-fix-the-bug")
@@ -490,7 +521,9 @@ class TestProcessorProcessComment:
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor_with_git.process_comment(project_config, sample_mr, "Fix this bug")
+        result = processor_with_git.process_comment(
+            project_config, sample_mr, "Fix this bug"
+        )
 
         assert result is False
 
@@ -525,7 +558,9 @@ class TestProcessorProcessComment:
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
 
-        result = processor_with_git.process_comment(project_config, sample_mr, "Fix this bug")
+        result = processor_with_git.process_comment(
+            project_config, sample_mr, "Fix this bug"
+        )
 
         assert result is False
 
@@ -629,26 +664,35 @@ class TestProcessorSanitizePrompt:
     def test_sanitize_prompt_truncates_long_prompt(self, processor: Processor) -> None:
         """Test long prompt is truncated."""
         from gitlab_watcher.processor import MAX_PROMPT_LENGTH
+
         long_prompt = "x" * (MAX_PROMPT_LENGTH + 100)
         result = processor._sanitize_prompt(long_prompt)
         assert len(result) == MAX_PROMPT_LENGTH
 
-    def test_sanitize_prompt_rejects_command_substitution(self, processor: Processor) -> None:
+    def test_sanitize_prompt_rejects_command_substitution(
+        self, processor: Processor
+    ) -> None:
         """Test prompt with command substitution is rejected."""
         with pytest.raises(ValueError, match="forbidden pattern"):
             processor._sanitize_prompt("Fix $(rm -rf /)")
 
-    def test_sanitize_prompt_rejects_backtick_command(self, processor: Processor) -> None:
+    def test_sanitize_prompt_rejects_backtick_command(
+        self, processor: Processor
+    ) -> None:
         """Test prompt with backtick command is rejected."""
         with pytest.raises(ValueError, match="forbidden pattern"):
             processor._sanitize_prompt("Fix `rm -rf /`")
 
-    def test_sanitize_prompt_rejects_variable_expansion(self, processor: Processor) -> None:
+    def test_sanitize_prompt_rejects_variable_expansion(
+        self, processor: Processor
+    ) -> None:
         """Test prompt with variable expansion is rejected."""
         with pytest.raises(ValueError, match="forbidden pattern"):
             processor._sanitize_prompt("Fix ${PATH}")
 
-    def test_sanitize_prompt_rejects_variable_reference(self, processor: Processor) -> None:
+    def test_sanitize_prompt_rejects_variable_reference(
+        self, processor: Processor
+    ) -> None:
         """Test prompt with variable reference is rejected."""
         with pytest.raises(ValueError, match="forbidden pattern"):
             processor._sanitize_prompt("Fix $HOME")
@@ -673,14 +717,19 @@ class TestProcessorValidateIssueTitle:
         with pytest.raises(ValueError, match="cannot be empty"):
             processor._validate_issue_title("   ")
 
-    def test_validate_issue_title_truncates_long_title(self, processor: Processor) -> None:
+    def test_validate_issue_title_truncates_long_title(
+        self, processor: Processor
+    ) -> None:
         """Test long title is truncated."""
         from gitlab_watcher.processor import MAX_TITLE_LENGTH
+
         long_title = "x" * (MAX_TITLE_LENGTH + 100)
         result = processor._validate_issue_title(long_title)
         assert len(result) == MAX_TITLE_LENGTH
 
-    def test_validate_issue_title_removes_control_characters(self, processor: Processor) -> None:
+    def test_validate_issue_title_removes_control_characters(
+        self, processor: Processor
+    ) -> None:
         """Test control characters are removed."""
         title = "Fix\nthe\tbug"
         result = processor._validate_issue_title(title)
@@ -703,17 +752,23 @@ class TestProcessorValidateBranchName:
         result = processor._validate_branch_name(branch)
         assert result == branch
 
-    def test_validate_branch_name_empty_returns_default(self, processor: Processor) -> None:
+    def test_validate_branch_name_empty_returns_default(
+        self, processor: Processor
+    ) -> None:
         """Test empty branch name returns default."""
         result = processor._validate_branch_name("")
         assert result == "auto-branch"
 
-    def test_validate_branch_name_whitespace_returns_default(self, processor: Processor) -> None:
+    def test_validate_branch_name_whitespace_returns_default(
+        self, processor: Processor
+    ) -> None:
         """Test whitespace-only branch name returns default."""
         result = processor._validate_branch_name("   ")
         assert result == "auto-branch"
 
-    def test_validate_branch_name_removes_special_chars(self, processor: Processor) -> None:
+    def test_validate_branch_name_removes_special_chars(
+        self, processor: Processor
+    ) -> None:
         """Test special characters are removed."""
         branch = "123-fix@the#bug!"
         result = processor._validate_branch_name(branch)
@@ -721,22 +776,29 @@ class TestProcessorValidateBranchName:
         assert "#" not in result
         assert "!" not in result
 
-    def test_validate_branch_name_removes_consecutive_hyphens(self, processor: Processor) -> None:
+    def test_validate_branch_name_removes_consecutive_hyphens(
+        self, processor: Processor
+    ) -> None:
         """Test consecutive hyphens are removed."""
         branch = "123--fix---bug"
         result = processor._validate_branch_name(branch)
         assert "--" not in result
 
-    def test_validate_branch_name_removes_leading_trailing_hyphens(self, processor: Processor) -> None:
+    def test_validate_branch_name_removes_leading_trailing_hyphens(
+        self, processor: Processor
+    ) -> None:
         """Test leading/trailing hyphens are removed."""
         branch = "-123-fix-bug-"
         result = processor._validate_branch_name(branch)
         assert not result.startswith("-")
         assert not result.endswith("-")
 
-    def test_validate_branch_name_truncates_long_name(self, processor: Processor) -> None:
+    def test_validate_branch_name_truncates_long_name(
+        self, processor: Processor
+    ) -> None:
         """Test long branch name is truncated."""
         from gitlab_watcher.processor import MAX_BRANCH_LENGTH
+
         long_branch = "x" * (MAX_BRANCH_LENGTH + 100)
         result = processor._validate_branch_name(long_branch)
         assert len(result) <= MAX_BRANCH_LENGTH

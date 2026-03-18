@@ -135,15 +135,16 @@ A `Processor` osztály felelős az issue-k és MR kommentek tényleges feldolgoz
 | `process_comment()` | MR komment feldolgozása: branch checkout, Claude futtatás, push |
 | `cleanup_after_merge()` | Takarítás merge után: master frissítés, branch törlés |
 
-**Claude CLI módok:**
+**AI Tool módok:**
 
-A rendszer három módot támogat a Claude CLI futtatásához:
+A rendszer négy módot támogat az AI tool futtatásához:
 
 | Mód | Parancs | Leírás |
 |-----|---------|--------|
 | `ollama` | `ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"` | Alapértelmezett mód, Ollama konténeren keresztül |
 | `direct` | `claude -p --permission-mode acceptEdits "<prompt>"` | Közvetlen Claude CLI hívás |
-| `custom` | Felhasználó által definiált parancs | Rugalmas, egyedi konfiguráció |
+| `opencode` | `opencode "<prompt>"` | Opencode CLI használata |
+| `custom` | Felhasználó által definiált parancs | Rugalmas, egyedi konfiguráció bármilyen AI eszközhöz |
 
 **Prompt struktúra:**
 
@@ -296,8 +297,8 @@ class Config:
     label_review: str = "Review"
     gitlab_username: str = "claude"
     poll_interval: int = 30
-    claude_mode: str = "ollama"
-    claude_custom_command: str = ""
+    ai_tool_mode: str = "ollama"
+    ai_tool_custom_command: str = ""
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
 ```
@@ -318,9 +319,9 @@ LABEL_REVIEW="Review"
 GITLAB_USERNAME="claude"
 POLL_INTERVAL=30
 
-# Claude CLI mód
-CLAUDE_MODE="ollama"
-CLAUDE_CUSTOM_COMMAND=""
+# AI tool mód
+AI_TOOL_MODE="ollama"
+AI_TOOL_CUSTOM_COMMAND=""
 
 # Projektek
 PROJECT_DIRS=(
@@ -331,7 +332,7 @@ PROJECT_DIRS=(
 
 **Projektfelfedezés:**
 
-A rendszer automatikusan felfedezi a projekteket a `PROJECT_DIRS` könyvtárakban lévő `CLAUDE.md` fájlok alapján. A fájlban a `Project ID: <szám>` sor határozza meg a GitLab projekt azonosítót.
+A rendszer automatikusan felfedezi a projekteket a `PROJECT_DIRS` könyvtárakban lévő `PROJECT.md` fájlok alapján. A fájlban a `Project ID: <szám>` sor határozza meg a GitLab projekt azonosítót.
 
 Támogatott formátumok:
 - `Project ID: 31`
@@ -428,11 +429,11 @@ A `pyproject.toml` alapján:
 
 ### 3.4 Konfiguráció beállítása
 
-1. Hozd létre a konfigurációs fájlt:
+1. Hozd létre a konfigurációs könyvtárat és fájlt:
 
 ```bash
-mkdir -p ~/.claude/config
-touch ~/.claude/config/gitlab_watcher.conf
+mkdir -p ~/.config/gitlab-watcher
+cp gitlab-watcher.conf ~/.config/gitlab-watcher/config.conf
 ```
 
 2. Töltsd ki a konfigurációt:
@@ -455,8 +456,8 @@ GITLAB_USERNAME="claude"
 # Polling intervallum (másodperc)
 POLL_INTERVAL=30
 
-# Claude CLI mód: ollama, direct, custom
-CLAUDE_MODE="ollama"
+# AI tool mód: ollama, direct, opencode, custom
+AI_TOOL_MODE="ollama"
 
 # Projektek
 PROJECT_DIRS=(
@@ -465,7 +466,7 @@ PROJECT_DIRS=(
 )
 ```
 
-3. Minden projekthez hozz létre `CLAUDE.md` fájlt:
+3. Minden projekthez hozz létre `PROJECT.md` fájlt:
 
 ```markdown
 Project ID: 42
@@ -504,8 +505,8 @@ gitlab-watcher --verbose
 | `LABEL_REVIEW` | string | "Review" | "Véleményezés" címke neve |
 | `GITLAB_USERNAME` | string | "claude" | Monitorozott GitLab felhasználó |
 | `POLL_INTERVAL` | int | 30 | Polling intervallum (másodperc) |
-| `CLAUDE_MODE` | string | "ollama" | Claude CLI mód |
-| `CLAUDE_CUSTOM_COMMAND` | string | "" | Egyéni parancs (custom módhoz) |
+| `AI_TOOL_MODE` | string | "ollama" | AI tool mód |
+| `AI_TOOL_CUSTOM_COMMAND` | string | "" | Egyéni parancs (custom módhoz) |
 | `PROJECT_DIRS` | array | [] | Projekt könyvtárak listája |
 
 ### 4.2 GitLab Token beszerzése
@@ -525,12 +526,12 @@ https://token@git.example.com/group/project.git  → URL: https://git.example.co
 https://user:token@git.example.com/group/project.git  → URL: https://git.example.com, Token: token
 ```
 
-### 4.4 Claude CLI módok
+### 4.4 AI Tool módok
 
 #### Ollama mód (alapértelmezett)
 
 ```bash
-CLAUDE_MODE="ollama"
+AI_TOOL_MODE="ollama"
 ```
 
 Előfeltétel: Ollama telepítése és `claude` modell jelenléte.
@@ -538,21 +539,47 @@ Előfeltétel: Ollama telepítése és `claude` modell jelenléte.
 #### Direct mód
 
 ```bash
-CLAUDE_MODE="direct"
+AI_TOOL_MODE="direct"
 ```
 
 Közvetlen Claude CLI hívás. Előfeltétel: `claude` parancs elérhető a PATH-ban.
 
+#### Opencode mód
+
+```bash
+AI_TOOL_MODE="opencode"
+```
+
+Opencode CLI használata. Előfeltétel: `opencode` parancs elérhető a PATH-ban.
+
 #### Custom mód
 
 ```bash
-CLAUDE_MODE="custom"
-CLAUDE_CUSTOM_COMMAND="my-ai-tool --prompt {prompt} --workdir {cwd}"
+AI_TOOL_MODE="custom"
+AI_TOOL_CUSTOM_COMMAND="my-ai-tool --prompt {prompt} --workdir {cwd}"
 ```
 
-Egyéni parancs definiálása. Elérhető változók:
-- `{prompt}` - A prompt szöveg
-- `{cwd}` - A munkakönyvtár
+Egyéni parancs definiálása bármilyen AI eszközhöz. Elérhető változók:
+- `{prompt}` - A prompt szöveg (kötelező)
+- `{cwd}` - A munkakönyvtár elérési útja (opcionális)
+
+**Fontos:** A munkakönyvtár automatikusan beállításra kerül a parancs futtatása előtt.
+Csak akkor használd a `{cwd}` változót, ha az AI eszköz explicit könyvtár paramétert igényel.
+
+Példák:
+```bash
+# A tool az aktuális könyvtárban dolgozik - nincs szükség {cwd}-re
+AI_TOOL_MODE="custom"
+AI_TOOL_CUSTOM_COMMAND="my-claude --prompt {prompt}"
+
+# A tool explicit könyvtár paramétert igényel
+AI_TOOL_MODE="custom"
+AI_TOOL_CUSTOM_COMMAND="my-opencode --task {prompt} --workspace {cwd}"
+
+# Bármilyen más AI eszköz - csak prompt szükséges
+AI_TOOL_MODE="custom"
+AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
+```
 
 ---
 
@@ -785,21 +812,26 @@ get_notes(
 )
 ```
 
-### 7.2 Claude CLI Integration
+### 7.2 AI Tool CLI Integration
 
-A Claude CLI hívás a `Processor._run_claude()` metódusban történik:
+Az AI tool hívás a `Processor._run_claude()` metódusban történik:
 
 ```python
 def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
     # Parancs összeállítása mód szerint
-    if self.claude_mode == "ollama":
+    if self.ai_tool_mode == "ollama":
         cmd = ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits", prompt]
-    elif self.claude_mode == "direct":
+    elif self.ai_tool_mode == "direct":
         cmd = ["claude", "-p", "--permission-mode", "acceptEdits", prompt]
-    elif self.claude_mode == "custom":
+    elif self.ai_tool_mode == "custom":
         # Placeholder-ek helyettesítése
         cmd = [part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path))
-               for part in shlex.split(self.claude_custom_command)]
+               for part in shlex.split(self.ai_tool_custom_command)]
+    elif self.ai_tool_mode == "opencode":
+        cmd = ["opencode", prompt]
+    elif self.ai_tool_mode == "opencode-custom":
+        cmd = [part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path))
+               for part in shlex.split(self.ai_tool_custom_command)]
 
     env = {"CLAUDECODE": ""}  # Environment változó beállítás
 
@@ -1172,8 +1204,11 @@ GITLAB_USERNAME="claude"
 # Polling intervallum (másodperc)
 POLL_INTERVAL=30
 
-# Claude CLI mód
-CLAUDE_MODE="ollama"
+# AI tool mód: ollama, direct, custom, opencode, opencode-custom
+AI_TOOL_MODE="ollama"
+
+# Egyéni parancs (custom vagy opencode-custom módhoz)
+AI_TOOL_CUSTOM_COMMAND=""
 
 # Projektek
 PROJECT_DIRS=(
@@ -1182,7 +1217,7 @@ PROJECT_DIRS=(
 )
 ```
 
-### B. Példa CLAUDE.md fájl
+### B. Példa PROJECT.md fájl
 
 ```markdown
 # My Project
