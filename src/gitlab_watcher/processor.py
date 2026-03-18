@@ -17,10 +17,10 @@ from .state import StateManager
 # Security constants for prompt sanitization
 MAX_PROMPT_LENGTH = 10000
 FORBIDDEN_PATTERNS = [
-    r'\$\([^)]+\)',   # Command substitution $(...)
-    r'`[^`]+`',        # Backtick command `...`
-    r'\$\{[^}]+\}',    # Variable expansion ${...}
-    r'\$\w+',          # Variable reference $var
+    r"\$\([^)]+\)",  # Command substitution $(...)
+    r"`[^`]+`",  # Backtick command `...`
+    r"\$\{[^}]+\}",  # Variable expansion ${...}
+    r"\$\w+",  # Variable reference $var
 ]
 
 # Input validation constants
@@ -44,10 +44,8 @@ class Processor:
         gitlab_username: str,
         label_in_progress: str,
         label_review: str,
-        claude_mode: str = "ollama",
-        claude_custom_command: str = "",
-        aider_model: str = "gpt-4o",
-        aider_extra_args: str = "",
+        ai_tool_mode: str = "ollama",
+        ai_tool_custom_command: str = "",
         default_branch: str = "master",
         git_factory: Callable[[Path], GitOperations] = GitOps,
     ) -> None:
@@ -60,12 +58,10 @@ class Processor:
             gitlab_username: GitLab username for filtering comments
             label_in_progress: Label for in-progress issues
             label_review: Label for issues under review
-            claude_mode: Claude CLI mode ("ollama", "direct", "custom", "aider", or "aider-custom")
-            claude_custom_command: Custom command for Claude CLI (used when mode is "custom")
+            ai_tool_mode: AI tool mode ("ollama", "direct", "custom", "opencode", or "opencode-custom")
+            ai_tool_custom_command: Custom command for AI tool (used when mode is "custom")
             default_branch: Default branch name (default: "master")
             git_factory: Factory function to create GitOperations instances (for dependency injection)
-            aider_model: Model to use with Aider (default: "gpt-4o")
-            aider_extra_args: Extra arguments for Aider command
         """
         self.gitlab = gitlab
         self.discord = discord
@@ -73,10 +69,8 @@ class Processor:
         self.gitlab_username = gitlab_username
         self.label_in_progress = label_in_progress
         self.label_review = label_review
-        self.claude_mode = claude_mode
-        self.claude_custom_command = claude_custom_command
-        self.aider_model = aider_model
-        self.aider_extra_args = aider_extra_args
+        self.ai_tool_mode = ai_tool_mode
+        self.ai_tool_custom_command = ai_tool_custom_command
         self.default_branch = default_branch
         self.git_factory = git_factory
         self.logger = logging.getLogger(__name__)
@@ -121,7 +115,7 @@ class Processor:
         title = title[:MAX_TITLE_LENGTH]
 
         # Remove control characters
-        title = ''.join(c for c in title if c.isprintable())
+        title = "".join(c for c in title if c.isprintable())
 
         return title.strip()
 
@@ -140,14 +134,14 @@ class Processor:
             return "auto-branch"
 
         # Remove problematic characters for git branch names
-        branch = re.sub(r'[^\w\-/.]', '-', branch)
+        branch = re.sub(r"[^\w\-/.]", "-", branch)
 
         # Remove consecutive hyphens
-        while '--' in branch:
-            branch = branch.replace('--', '-')
+        while "--" in branch:
+            branch = branch.replace("--", "-")
 
         # Remove leading/trailing hyphens and dots
-        branch = branch.strip('-.')
+        branch = branch.strip("-.")
 
         # Truncate to max length
         if len(branch) > MAX_BRANCH_LENGTH:
@@ -156,10 +150,10 @@ class Processor:
         return branch or "auto-branch"
 
     def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
-        """Run Claude CLI with a prompt based on configured mode.
+        """Run AI tool CLI with a prompt based on configured mode.
 
         Args:
-            prompt: The prompt for Claude
+            prompt: The prompt for AI tool
             repo_path: Path to the repository
 
         Returns:
@@ -172,29 +166,32 @@ class Processor:
             return False, f"Prompt validation failed: {e}"
 
         # Build command based on mode
-        if self.claude_mode == "ollama":
-            cmd = ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits", safe_prompt]
-        elif self.claude_mode == "direct":
+        if self.ai_tool_mode == "ollama":
+            cmd = [
+                "ollama",
+                "launch",
+                "claude",
+                "--",
+                "-p",
+                "--permission-mode",
+                "acceptEdits",
+                safe_prompt,
+            ]
+        elif self.ai_tool_mode == "direct":
             cmd = ["claude", "-p", "--permission-mode", "acceptEdits", safe_prompt]
-        elif self.claude_mode == "custom":
-            if not self.claude_custom_command:
-                return False, "CLAUDE_CUSTOM_COMMAND not set for custom mode"
+        elif self.ai_tool_mode == "opencode":
+            cmd = ["opencode", safe_prompt]
+        elif self.ai_tool_mode == "custom":
+            if not self.ai_tool_custom_command:
+                return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
             # Split first, then substitute to preserve multi-word values
-            cmd_parts = shlex.split(self.claude_custom_command)
-            cmd = [part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)) for part in cmd_parts]
-        elif self.claude_mode == "aider":
-            cmd = ["aider", "--model", self.aider_model, "--yes", "--no-git"]
-            if self.aider_extra_args:
-                cmd.extend(shlex.split(self.aider_extra_args))
-            cmd.extend(["--message", safe_prompt])
-        elif self.claude_mode == "aider-custom":
-            if not self.claude_custom_command:
-                return False, "CLAUDE_CUSTOM_COMMAND not set for aider-custom mode"
-            # Split first, then substitute to preserve multi-word values
-            cmd_parts = shlex.split(self.claude_custom_command)
-            cmd = [part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)) for part in cmd_parts]
+            cmd_parts = shlex.split(self.ai_tool_custom_command)
+            cmd = [
+                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path))
+                for part in cmd_parts
+            ]
         else:
-            return False, f"Unknown CLAUDE_MODE: {self.claude_mode}"
+            return False, f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}"
 
         try:
             env = {"CLAUDECODE": ""}
@@ -244,7 +241,9 @@ class Processor:
         slug = GitOps.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
         branch = self._validate_branch_name(f"{issue.iid}-{slug}")
 
-        self.logger.info(f"[{project.name}] Processing issue #{issue.iid}: {validated_title}")
+        self.logger.info(
+            f"[{project.name}] Processing issue #{issue.iid}: {validated_title}"
+        )
         self.logger.debug(f"[{project.name}] Creating branch: {branch}")
 
         self.discord.notify_issue_started(

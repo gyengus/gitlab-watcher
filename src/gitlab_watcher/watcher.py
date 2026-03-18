@@ -76,7 +76,9 @@ class Watcher:
 
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
-        self.discord = discord or DiscordWebhook(webhook_url=self.config.discord_webhook)
+        self.discord = discord or DiscordWebhook(
+            webhook_url=self.config.discord_webhook
+        )
         self.processor = processor or Processor(
             gitlab=self.gitlab,
             discord=self.discord,
@@ -84,8 +86,9 @@ class Watcher:
             gitlab_username=self.config.gitlab_username,
             label_in_progress=self.config.label_in_progress,
             label_review=self.config.label_review,
-            claude_mode=self.config.claude_mode,
-            claude_custom_command=self.config.claude_custom_command,
+            ai_tool_mode=self.config.ai_tool_mode,
+            ai_tool_custom_command=self.config.ai_tool_custom_command,
+            default_branch=self.config.default_branch,
         )
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, str | None]:
@@ -153,7 +156,10 @@ class Watcher:
             has_review = self.config.label_review in issue.labels
 
             if not has_in_progress and not has_review:
-                self._log(project.project_id, f"Found backlog issue #{issue.iid}: {issue.title}")
+                self._log(
+                    project.project_id,
+                    f"Found backlog issue #{issue.iid}: {issue.title}",
+                )
                 self.state.set_processing(project.project_id, True)
                 self.processor.process_issue(project, issue)
                 break
@@ -214,7 +220,9 @@ class Watcher:
             and latest_note.id != old_note_id
             and latest_note.author_username != self.config.gitlab_username
         ):
-            self._log(project.project_id, f"New comment on MR !{mr.iid}: {latest_note.body}")
+            self._log(
+                project.project_id, f"New comment on MR !{mr.iid}: {latest_note.body}"
+            )
             self.state.set_processing(project.project_id, True)
             self.processor.process_comment(project, mr, latest_note.body)
 

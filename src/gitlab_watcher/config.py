@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 # Default configuration file path
-DEFAULT_CONFIG_PATH = "~/.claude/config/gitlab_watcher.conf"
+DEFAULT_CONFIG_PATH = os.path.expanduser("~/.config/gitlab-watcher/config.conf")
 
 
 @dataclass
@@ -31,10 +31,8 @@ class Config:
     label_review: str = "Review"
     gitlab_username: str = "claude"
     poll_interval: int = 30
-    claude_mode: str = "ollama"
-    claude_custom_command: str = ""
-    aider_model: str = "gpt-4o"
-    aider_extra_args: str = ""
+    ai_tool_mode: str = "ollama"
+    ai_tool_custom_command: str = ""
     default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
@@ -88,8 +86,9 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
                 if array_line:
                     # Remove surrounding quotes if present
                     value = array_line
-                    if (value.startswith('"') and value.endswith('"')) or \
-                       (value.startswith("'") and value.endswith("'")):
+                    if (value.startswith('"') and value.endswith('"')) or (
+                        value.startswith("'") and value.endswith("'")
+                    ):
                         value = value[1:-1]
                     values.append(value)
 
@@ -127,14 +126,15 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
             continue
 
         # Handle simple key=value
-        simple_match = re.match(r'^(\w+)=(.*)$', line)
+        simple_match = re.match(r"^(\w+)=(.*)$", line)
         if simple_match:
             key = simple_match.group(1)
             value = simple_match.group(2).strip()
 
             # Remove surrounding quotes
-            if (value.startswith('"') and value.endswith('"')) or \
-               (value.startswith("'") and value.endswith("'")):
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
                 value = value[1:-1]
 
             result[key] = value
@@ -144,18 +144,18 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
     return result
 
 
-def extract_project_id(claude_md_path: Path) -> Optional[int]:
-    """Extract Project ID from CLAUDE.md file.
+def extract_project_id(project_file_path: Path) -> Optional[int]:
+    """Extract Project ID from PROJECT.md or CLAUDE.md file.
 
     Supports formats like:
     - Project ID: 31
     - Project ID: **31**
     - project_id: 31
     """
-    if not claude_md_path.exists():
+    if not project_file_path.exists():
         return None
 
-    content = claude_md_path.read_text()
+    content = project_file_path.read_text()
 
     # Match patterns with optional markdown formatting
     match = re.search(r"(?i)project[_\s]*id:?\s*\*{0,2}(\d+)\*{0,2}", content)
@@ -174,18 +174,29 @@ def load_config(config_path: str) -> Config:
 
     raw_config = parse_bash_config(config_file)
 
+    # Helper function to safely convert config values
+    def get_str(key: str, default: str = "") -> str:
+        value = raw_config.get(key, default)
+        if isinstance(value, list) and value:
+            return str(value[0])
+        return str(value)
+
+    def get_int(key: str, default: int = 0) -> int:
+        value = raw_config.get(key, str(default))
+        if isinstance(value, list) and value:
+            return int(str(value[0]))
+        return int(str(value))
+
     config = Config(
-        gitlab_url=str(raw_config.get("GITLAB_URL", "")),
-        gitlab_token=str(raw_config.get("GITLAB_TOKEN", "")),
-        discord_webhook=str(raw_config.get("DISCORD_WEBHOOK", "")),
-        label_in_progress=str(raw_config.get("LABEL_IN_PROGRESS", "In progress")),
-        label_review=str(raw_config.get("LABEL_REVIEW", "Review")),
-        gitlab_username=str(raw_config.get("GITLAB_USERNAME", "claude")),
-        poll_interval=int(raw_config.get("POLL_INTERVAL", "30")),
-        claude_mode=str(raw_config.get("CLAUDE_MODE", "ollama")),
-        claude_custom_command=str(raw_config.get("CLAUDE_CUSTOM_COMMAND", "")),
-        aider_model=str(raw_config.get("AIDER_MODEL", "gpt-4o")),
-        aider_extra_args=str(raw_config.get("AIDER_EXTRA_ARGS", "")),
+        gitlab_url=get_str("GITLAB_URL"),
+        gitlab_token=get_str("GITLAB_TOKEN"),
+        discord_webhook=get_str("DISCORD_WEBHOOK"),
+        label_in_progress=get_str("LABEL_IN_PROGRESS", "In progress"),
+        label_review=get_str("LABEL_REVIEW", "Review"),
+        gitlab_username=get_str("GITLAB_USERNAME", "claude"),
+        poll_interval=get_int("POLL_INTERVAL", 30),
+        ai_tool_mode=get_str("AI_TOOL_MODE", "ollama"),
+        ai_tool_custom_command=get_str("AI_TOOL_CUSTOM_COMMAND"),
     )
 
     # Get project directories
@@ -201,15 +212,18 @@ def load_config(config_path: str) -> Config:
     for project_dir in project_dirs:
         project_path = Path(project_dir).expanduser()
 
-        # Skip commented entries
         if project_dir.strip().startswith("#"):
             continue
 
         if not project_path.exists():
             continue
 
-        claude_md = project_path / "CLAUDE.md"
-        project_id = extract_project_id(claude_md)
+        project_id = None
+        for filename in ["PROJECT.md", "CLAUDE.md"]:
+            project_file = project_path / filename
+            project_id = extract_project_id(project_file)
+            if project_id is not None:
+                break
 
         if project_id is None:
             continue
@@ -219,11 +233,13 @@ def load_config(config_path: str) -> Config:
 
         seen_ids.add(project_id)
 
-        config.projects.append(ProjectConfig(
-            project_id=project_id,
-            path=project_path,
-            name=project_path.name,
-        ))
+        config.projects.append(
+            ProjectConfig(
+                project_id=project_id,
+                path=project_path,
+                name=project_path.name,
+            )
+        )
 
     if not config.projects:
         raise ValueError("No valid projects found in configuration")

@@ -78,6 +78,3 @@ dmypy.json
 .claude_session
 .worktrees/
 
-# Aider cache and temporary files
-.aider*
-!.aider.conf.yml

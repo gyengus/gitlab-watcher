@@ -64,10 +64,13 @@ Per-project state is stored in `/tmp/gitlab-watcher/state_{project_id}.json`:
 - `processing` flag prevents concurrent operations on same project
 - On startup, `init_state()` resets the processing flag (crash recovery)
 
-### Claude CLI Integration
+### AI Tool Integration
 
-The `_run_claude()` method in `processor.py` invokes:
-```bash
-ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"
-```
-With a 10-minute timeout and `CLAUDECODE=""` environment variable to avoid conflicts.
+The `_run_claude()` method in `processor.py` supports multiple AI tools:
+- **ollama**: `ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"`
+- **direct**: `claude -p --permission-mode acceptEdits "<prompt>"`
+- **opencode**: `opencode "<prompt>"`
+- **custom**: Configurable command with `{prompt}` and `{cwd}` placeholders
+- **opencode-custom**: Configurable opencode command with `{prompt}` and `{cwd}` placeholders
+
+All modes use a 10-minute timeout and `CLAUDECODE=""` environment variable to avoid conflicts.
