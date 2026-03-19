@@ -38,7 +38,7 @@ cp gitlab-watcher.conf ~/.config/gitlab-watcher/config.conf
 
 Edit the config file to match your environment. See `gitlab-watcher.conf` for all available options.
 
-Each project must have a `PROJECT.md` file with a Project ID:
+Each project must have a `PROJECT.md`, `AGENTS.md`, or `CLAUDE.md` file with a Project ID:
 
 ```markdown
 Project ID: 31
