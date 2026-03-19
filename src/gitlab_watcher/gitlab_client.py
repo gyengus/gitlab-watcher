@@ -10,6 +10,14 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .cache import TimedCache
+from .exceptions import (
+    GitLabAPIError,
+    GitLabAuthenticationError,
+    GitLabConnectionError,
+    GitLabForbiddenError,
+    GitLabNotFoundError,
+    GitLabRateLimitError,
+)
 
 
 # Default configuration values
@@ -132,13 +140,28 @@ class GitLabClient:
                     time.sleep(self.retry_delay * (attempt + 1))
                     continue
 
+                if response.status_code == 401:
+                    raise GitLabAuthenticationError()
+                elif response.status_code == 403:
+                    raise GitLabForbiddenError(url)
+                elif response.status_code == 404:
+                    raise GitLabNotFoundError("Resource", url)
+                elif response.status_code == 429:
+                    retry_after_str = response.headers.get("Retry-After")
+                    retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
+                    raise GitLabRateLimitError(retry_after)
+                elif response.status_code >= 400:
+                    raise GitLabAPIError(response.status_code, response.text)
+
                 return response
 
             except requests.RequestException as e:
                 last_error = e
                 time.sleep(self.retry_delay * (attempt + 1))
 
-        raise RuntimeError(f"Request failed after {self.max_retries} retries: {last_error}")
+        raise GitLabConnectionError(
+            f"Request failed after {self.max_retries} retries. Last error: {last_error}"
+        )
 
     def get_issues(
         self,
@@ -204,7 +227,11 @@ class GitLabClient:
                 state=cached.get("state", ""),
             )
 
-        response = self._request("GET", self._api_url(project_id, f"/merge_requests/{mr_iid}"))
+        try:
+            response = self._request("GET", self._api_url(project_id, f"/merge_requests/{mr_iid}"))
+        except GitLabNotFoundError:
+            return None
+            
         data = response.json()
 
         if "iid" not in data:

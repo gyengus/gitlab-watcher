@@ -1,10 +1,13 @@
 """State management for tracking processed items."""
 
 import json
+import logging
 import threading
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # Default delay for debounced saves
@@ -95,7 +98,10 @@ class StateManager:
         if project_id not in self._states:
             return
         state_file = self._state_file(project_id)
-        state_file.write_text(json.dumps(asdict(self._states[project_id]), indent=2))
+        try:
+            state_file.write_text(json.dumps(asdict(self._states[project_id]), indent=2))
+        except Exception as e:
+            logger.error(f"Failed to save state for project {project_id}: {e}")
 
     def load(self, project_id: int) -> ProjectState:
         """Load state for a project, returning cached state if available.

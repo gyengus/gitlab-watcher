@@ -8,6 +8,7 @@ from typing import Optional
 
 from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
+from .exceptions import GitLabError
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient
 from .logging_utils import SensitiveDataFilter
@@ -251,6 +252,9 @@ class Watcher:
 
                 except KeyboardInterrupt:
                     break
+                except GitLabError as e:
+                    self.logger.error(f"GitLab API Error: {e.message}")
+                    time.sleep(self.config.poll_interval)
                 except Exception as e:
                     self.logger.error(f"Error in main loop: {e}")
                     time.sleep(self.config.poll_interval)
@@ -258,9 +262,6 @@ class Watcher:
             # Ensure all pending state is saved before shutdown
             print("\nShutting down...")
             self.state.force_save_all()
-
-
-__all__ = ["Watcher"]
 
 
 __all__ = ["Watcher"]
