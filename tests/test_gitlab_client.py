@@ -6,6 +6,11 @@ import pytest
 import requests
 
 from gitlab_watcher.gitlab_client import GitLabClient, Issue, MergeRequest, Note
+from gitlab_watcher.exceptions import (
+    GitLabAPIError,
+    GitLabConnectionError,
+    GitLabNotFoundError,
+)
 
 
 @pytest.fixture
@@ -170,9 +175,8 @@ class TestGitLabClient:
         """Test updating issue labels failure."""
         mock_request.return_value = Mock(status_code=400)
 
-        result = client.update_issue_labels(42, 1, ["In progress", "bug"])
-
-        assert result is False
+        with pytest.raises(GitLabAPIError):
+            client.update_issue_labels(42, 1, ["In progress", "bug"])
 
     @patch("requests.Session.request")
     def test_create_merge_request(self, mock_request: Mock, client: GitLabClient) -> None:
@@ -210,15 +214,14 @@ class TestGitLabClient:
             json=lambda: {"message": "Bad Request"},
         )
 
-        mr = client.create_merge_request(
-            42,
-            source_branch="feature-branch",
-            target_branch="master",
-            title="New MR",
-            description="Description",
-        )
-
-        assert mr is None
+        with pytest.raises(GitLabAPIError):
+            client.create_merge_request(
+                42,
+                source_branch="feature-branch",
+                target_branch="master",
+                title="New MR",
+                description="Description",
+            )
 
     @patch("requests.Session.request")
     def test_retry_on_5xx(self, mock_request: Mock, client: GitLabClient) -> None:
@@ -243,7 +246,7 @@ class TestGitLabClient:
         """Test that exception is raised after max retries."""
         mock_request.return_value = Mock(status_code=500, text="Internal Server Error")
 
-        with pytest.raises(RuntimeError, match="Request failed after 3 retries"):
+        with pytest.raises(GitLabConnectionError, match="Request failed after 3 retries"):
             client.get_issues(42)
 
     @patch("requests.Session.request")
@@ -272,9 +275,9 @@ class TestGitLabClient:
         # Should return empty list for 404 (no retry)
         # Actually get_issues returns the JSON response regardless of status
         # Let's test with a method that checks status
-        result = client.update_issue_labels(42, 1, ["bug"])
+        with pytest.raises(GitLabNotFoundError):
+            client.update_issue_labels(42, 1, ["bug"])
 
-        assert result is False
         assert mock_request.call_count == 1
 
 
