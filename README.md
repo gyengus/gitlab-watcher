@@ -134,3 +134,14 @@ pytest
 # Run tests with coverage
 pytest --cov=gitlab_watcher
 ```
+
+## Support & Donations
+
+If you find this tool helpful and would like to support its continued development, crypto donations are very much appreciated!
+
+- **Bitcoin (BTC):** `bc1qx4q5epl7nsyu9mum8edrvp2my8tut0enrz7kcn`
+- **Dogecoin (DOGE):** `DS62HBswTfAJLadRcMyrUJq6CAE8XV6SqC`
+- **EVM (ETH/BSC/Polygon):** `0x9F0a70A7306DF3fc072446cAF540F6766a4CC4E8`
+- **Web3 Domain:** `gyengus.sendme1satoshi.wallet`
+
+Thank you for your support!
