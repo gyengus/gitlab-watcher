@@ -1,4 +1,4 @@
-image: python:3.11-alpine
+image: python:3.11-slim
 
 stages:
   - test
@@ -20,7 +20,7 @@ test:
 
 .build_template:
   before_script:
-    - pip install build twine
+    - python -m pip install --upgrade pip build twine
 
 deploy_test:
   extends: .build_template
