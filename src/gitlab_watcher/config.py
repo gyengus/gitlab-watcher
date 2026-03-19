@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -82,15 +83,9 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
                     i += 1
                     break
 
-                # Extract value from line (handle quoted strings)
                 if array_line:
-                    # Remove surrounding quotes if present
-                    value = array_line
-                    if (value.startswith('"') and value.endswith('"')) or (
-                        value.startswith("'") and value.endswith("'")
-                    ):
-                        value = value[1:-1]
-                    values.append(value)
+                    # Parse array values using shlex
+                    values.extend(shlex.split(array_line))
 
                 i += 1
 
@@ -103,25 +98,8 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
             key = inline_array.group(1)
             values_str = inline_array.group(2)
 
-            # Parse array values, handling quoted strings
-            values = []
-            current = ""
-            in_quotes = False
-
-            for char in values_str:
-                if char == '"':
-                    in_quotes = not in_quotes
-                elif char == " " and not in_quotes:
-                    if current:
-                        values.append(current.strip('"'))
-                        current = ""
-                else:
-                    current += char
-
-            if current:
-                values.append(current.strip('"'))
-
-            result[key] = values
+            # Parse array values using shlex
+            result[key] = shlex.split(values_str)
             i += 1
             continue
 
@@ -129,15 +107,14 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
         simple_match = re.match(r"^(\w+)=(.*)$", line)
         if simple_match:
             key = simple_match.group(1)
-            value = simple_match.group(2).strip()
+            value_str = simple_match.group(2).strip()
 
-            # Remove surrounding quotes
-            if (value.startswith('"') and value.endswith('"')) or (
-                value.startswith("'") and value.endswith("'")
-            ):
-                value = value[1:-1]
-
-            result[key] = value
+            # Parse simple values using shlex
+            parts = shlex.split(value_str)
+            if parts:
+                result[key] = parts[0]
+            else:
+                result[key] = ""
 
         i += 1
 
