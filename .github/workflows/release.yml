@@ -19,6 +19,8 @@ jobs:
   release:
     name: Auto-generate Release
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -30,3 +32,8 @@ jobs:
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
           generate_release_notes: true
+          append_body: true
+          body: |
+            
+            ---
+            📦 **PyPI Package available:** [https://pypi.org/project/gitlab-watcher/](https://pypi.org/project/gitlab-watcher/)
