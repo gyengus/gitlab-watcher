@@ -40,9 +40,9 @@ dev = [
 gitlab-watcher = "gitlab_watcher.cli:main"
 
 [project.urls]
-Homepage = "https://git.gyengus.hu/gyengus/gitlab-watcher"
-Repository = "https://git.gyengus.hu/gyengus/gitlab-watcher.git"
-Issues = "https://git.gyengus.hu/gyengus/gitlab-watcher/issues"
+Homepage = "https://github.com/gyengus/gitlab-watcher"
+Repository = "https://github.com/gyengus/gitlab-watcher.git"
+Issues = "https://github.com/gyengus/gitlab-watcher/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
