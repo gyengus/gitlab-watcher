@@ -53,4 +53,27 @@ class SensitiveDataFilter(logging.Filter):
         return text
 
 
-__all__ = ["SensitiveDataFilter"]
+def sanitize_for_log(text: str) -> str:
+    """Sanitize string for logging to prevent log injection.
+
+    Removes newlines and non-printable characters.
+
+    Args:
+        text: The string to sanitize
+
+    Returns:
+        The sanitized string
+    """
+    if not text:
+        return ""
+
+    # Replace newlines and tabs with spaces
+    text = text.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+
+    # Remove non-printable characters
+    text = "".join(c for c in text if c.isprintable())
+
+    return text.strip()
+
+
+__all__ = ["SensitiveDataFilter", "sanitize_for_log"]

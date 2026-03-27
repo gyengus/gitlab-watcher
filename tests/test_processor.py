@@ -215,6 +215,8 @@ class TestProcessorAIToolModes:
         args = mock_run.call_args[0][0]
         assert args[0] == "claude"
         assert args[1] == "-p"
+        assert args[4] == "--"
+        assert args[5] == "Fix the bug"
         assert "ollama" not in args
 
     @patch("subprocess.run")
@@ -301,7 +303,8 @@ class TestProcessorAIToolModes:
         assert success is True
         args = mock_run.call_args[0][0]
         assert args[0] == "opencode"
-        assert args[1] == "Fix the bug"
+        assert args[1] == "--"
+        assert args[2] == "Fix the bug"
 
     def test_run_claude_invalid_mode(
         self,
