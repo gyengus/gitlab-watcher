@@ -115,7 +115,8 @@ class GitLabClient:
 
     def __repr__(self) -> str:
         """Return string representation without sensitive data."""
-        return f"GitLabClient(url={self.base_url!r})"
+        from .logging_utils import sanitize_for_log
+        return f"GitLabClient(url={sanitize_for_log(self.base_url)!r})"
 
     def _api_url(self, project_id: int, endpoint: str) -> str:
         """Build full API URL for a project endpoint."""
