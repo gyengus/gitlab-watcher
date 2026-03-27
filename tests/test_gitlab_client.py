@@ -324,7 +324,8 @@ class TestDataClasses:
         """Test that __repr__ shows the URL."""
         from gitlab_watcher.logging_utils import sanitize_for_log
         repr_str = sanitize_for_log(repr(client))
-        assert "https://git.example.com" in repr_str
+        # Use exact match to satisfy CodeQL's URL sanitization check
+        assert repr_str == "GitLabClient(url='https://git.example.com')"
 
     def test_repr_hides_token_extended(self) -> None:
         """Test that __repr__ does not expose the token even if longer."""
@@ -332,8 +333,8 @@ class TestDataClasses:
         client = GitLabClient(url="https://git.example.com", token="super-secret-token-12345")
         repr_str = sanitize_for_log(repr(client))
         assert "super-secret-token-12345" not in repr_str
-        assert "git.example.com" in repr_str
-        assert "GitLabClient" in repr_str
+        # Use exact match to satisfy CodeQL's URL sanitization check
+        assert repr_str == "GitLabClient(url='https://git.example.com')"
 
 
 class TestGitLabClientConfiguration:
@@ -392,55 +393,3 @@ class TestGitLabClientConfiguration:
         assert "timeout" in call_kwargs
         assert call_kwargs["timeout"] == 45.0
 
-
-class TestGitLabClientConfiguration:
-    """Tests for GitLab client configuration."""
-
-    def test_default_timeout(self) -> None:
-        """Test that default timeout is set."""
-        from gitlab_watcher.gitlab_client import DEFAULT_TIMEOUT
-        client = GitLabClient(url="https://git.example.com", token="test-token")
-        assert client.timeout == DEFAULT_TIMEOUT
-
-    def test_custom_timeout(self) -> None:
-        """Test that custom timeout can be set."""
-        client = GitLabClient(
-            url="https://git.example.com",
-            token="test-token",
-            timeout=60.0,
-        )
-        assert client.timeout == 60.0
-
-    def test_connection_pooling_configured(self) -> None:
-        """Test that connection pooling is configured."""
-        client = GitLabClient(url="https://git.example.com", token="test-token")
-        # Check that adapters are mounted for both http and https
-        assert "https://" in client.session.adapters
-        assert "http://" in client.session.adapters
-
-    @patch("requests.Session.request")
-    def test_request_uses_default_timeout(self, mock_request: Mock) -> None:
-        """Test that requests use default timeout."""
-        from gitlab_watcher.gitlab_client import DEFAULT_TIMEOUT
-        mock_request.return_value = Mock(status_code=200, json=lambda: [])
-
-        client = GitLabClient(url="https://git.example.com", token="test-token")
-        client._request("GET", "https://git.example.com/api/v4/test")
-
-        call_kwargs = mock_request.call_args[1]
-        assert call_kwargs["timeout"] == DEFAULT_TIMEOUT
-
-    @patch("requests.Session.request")
-    def test_request_uses_custom_timeout(self, mock_request: Mock) -> None:
-        """Test that requests use custom timeout when provided."""
-        mock_request.return_value = Mock(status_code=200, json=lambda: [])
-
-        client = GitLabClient(
-            url="https://git.example.com",
-            token="test-token",
-            timeout=45.0,
-        )
-        client._request("GET", "https://git.example.com/api/v4/test")
-
-        call_kwargs = mock_request.call_args[1]
-        assert call_kwargs["timeout"] == 45.0
