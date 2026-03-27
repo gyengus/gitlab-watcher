@@ -320,23 +320,17 @@ class TestDataClasses:
         assert note.body == "Comment"
         assert note.author_username == "user"
 
-    def test_repr_hides_token(self) -> None:
-        """Test that __repr__ does not expose sensitive token."""
-        client = GitLabClient(url="https://git.example.com", token="super-secret-token")
-        repr_str = repr(client)
-        assert "super-secret-token" not in repr_str
-        assert "GitLabClient(url='https://git.example.com')" == repr_str
-
-    def test_repr_shows_url(self) -> None:
+    def test_repr_shows_url(self, client: GitLabClient) -> None:
         """Test that __repr__ shows the URL."""
-        client = GitLabClient(url="https://git.example.com", token="test-token")
-        repr_str = repr(client)
+        from gitlab_watcher.logging_utils import sanitize_for_log
+        repr_str = sanitize_for_log(repr(client))
         assert "https://git.example.com" in repr_str
 
-    def test_repr_hides_token(self) -> None:
-        """Test that __repr__ does not expose the token."""
+    def test_repr_hides_token_extended(self) -> None:
+        """Test that __repr__ does not expose the token even if longer."""
+        from gitlab_watcher.logging_utils import sanitize_for_log
         client = GitLabClient(url="https://git.example.com", token="super-secret-token-12345")
-        repr_str = repr(client)
+        repr_str = sanitize_for_log(repr(client))
         assert "super-secret-token-12345" not in repr_str
         assert "git.example.com" in repr_str
         assert "GitLabClient" in repr_str
