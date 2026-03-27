@@ -254,10 +254,10 @@ class Watcher:
                 except KeyboardInterrupt:
                     break
                 except GitLabError as e:
-                    self.logger.error(f"GitLab API Error: {e.message}")
+                    self.logger.error(f"GitLab API Error: {sanitize_for_log(e.message)}")
                     time.sleep(self.config.poll_interval)
                 except Exception as e:
-                    self.logger.error(f"Error in main loop: {e}")
+                    self.logger.error(f"Error in main loop: {sanitize_for_log(str(e))}")
                     time.sleep(self.config.poll_interval)
         finally:
             # Ensure all pending state is saved before shutdown
