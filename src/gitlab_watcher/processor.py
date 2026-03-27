@@ -11,6 +11,7 @@ from .config import ProjectConfig
 from .discord import DiscordWebhook
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient, Issue, MergeRequest, Note
+from .logging_utils import SensitiveDataFilter, sanitize_for_log
 from .protocols import GitOperations
 from .state import StateManager
 
@@ -178,9 +179,9 @@ class Processor:
                 safe_prompt,
             ]
         elif self.ai_tool_mode == "direct":
-            cmd = ["claude", "-p", "--permission-mode", "acceptEdits", safe_prompt]
+            cmd = ["claude", "-p", "--permission-mode", "acceptEdits", "--", safe_prompt]
         elif self.ai_tool_mode == "opencode":
-            cmd = ["opencode", safe_prompt]
+            cmd = ["opencode", "--", safe_prompt]
         elif self.ai_tool_mode == "custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
@@ -242,7 +243,7 @@ class Processor:
         branch = self._validate_branch_name(f"{issue.iid}-{slug}")
 
         self.logger.info(
-            f"[{project.name}] Processing issue #{issue.iid}: {validated_title}"
+            f"[{project.name}] Processing issue #{issue.iid}: {sanitize_for_log(validated_title)}"
         )
         self.logger.debug(f"[{project.name}] Creating branch: {branch}")
 
@@ -326,7 +327,7 @@ Do not add Co-Authored-By signature to commits."""
             self.discord.notify_error(
                 project.name,
                 f"Processing failed for issue #{issue.iid}",
-                output,
+                sanitize_for_log(output),
             )
 
         self.state.set_processing(project.project_id, False)
@@ -395,7 +396,7 @@ Do not add Co-Authored-By signature to commits."""
             self.discord.notify_error(
                 project.name,
                 f"Processing failed for MR !{mr.iid}",
-                output,
+                sanitize_for_log(output),
             )
 
         self.state.set_processing(project.project_id, False)

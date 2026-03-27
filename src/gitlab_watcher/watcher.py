@@ -11,7 +11,7 @@ from .discord import DiscordWebhook
 from .exceptions import GitLabError
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient
-from .logging_utils import SensitiveDataFilter
+from .logging_utils import SensitiveDataFilter, sanitize_for_log
 from .processor import Processor
 from .state import StateManager
 
@@ -159,7 +159,7 @@ class Watcher:
             if not has_in_progress and not has_review:
                 self._log(
                     project.project_id,
-                    f"Found backlog issue #{issue.iid}: {issue.title}",
+                    f"Found backlog issue #{issue.iid}: {sanitize_for_log(issue.title)}",
                 )
                 self.state.set_processing(project.project_id, True)
                 self.processor.process_issue(project, issue)
@@ -222,7 +222,8 @@ class Watcher:
             and latest_note.author_username != self.config.gitlab_username
         ):
             self._log(
-                project.project_id, f"New comment on MR !{mr.iid}: {latest_note.body}"
+                project.project_id,
+                f"New comment on MR !{mr.iid}: {sanitize_for_log(latest_note.body)}",
             )
             self.state.set_processing(project.project_id, True)
             self.processor.process_comment(project, mr, latest_note.body)
