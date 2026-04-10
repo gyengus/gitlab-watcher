@@ -199,3 +199,26 @@ PROJECT_DIRS=(
 
     assert config.ai_tool_mode == "ollama"
     assert config.ai_tool_custom_command == ""
+
+
+def test_load_config_with_timeout(tmp_path: Path) -> None:
+    """Test loading config with AI_TOOL_TIMEOUT."""
+    config_file = tmp_path / "gitlab_watcher.conf"
+    config_file.write_text(
+        """
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="test-token"
+AI_TOOL_TIMEOUT=1234
+PROJECT_DIRS=(
+    "{}"
+)
+""".format(tmp_path / "project")
+    )
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+
+    config = load_config(str(config_file))
+
+    assert config.ai_tool_timeout == 1234
