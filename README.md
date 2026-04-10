@@ -90,6 +90,9 @@ POLL_INTERVAL=30
 # AI Tool implementation style (ollama, direct, opencode, custom)
 AI_TOOL_MODE="ollama"
 
+# Maximum execution time for AI tool in seconds (default: 3600 / 1 hour)
+AI_TOOL_TIMEOUT=3600
+
 # List of absolute paths to project directories to monitor
 PROJECT_DIRS=(
   "/path/to/project1"
@@ -113,14 +116,19 @@ The watcher supports multiple AI tools:
 |------|-------------|
 | `ollama` | Launches Claude via Ollama (requires both `ollama` and `claude`) (default) |
 | `direct` | Direct Claude CLI execution (`claude`) |
-| `opencode` | Opencode CLI execution (`opencode`) |
+| `opencode` | Opencode CLI execution using `run` subcommand |
 | `custom` | Custom command for any AI tool |
 
 Configure in `config.conf`:
 
 ```bash
 AI_TOOL_MODE="ollama"  # or "direct", "opencode", "custom"
+AI_TOOL_TIMEOUT=3600   # default is 1 hour
 ```
+
+### Timeout Diagnostics
+
+If an AI tool exceeds the configured `AI_TOOL_TIMEOUT`, the watcher will attempt to capture and display any partial output (`stdout`/`stderr`) generated before the process was terminated. This helps in diagnosing why a tool might be hanging or taking longer than expected.
 
 ## Development
 
