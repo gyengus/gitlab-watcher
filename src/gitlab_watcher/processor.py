@@ -30,8 +30,8 @@ MAX_DESCRIPTION_LENGTH = 50000
 MAX_SLUG_LENGTH = 50
 MAX_BRANCH_LENGTH = 100
 
-# Claude CLI timeout
-CLAUDE_CLI_TIMEOUT_SECONDS = 600
+# Default AI tool timeout (1 hour)
+DEFAULT_AI_TOOL_TIMEOUT = 3600
 
 
 class Processor:
@@ -47,6 +47,7 @@ class Processor:
         label_review: str,
         ai_tool_mode: str = "ollama",
         ai_tool_custom_command: str = "",
+        ai_tool_timeout: int = DEFAULT_AI_TOOL_TIMEOUT,
         default_branch: str = "master",
         git_factory: Callable[[Path], GitOperations] = GitOps,
     ) -> None:
@@ -61,6 +62,7 @@ class Processor:
             label_review: Label for issues under review
             ai_tool_mode: AI tool mode ("ollama", "direct", "custom", "opencode", or "opencode-custom")
             ai_tool_custom_command: Custom command for AI tool (used when mode is "custom")
+            ai_tool_timeout: Timeout for AI tool in seconds
             default_branch: Default branch name (default: "master")
             git_factory: Factory function to create GitOperations instances (for dependency injection)
         """
@@ -72,6 +74,7 @@ class Processor:
         self.label_review = label_review
         self.ai_tool_mode = ai_tool_mode
         self.ai_tool_custom_command = ai_tool_custom_command
+        self.ai_tool_timeout = ai_tool_timeout
         self.default_branch = default_branch
         self.git_factory = git_factory
         self.logger = logging.getLogger(__name__)
@@ -181,7 +184,7 @@ class Processor:
         elif self.ai_tool_mode == "direct":
             cmd = ["claude", "-p", safe_prompt, "--permission-mode", "acceptEdits"]
         elif self.ai_tool_mode == "opencode":
-            cmd = ["opencode", "--prompt", safe_prompt]
+            cmd = ["opencode", "run", safe_prompt, "--print-logs"]
         elif self.ai_tool_mode == "custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
@@ -202,13 +205,39 @@ class Processor:
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=CLAUDE_CLI_TIMEOUT_SECONDS,
+                timeout=self.ai_tool_timeout,
             )
             return result.returncode == 0, result.stdout + result.stderr
-        except subprocess.TimeoutExpired:
-            return False, "Claude timed out"
+        except subprocess.TimeoutExpired as e:
+            output = ""
+            if e.stdout:
+                output += (
+                    "\n--- STDOUT (partial) ---\n"
+                    + (
+                        e.stdout.decode("utf-8")
+                        if isinstance(e.stdout, bytes)
+                        else e.stdout
+                    )
+                    + "\n"
+                )
+            if e.stderr:
+                output += (
+                    "\n--- STDERR (partial) ---\n"
+                    + (
+                        e.stderr.decode("utf-8")
+                        if isinstance(e.stderr, bytes)
+                        else e.stderr
+                    )
+                    + "\n"
+                )
+
+            tool_name = self.ai_tool_mode
+            if tool_name == "direct":
+                tool_name = "Claude"
+
+            return False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.{output}"
         except FileNotFoundError:
-            return False, "Claude CLI not found"
+            return False, f"AI tool CLI ({cmd[0]}) not found"
 
     def process_issue(
         self,

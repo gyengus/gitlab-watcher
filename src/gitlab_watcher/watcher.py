@@ -89,6 +89,7 @@ class Watcher:
             label_review=self.config.label_review,
             ai_tool_mode=self.config.ai_tool_mode,
             ai_tool_custom_command=self.config.ai_tool_custom_command,
+            ai_tool_timeout=self.config.ai_tool_timeout,
             default_branch=self.config.default_branch,
         )
 

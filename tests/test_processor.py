@@ -131,12 +131,32 @@ class TestProcessorRunClaude:
         project_config: ProjectConfig,
     ) -> None:
         """Test Claude timeout."""
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="ollama", timeout=600)
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="ollama", timeout=3600)
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
 
         assert success is False
         assert "timed out" in output.lower()
+        assert "ollama" in output
+
+
+    @patch("subprocess.run")
+    def test_run_claude_timeout_with_output(
+        self,
+        mock_run: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test Claude timeout with partial output."""
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd="ollama", timeout=3600, output="Partial output", stderr="Some error"
+        )
+
+        success, output = processor._run_claude("Fix the bug", project_config.path)
+
+        assert success is False
+        assert "Partial output" in output
+        assert "Some error" in output
 
     @patch("subprocess.run")
     def test_run_claude_not_found(
@@ -304,8 +324,9 @@ class TestProcessorAIToolModes:
         assert success is True
         args = mock_run.call_args[0][0]
         assert args[0] == "opencode"
-        assert args[1] == "--prompt"
-        assert args[2] == "Fix the bug"
+        assert args[1] == "run"
+        assert "Fix the bug" in args
+        assert "--print-logs" in args
 
     def test_run_claude_invalid_mode(
         self,
