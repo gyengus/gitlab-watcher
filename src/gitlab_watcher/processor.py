@@ -179,9 +179,9 @@ class Processor:
                 safe_prompt,
             ]
         elif self.ai_tool_mode == "direct":
-            cmd = ["claude", "-p", "--permission-mode", "acceptEdits", "--", safe_prompt]
+            cmd = ["claude", "-p", safe_prompt, "--permission-mode", "acceptEdits"]
         elif self.ai_tool_mode == "opencode":
-            cmd = ["opencode", "--", safe_prompt]
+            cmd = ["opencode", "--prompt", safe_prompt]
         elif self.ai_tool_mode == "custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
