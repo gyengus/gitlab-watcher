@@ -45,9 +45,12 @@ class GitOps:
                 return True, ""
 
             if create:
-                if self.branch_exists(branch):
+                # Try checking out normally first (if it exists)
+                try:
                     self._run("checkout", branch)
-                else:
+                    return True, ""
+                except subprocess.CalledProcessError:
+                    # If normal checkout fails, try creating it
                     self._run("checkout", "-b", branch)
             else:
                 self._run("checkout", branch)
@@ -106,9 +109,9 @@ class GitOps:
     def branch_exists(self, branch: str) -> bool:
         """Check if a branch exists locally."""
         try:
-            self._run("rev-parse", "--verify", branch, check=False)
-            return True
-        except subprocess.CalledProcessError:
+            result = self._run("rev-parse", "--verify", branch, check=False)
+            return result.returncode == 0
+        except Exception:
             return False
 
     def get_current_branch(self) -> str | None:
