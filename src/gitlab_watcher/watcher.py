@@ -44,11 +44,40 @@ class Watcher:
 
         # Setup logging
         log_level = logging.DEBUG if verbose else logging.INFO
+        log_format = "%(asctime)s [%(levelname)s] %(message)s"
+
         logging.basicConfig(
             level=log_level,
-            format="%(asctime)s [%(levelname)s] %(message)s",
+            format=log_format,
         )
         self.logger = logging.getLogger(__name__)
+
+        # Setup file logging with fallback
+        log_path = Path(self.config.log_file)
+        try:
+            # Ensure the directory exists
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # Check if file is writable (or can be created)
+            with open(log_path, "a"):
+                pass
+            file_handler = logging.FileHandler(log_path)
+            file_handler.setFormatter(logging.Formatter(log_format))
+            logging.getLogger().addHandler(file_handler)
+        except (PermissionError, OSError) as e:
+            # Fallback to work directory in /tmp
+            fallback_dir = Path("/tmp/gitlab-watcher")
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            fallback_path = fallback_dir / "watcher.log"
+            try:
+                file_handler = logging.FileHandler(fallback_path)
+                file_handler.setFormatter(logging.Formatter(log_format))
+                logging.getLogger().addHandler(file_handler)
+                self.logger.warning(
+                    f"Could not use log file {log_path} ({e}). "
+                    f"Falling back to {fallback_path}"
+                )
+            except (PermissionError, OSError) as e2:
+                self.logger.error(f"Failed to setup file logging: {e2}")
 
         # Add sensitive data filter to prevent token leakage in logs
         sensitive_filter = SensitiveDataFilter()
@@ -56,7 +85,7 @@ class Watcher:
         # Also add to root logger for comprehensive coverage
         logging.getLogger().addFilter(sensitive_filter)
 
-        # Create work directory
+        # Create work directory (for state files)
         self.work_dir = Path("/tmp/gitlab-watcher")
         self.work_dir.mkdir(parents=True, exist_ok=True)
 

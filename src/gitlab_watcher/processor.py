@@ -4,6 +4,9 @@ import logging
 import re
 import shlex
 import subprocess
+import threading
+import queue
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -184,7 +187,15 @@ class Processor:
         elif self.ai_tool_mode == "direct":
             cmd = ["claude", "-p", safe_prompt, "--permission-mode", "acceptEdits"]
         elif self.ai_tool_mode == "opencode":
-            cmd = ["opencode", "run", safe_prompt, "--print-logs"]
+            cmd = [
+                "opencode",
+                "run",
+                safe_prompt,
+                "--print-logs",
+                "--thinking",
+                "--log-level",
+                "DEBUG",
+            ]
         elif self.ai_tool_mode == "custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
@@ -199,45 +210,76 @@ class Processor:
 
         try:
             env = {"CLAUDECODE": ""}
-            result = subprocess.run(
+            self.logger.info(
+                f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s"
+            )
+
+            process = subprocess.Popen(
                 cmd,
                 cwd=repo_path,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout
                 text=True,
                 env=env,
-                timeout=self.ai_tool_timeout,
+                bufsize=1,  # Line buffered
             )
-            return result.returncode == 0, result.stdout + result.stderr
-        except subprocess.TimeoutExpired as e:
-            output = ""
-            if e.stdout:
-                output += (
-                    "\n--- STDOUT (partial) ---\n"
-                    + (
-                        e.stdout.decode("utf-8")
-                        if isinstance(e.stdout, bytes)
-                        else e.stdout
-                    )
-                    + "\n"
-                )
-            if e.stderr:
-                output += (
-                    "\n--- STDERR (partial) ---\n"
-                    + (
-                        e.stderr.decode("utf-8")
-                        if isinstance(e.stderr, bytes)
-                        else e.stderr
-                    )
-                    + "\n"
-                )
 
-            tool_name = self.ai_tool_mode
-            if tool_name == "direct":
-                tool_name = "Claude"
+            all_output = []
+            output_queue: queue.Queue = queue.Queue()
 
-            return False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.{output}"
+            def reader(pipe, q):
+                try:
+                    for line in iter(pipe.readline, ""):
+                        q.put(line)
+                finally:
+                    pipe.close()
+
+            thread = threading.Thread(target=reader, args=(process.stdout, output_queue))
+            thread.daemon = True
+            thread.start()
+
+            start_time = time.time()
+            while True:
+                try:
+                    # Check for output every 100ms
+                    line = output_queue.get(timeout=0.1)
+                    all_output.append(line)
+
+                    # Log to watcher log in real-time
+                    stripped = line.strip()
+                    if stripped:
+                        self.logger.debug(f"[{self.ai_tool_mode}] {stripped}")
+                except queue.Empty:
+                    if process.poll() is not None:
+                        # Process finished
+                        break
+
+                # Check for timeout
+                if time.time() - start_time > self.ai_tool_timeout:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+
+                    captured = "".join(all_output)
+                    tool_name = (
+                        "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
+                    )
+                    return (
+                        False,
+                        f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n\n"
+                        f"--- Captured Output ---\n{captured}",
+                    )
+
+            # Cleanup thread (it should finish since EOF reached)
+            thread.join(timeout=1)
+
+            return process.returncode == 0, "".join(all_output)
         except FileNotFoundError:
             return False, f"AI tool CLI ({cmd[0]}) not found"
+        except Exception as e:
+            return False, f"AI tool execution failed ({self.ai_tool_mode}): {str(e)}"
 
     def process_issue(
         self,

@@ -93,6 +93,9 @@ AI_TOOL_MODE="ollama"
 # Maximum execution time for AI tool in seconds (default: 3600 / 1 hour)
 AI_TOOL_TIMEOUT=3600
 
+# Path to log file (default: /var/log/gitlab-watcher.log)
+LOG_FILE="/var/log/gitlab-watcher.log"
+
 # List of absolute paths to project directories to monitor
 PROJECT_DIRS=(
   "/path/to/project1"
