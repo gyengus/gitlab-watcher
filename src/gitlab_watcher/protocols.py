@@ -22,7 +22,7 @@ class GitOperations(Protocol):
         """
         ...
 
-    def checkout(self, branch: str, create: bool = False) -> bool:
+    def checkout(self, branch: str, create: bool = False) -> tuple[bool, str]:
         """Checkout a branch.
 
         Args:
@@ -30,7 +30,7 @@ class GitOperations(Protocol):
             create: Create branch if it doesn't exist
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, error_message)
         """
         ...
 

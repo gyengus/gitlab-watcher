@@ -384,7 +384,7 @@ class TestProcessorProcessIssue:
         """Test successful issue processing."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git.checkout.return_value = True
+        mock_git.checkout.return_value = (True, "")
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -437,7 +437,7 @@ class TestProcessorProcessIssue:
         """Test issue processing when branch creation fails."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git.checkout.return_value = False
+        mock_git.checkout.return_value = (False, "Error")
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -472,7 +472,7 @@ class TestProcessorProcessIssue:
         """Test issue processing when AI tool fails."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git.checkout.return_value = True
+        mock_git.checkout.return_value = (True, "")
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -518,7 +518,7 @@ class TestProcessorProcessComment:
         """Test successful comment processing."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git.checkout.return_value = True
+        mock_git.checkout.return_value = (True, "")
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -559,7 +559,7 @@ class TestProcessorProcessComment:
         """Test comment processing when checkout fails."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git.checkout.return_value = False
+        mock_git.checkout.return_value = (False, "Error")
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -593,7 +593,7 @@ class TestProcessorProcessComment:
         """Test comment processing when AI tool fails."""
         # Mock GitOps
         mock_git = MagicMock()
-        mock_git.checkout.return_value = True
+        mock_git.checkout.return_value = (True, "")
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(

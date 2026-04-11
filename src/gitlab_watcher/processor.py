@@ -337,10 +337,12 @@ class Processor:
         git.checkout(self.default_branch)
         git.pull()
 
-        if not git.checkout(branch, create=True):
+        success, error = git.checkout(branch, create=True)
+        if not success:
             self.discord.notify_error(
                 project.name,
                 f"Could not create branch `{branch}`",
+                details=error,
             )
             self.state.set_processing(project.project_id, False)
             return False
@@ -430,10 +432,12 @@ Do not add Co-Authored-By signature to commits."""
 
         # Switch to MR branch
         git.fetch()
-        if not git.checkout(mr.source_branch):
+        success, error = git.checkout(mr.source_branch)
+        if not success:
             self.discord.notify_error(
                 project.name,
                 f"Could not checkout branch `{mr.source_branch}`",
+                details=error,
             )
             self.state.set_processing(project.project_id, False)
             return False

@@ -33,16 +33,28 @@ class GitOps:
         except subprocess.CalledProcessError:
             return False
 
-    def checkout(self, branch: str, create: bool = False) -> bool:
-        """Checkout a branch, optionally creating it."""
+    def checkout(self, branch: str, create: bool = False) -> tuple[bool, str]:
+        """Checkout a branch, optionally creating it.
+
+        If already on the branch, does nothing.
+        If create=True and branch exists, just switches to it.
+        """
         try:
+            current = self.get_current_branch()
+            if current == branch:
+                return True, ""
+
             if create:
-                self._run("checkout", "-b", branch)
+                if self.branch_exists(branch):
+                    self._run("checkout", branch)
+                else:
+                    self._run("checkout", "-b", branch)
             else:
                 self._run("checkout", branch)
-            return True
-        except subprocess.CalledProcessError:
-            return False
+            return True, ""
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr.strip() if e.stderr else str(e)
+            return False, error_msg
 
     def pull(self, remote: str = "origin", branch: str | None = None) -> bool:
         """Pull from remote."""
