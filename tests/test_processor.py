@@ -98,13 +98,13 @@ def sample_mr() -> MergeRequest:
 
 
 class TestProcessorRunClaude:
-    """Tests for the _run_claude method."""
+    """Tests for the _run_ai_tool method."""
 
     @patch("subprocess.Popen")
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_claude_success(
+    def test_run_ai_tool_success(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -122,7 +122,7 @@ class TestProcessorRunClaude:
         mock_popen.return_value = mock_process
         mock_getpgid.return_value = 5678
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is True
         assert "Done" in output
@@ -132,7 +132,7 @@ class TestProcessorRunClaude:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_claude_failure(
+    def test_run_ai_tool_failure(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -150,7 +150,7 @@ class TestProcessorRunClaude:
         mock_popen.return_value = mock_process
         mock_getpgid.return_value = 5678
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is False
         assert "Error" in output
@@ -161,7 +161,7 @@ class TestProcessorRunClaude:
     @patch("time.sleep")
     @patch("os.getpgid")
     @patch("os.killpg")
-    def test_run_claude_timeout(
+    def test_run_ai_tool_timeout(
         self,
         mock_killpg: Mock,
         mock_getpgid: Mock,
@@ -182,7 +182,7 @@ class TestProcessorRunClaude:
         # Mock time to exceed timeout. We need enough values for logging and the wait loop.
         mock_time.side_effect = [0, 0, 5000, 5001, 5002, 5003, 5004, 5005, 5006]
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is False
         assert "timed out" in output.lower()
@@ -190,7 +190,7 @@ class TestProcessorRunClaude:
         mock_killpg.assert_any_call(5678, signal.SIGKILL)
 
     @patch("subprocess.Popen")
-    def test_run_claude_not_found(
+    def test_run_ai_tool_not_found(
         self,
         mock_popen: Mock,
         processor: Processor,
@@ -199,7 +199,7 @@ class TestProcessorRunClaude:
         """Test Claude CLI not found."""
         mock_popen.side_effect = FileNotFoundError()
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is False
         assert "not found" in output.lower()
@@ -212,7 +212,7 @@ class TestProcessorAIToolModes:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_claude_ollama_mode(
+    def test_run_ai_tool_ollama_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -242,7 +242,7 @@ class TestProcessorAIToolModes:
             ai_tool_mode="ollama",
         )
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is True
         args = mock_popen.call_args[0][0]
@@ -254,7 +254,7 @@ class TestProcessorAIToolModes:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_claude_direct_mode(
+    def test_run_ai_tool_direct_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -284,7 +284,7 @@ class TestProcessorAIToolModes:
             ai_tool_mode="direct",
         )
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is True
         args = mock_popen.call_args[0][0]
@@ -298,7 +298,7 @@ class TestProcessorAIToolModes:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_claude_custom_mode(
+    def test_run_ai_tool_custom_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -329,7 +329,7 @@ class TestProcessorAIToolModes:
             ai_tool_custom_command="my-ai --prompt {prompt} --dir {cwd}",
         )
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is True
         args = mock_popen.call_args[0][0]
@@ -343,7 +343,7 @@ class TestProcessorAIToolModes:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_claude_opencode_mode(
+    def test_run_ai_tool_opencode_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -372,20 +372,26 @@ class TestProcessorAIToolModes:
             label_review="Review",
             ai_tool_mode="opencode",
         )
-
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is True
         args = mock_popen.call_args[0][0]
         assert args[0] == "opencode"
         assert args[1] == "run"
+        
+        # Verify non-interactive environment variables
+        kwargs = mock_popen.call_args[1]
+        assert kwargs["env"]["CI"] == "true"
+        assert kwargs["env"]["PYTHONUNBUFFERED"] == "1"
+        assert kwargs["env"]["DEBIAN_FRONTEND"] == "noninteractive"
+        assert kwargs["stdin"] == subprocess.DEVNULL
         assert "Fix the bug" in args
 
     @patch("subprocess.Popen")
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_claude_opencode_custom_mode(
+    def test_run_ai_tool_opencode_custom_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -416,7 +422,7 @@ class TestProcessorAIToolModes:
             ai_tool_custom_command="my-opencode --p {prompt}",
         )
 
-        success, output = processor._run_claude("Fix the bug", project_config.path)
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is True
         args = mock_popen.call_args[0][0]

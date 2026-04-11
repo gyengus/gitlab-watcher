@@ -159,7 +159,7 @@ class Processor:
 
         return branch or "auto-branch"
 
-    def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
+    def _run_ai_tool(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
         """Run AI tool CLI with a prompt based on configured mode.
 
         Args:
@@ -258,7 +258,7 @@ class Processor:
             thread = threading.Thread(
                 target=reader, 
                 args=(process.stdout, output_queue),
-                name=f"ClaudeReader-{process.pid}"
+                name=f"AiToolReader-{process.pid}"
             )
             thread.daemon = True
             thread.start()
@@ -425,8 +425,8 @@ Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits."""
 
-        # Run Claude
-        success, output = self._run_claude(prompt, project.path)
+        # Run AI tool
+        success, output = self._run_ai_tool(prompt, project.path)
 
         if success:
             # Push branch
@@ -527,8 +527,8 @@ Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits."""
 
-        # Run Claude
-        success, output = self._run_claude(prompt, project.path)
+        # Run AI tool
+        success, output = self._run_ai_tool(prompt, project.path)
 
         if success:
             # Push changes
