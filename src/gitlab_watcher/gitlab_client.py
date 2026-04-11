@@ -58,6 +58,7 @@ class Note:
     id: int
     body: str
     author_username: str
+    system: bool = False
 
 
 class GitLabClient:
@@ -265,6 +266,7 @@ class GitLabClient:
                     id=item["id"],
                     body=item.get("body", ""),
                     author_username=item.get("author", {}).get("username", ""),
+                    system=item.get("system", False),
                 )
                 for item in cached
             ]
@@ -282,6 +284,7 @@ class GitLabClient:
                 id=item["id"],
                 body=item.get("body", ""),
                 author_username=item.get("author", {}).get("username", ""),
+                system=item.get("system", False),
             )
             for item in data
         ]

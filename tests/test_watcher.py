@@ -725,9 +725,43 @@ class TestWatcherCheckMRStatus:
             branch=sample_mr.source_branch,
         )
 
+        # Should not process the same comment again
+        mock_processor.process_comment.assert_not_called()
+
+    def test_check_mr_status_ignores_system_notes(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test check_mr_status ignores system-generated notes (e.g. MR approval)."""
+        # System note (e.g. "approved this merge request")
+        system_note = Note(
+            id=123,
+            body="approved this merge request",
+            author_username="reviewer",
+            system=True,  # System note flag
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [system_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
         watcher.check_mr_status(project)
 
-        # Should not process the same comment again
+        # Should NOT process system notes
+        mock_processor.process_comment.assert_not_called()
         mock_processor.process_comment.assert_not_called()
 
 

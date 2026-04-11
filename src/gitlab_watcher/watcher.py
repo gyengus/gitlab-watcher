@@ -265,6 +265,7 @@ class Watcher:
             latest_note
             and latest_note.id != old_note_id
             and latest_note.author_username != self.config.gitlab_username
+            and not latest_note.system
         ):
             self._log(
                 project.project_id,
