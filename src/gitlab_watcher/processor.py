@@ -397,12 +397,25 @@ class Processor:
         )
 
         # Create branch
-        git.fetch()
-        git.checkout(self.default_branch)
-        git.pull()
+        try:
+            self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull)")
+            git.fetch()
+            git.checkout(self.default_branch)
+            git.pull()
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
+            self.discord.notify_error(
+                project.name,
+                "Git preparation failed (fetch/checkout/pull)",
+                details=str(e),
+            )
+            self.state.set_processing(project.project_id, False)
+            return False
 
+        self.logger.info(f"[{project.name}] Creating branch: {branch}")
         success, error = git.checkout(branch, create=True)
         if not success:
+            self.logger.error(f"[{project.name}] Could not create branch {branch}: {error}")
             self.discord.notify_error(
                 project.name,
                 f"Could not create branch `{branch}`",
@@ -427,9 +440,21 @@ Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits."""
 
         # Run AI tool
-        success, output = self._run_ai_tool(prompt, project.path)
+        try:
+            self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
+            success, output = self._run_ai_tool(prompt, project.path)
+            
+            if not success:
+                self.logger.error(f"[{project.name}] AI tool failed for issue #{issue.iid}: {output}")
+                self.discord.notify_error(
+                    project.name,
+                    f"AI tool failed for issue #{issue.iid}",
+                    details=output,
+                )
+                return False
 
-        if success:
+            self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
+            
             # Push branch
             git.push("origin", branch, set_upstream=True)
 
@@ -460,23 +485,17 @@ Do not add Co-Authored-By signature to commits."""
                     project.name,
                     "Changes done but MR creation failed",
                 )
-        else:
-            # Format error details for Discord with a code block
-            error_details = sanitize_for_log(output, preserve_newlines=True)
-            if error_details:
-                # Limit length for Discord (2000 chars total limit)
-                if len(error_details) > 1800:
-                    error_details = error_details[:1800] + "... (truncated)"
-                error_details = f"```\n{error_details}\n```"
-            
+            return True
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Processing failed for issue #{issue.iid}",
-                error_details,
+                f"Unexpected error during AI tool execution (issue #{issue.iid})",
+                details=str(e),
             )
-
-        self.state.set_processing(project.project_id, False)
-        return success
+            return False
+        finally:
+            self.state.set_processing(project.project_id, False)
 
     def process_comment(
         self,
@@ -503,18 +522,20 @@ Do not add Co-Authored-By signature to commits."""
         )
 
         # Switch to MR branch
-        git.fetch()
-        success, error = git.checkout(mr.source_branch)
-        if not success:
+        try:
+            self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull/rebase)")
+            git.fetch()
+            git.checkout(mr.source_branch)
+            git.pull("origin", mr.source_branch)
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Could not checkout branch `{mr.source_branch}`",
-                details=error,
+                "Git preparation failed (fetch/checkout/pull)",
+                details=str(e),
             )
             self.state.set_processing(project.project_id, False)
             return False
-
-        git.pull("origin", mr.source_branch)
 
         # Build prompt for Claude
         prompt = f"""You are working on a merge request titled: {mr.title}
@@ -529,9 +550,21 @@ Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits."""
 
         # Run AI tool
-        success, output = self._run_ai_tool(prompt, project.path)
+        try:
+            self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
+            success, output = self._run_ai_tool(prompt, project.path)
+            
+            if not success:
+                self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
+                self.discord.notify_error(
+                    project.name,
+                    f"AI tool failed for merge request !{mr.iid}",
+                    details=output,
+                )
+                return False
 
-        if success:
+            self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
+            
             # Push changes
             git.push("origin", mr.source_branch)
             self.discord.notify_changes_applied(
@@ -539,23 +572,17 @@ Do not add Co-Authored-By signature to commits."""
                 mr.title,
                 mr.web_url,
             )
-        else:
-            # Format error details for Discord with a code block
-            error_details = sanitize_for_log(output, preserve_newlines=True)
-            if error_details:
-                # Limit length for Discord
-                if len(error_details) > 1800:
-                    error_details = error_details[:1800] + "... (truncated)"
-                error_details = f"```\n{error_details}\n```"
-                
+            return True
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Processing failed for MR !{mr.iid}",
-                error_details,
+                f"Unexpected error during AI tool execution (MR !{mr.iid})",
+                details=str(e),
             )
-
-        self.state.set_processing(project.project_id, False)
-        return success
+            return False
+        finally:
+            self.state.set_processing(project.project_id, False)
 
     def cleanup_after_merge(
         self,
