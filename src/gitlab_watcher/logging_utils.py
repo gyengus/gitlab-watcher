@@ -53,13 +53,14 @@ class SensitiveDataFilter(logging.Filter):
         return text
 
 
-def sanitize_for_log(text: str) -> str:
+def sanitize_for_log(text: str, preserve_newlines: bool = False) -> str:
     """Sanitize string for logging to prevent log injection.
 
-    Removes newlines, carriage returns, tabs, and non-printable characters.
+    Removes tabs and non-printable characters. Optionally preserves newlines.
 
     Args:
         text: The string to sanitize
+        preserve_newlines: If True, keep \n and \r characters. Defaults to False.
 
     Returns:
         The sanitized string
@@ -67,11 +68,18 @@ def sanitize_for_log(text: str) -> str:
     if not text:
         return ""
 
-    # Replace newlines, carriage returns, and tabs with spaces
-    text = re.sub(r"[\r\n\t]+", " ", text)
+    if not preserve_newlines:
+        # Replace newlines, carriage returns, and tabs with spaces
+        text = re.sub(r"[\r\n\t]+", " ", text)
+    else:
+        # Replace only tabs with spaces
+        text = text.replace("\t", " ")
 
-    # Remove non-printable characters
-    text = "".join(c for c in text if c.isprintable())
+    # Remove non-printable characters except newlines/CR if preserved
+    if preserve_newlines:
+        text = "".join(c for c in text if c.isprintable() or c in "\r\n")
+    else:
+        text = "".join(c for c in text if c.isprintable())
 
     return text.strip()
 

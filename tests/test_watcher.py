@@ -68,7 +68,9 @@ def state_manager(tmp_path: Path) -> StateManager:
     """Create a state manager with temp directory."""
     work_dir = tmp_path / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
-    return StateManager(work_dir)
+    manager = StateManager(work_dir)
+    yield manager
+    manager.stop()
 
 
 @pytest.fixture

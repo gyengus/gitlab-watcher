@@ -42,6 +42,8 @@ class StateManager:
         self._save_timer: Optional[threading.Timer] = None
         self._save_delay = save_delay
         self._lock = threading.Lock()
+        self._stopped = False
+
 
     def _state_file(self, project_id: int) -> Path:
         """Get the state file path for a project."""
@@ -76,6 +78,8 @@ class StateManager:
     def _schedule_save(self, project_id: int) -> None:
         """Schedule a debounced save operation."""
         with self._lock:
+            if self._stopped:
+                return
             self._dirty.add(project_id)
             if self._save_timer is not None:
                 self._save_timer.cancel()
@@ -84,6 +88,21 @@ class StateManager:
                 self._flush_dirty,
             )
             self._save_timer.start()
+
+    def stop(self) -> None:
+        """Stop the state manager and cancel any pending timers."""
+        with self._lock:
+            self._stopped = True
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+
+    def __del__(self) -> None:
+        """Ensure timer is cancelled on deletion."""
+        try:
+            self.stop()
+        except Exception:
+            pass
 
     def _flush_dirty(self) -> None:
         """Save all dirty states."""

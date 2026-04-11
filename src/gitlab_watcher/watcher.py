@@ -45,33 +45,39 @@ class Watcher:
         # Setup logging
         log_level = logging.DEBUG if verbose else logging.INFO
         log_format = "%(asctime)s [%(levelname)s] %(message)s"
-
-        logging.basicConfig(
-            level=log_level,
-            format=log_format,
-        )
-        self.logger = logging.getLogger(__name__)
+        
+        # Only configure basic logging if not already configured (avoids issues in tests)
+        if not logging.getLogger().handlers:
+            logging.basicConfig(
+                level=log_level,
+                format=log_format,
+            )
+        
+        self.logger = logging.getLogger("gitlab_watcher")
+        self.logger.setLevel(log_level)
+        self.logger.propagate = True # Allow root logger to catch if configured
 
         # Setup file logging with fallback
+        self._log_handlers: list[logging.Handler] = []
         log_path = Path(self.config.log_file)
+        handler_path = None
+
         try:
             # Ensure the directory exists
             log_path.parent.mkdir(parents=True, exist_ok=True)
             # Check if file is writable (or can be created)
             with open(log_path, "a"):
                 pass
-            file_handler = logging.FileHandler(log_path)
-            file_handler.setFormatter(logging.Formatter(log_format))
-            logging.getLogger().addHandler(file_handler)
+            handler_path = log_path
         except (PermissionError, OSError) as e:
             # Fallback to work directory in /tmp
             fallback_dir = Path("/tmp/gitlab-watcher")
             fallback_dir.mkdir(parents=True, exist_ok=True)
             fallback_path = fallback_dir / "watcher.log"
             try:
-                file_handler = logging.FileHandler(fallback_path)
-                file_handler.setFormatter(logging.Formatter(log_format))
-                logging.getLogger().addHandler(file_handler)
+                with open(fallback_path, "a"):
+                    pass
+                handler_path = fallback_path
                 self.logger.warning(
                     f"Could not use log file {log_path} ({e}). "
                     f"Falling back to {fallback_path}"
@@ -79,11 +85,20 @@ class Watcher:
             except (PermissionError, OSError) as e2:
                 self.logger.error(f"Failed to setup file logging: {e2}")
 
-        # Add sensitive data filter to prevent token leakage in logs
-        sensitive_filter = SensitiveDataFilter()
-        self.logger.addFilter(sensitive_filter)
-        # Also add to root logger for comprehensive coverage
-        logging.getLogger().addFilter(sensitive_filter)
+        if handler_path:
+            file_handler = logging.FileHandler(handler_path)
+            file_handler.setFormatter(logging.Formatter(log_format))
+            # Add to our specific logger instead of root logger to avoid global leak in tests
+            self.logger.addHandler(file_handler)
+            self._log_handlers.append(file_handler)
+
+        # Add sensitive data filter
+        self._sensitive_filter = SensitiveDataFilter()
+        self.logger.addFilter(self._sensitive_filter)
+        
+        # In production mode (not tests), we might want to add to root logger
+        # but for now let's keep it to our logger to fix the memory leak.
+        # If the user really wants root coverage, they can add it once in cli.py.
 
         # Create work directory (for state files)
         self.work_dir = Path("/tmp/gitlab-watcher")
@@ -292,7 +307,23 @@ class Watcher:
         finally:
             # Ensure all pending state is saved before shutdown
             print("\nShutting down...")
+            self.stop()
+
+    def stop(self) -> None:
+        """Stop the watcher and cleanup resources."""
+        if hasattr(self, "state"):
             self.state.force_save_all()
+            self.state.stop()
+        
+        # Remove our handlers from the logger
+        if hasattr(self, "_log_handlers"):
+            for handler in self._log_handlers:
+                self.logger.removeHandler(handler)
+                handler.close()
+            self._log_handlers.clear()
+        
+        if hasattr(self, "_sensitive_filter"):
+            self.logger.removeFilter(self._sensitive_filter)
 
 
 __all__ = ["Watcher"]

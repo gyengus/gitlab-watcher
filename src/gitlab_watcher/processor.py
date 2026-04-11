@@ -3,9 +3,11 @@
 import logging
 import re
 import shlex
+import os
+import queue
+import signal
 import subprocess
 import threading
-import queue
 import time
 from pathlib import Path
 from typing import Callable
@@ -35,6 +37,7 @@ MAX_BRANCH_LENGTH = 100
 
 # Default AI tool timeout (1 hour)
 DEFAULT_AI_TOOL_TIMEOUT = 3600
+CLAUDE_CLI_TIMEOUT_SECONDS = DEFAULT_AI_TOOL_TIMEOUT
 
 
 class Processor:
@@ -196,6 +199,14 @@ class Processor:
                 "--log-level",
                 "DEBUG",
             ]
+        elif self.ai_tool_mode == "opencode-custom":
+            if not self.ai_tool_custom_command:
+                return False, "AI_TOOL_CUSTOM_COMMAND not set for opencode-custom mode"
+            cmd_parts = shlex.split(self.ai_tool_custom_command)
+            cmd = [
+                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path))
+                for part in cmd_parts
+            ]
         elif self.ai_tool_mode == "custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
@@ -209,7 +220,15 @@ class Processor:
             return False, f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}"
 
         try:
-            env = {"CLAUDECODE": ""}
+            # Setup environment for non-interactive execution
+            env = dict(os.environ)
+            env.update({
+                "CI": "true",
+                "PYTHONUNBUFFERED": "1",
+                "DEBIAN_FRONTEND": "noninteractive",
+                "CLAUDECODE": "",
+            })
+            
             self.logger.info(
                 f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s"
             )
@@ -218,10 +237,12 @@ class Processor:
                 cmd,
                 cwd=repo_path,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,  # Prevent interactive hangs
                 text=True,
                 env=env,
                 bufsize=1,  # Line buffered
+                preexec_fn=os.setsid,  # Create new process group for cleanup
             )
 
             all_output = []
@@ -234,52 +255,94 @@ class Processor:
                 finally:
                     pipe.close()
 
-            thread = threading.Thread(target=reader, args=(process.stdout, output_queue))
+            thread = threading.Thread(
+                target=reader, 
+                args=(process.stdout, output_queue),
+                name=f"ClaudeReader-{process.pid}"
+            )
             thread.daemon = True
             thread.start()
 
             start_time = time.time()
-            while True:
-                try:
-                    # Check for output every 100ms
-                    line = output_queue.get(timeout=0.1)
-                    all_output.append(line)
-
-                    # Log to watcher log in real-time
-                    stripped = line.strip()
-                    if stripped:
-                        self.logger.debug(f"[{self.ai_tool_mode}] {stripped}")
-                except queue.Empty:
-                    if process.poll() is not None:
-                        # Process finished
-                        break
-
-                # Check for timeout
-                if time.time() - start_time > self.ai_tool_timeout:
-                    process.terminate()
+            timed_out = False
+            try:
+                while True:
                     try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+                        # Check for output every 100ms
+                        line = output_queue.get(timeout=0.1)
+                        all_output.append(line)
 
-                    captured = "".join(all_output)
-                    tool_name = (
-                        "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
-                    )
-                    return (
-                        False,
-                        f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n\n"
-                        f"--- Captured Output ---\n{captured}",
-                    )
+                        # Log to watcher log in real-time
+                        stripped = line.strip()
+                        if stripped:
+                            self.logger.info(f"[{self.ai_tool_mode}] {stripped}")
+                    except queue.Empty:
+                        if process.poll() is not None:
+                            # Process finished
+                            break
 
-            # Cleanup thread (it should finish since EOF reached)
-            thread.join(timeout=1)
+                    # Check for timeout
+                    if time.time() - start_time > self.ai_tool_timeout:
+                        timed_out = True
+                        break
+            finally:
+                # Always cleanup the process group (including orphans)
+                try:
+                    pgid = os.getpgid(process.pid)
+                    # Use SIGTERM first
+                    os.killpg(pgid, signal.SIGTERM)
+                    
+                    # Give it a moment (up to 2s) to exit gracefully
+                    wait_start = time.time()
+                    while time.time() - wait_start < 2:
+                        if process.poll() is not None:
+                            break
+                        time.sleep(0.1)
+                    
+                    # If still running, use SIGKILL
+                    if process.poll() is None:
+                        os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    # Process or process group already gone
+                    pass
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up process group: {e}")
 
-            return process.returncode == 0, "".join(all_output)
+            # Ensure pipe is closed to unblock reader if process is gone
+            try:
+                process.stdout.close()
+            except Exception:
+                pass
+
+            # Wait for thread to finish reading remaining output
+            thread.join(timeout=2)
+            if thread.is_alive():
+                self.logger.warning(f"Reader thread for process {process.pid} still alive after join timeout")
+
+            full_output = "".join(all_output)
+            
+            if timed_out:
+                tool_name = (
+                    "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
+                )
+                self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
+                return (
+                    False,
+                    f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n\n"
+                    f"--- Captured Output ---\n{full_output}",
+                )
+
+            success = process.returncode == 0
+            if not success:
+                self.logger.error(f"AI tool failed with return code {process.returncode}:\n{full_output}")
+            
+            return success, full_output
         except FileNotFoundError:
             return False, f"AI tool CLI ({cmd[0]}) not found"
         except Exception as e:
-            return False, f"AI tool execution failed ({self.ai_tool_mode}): {str(e)}"
+            msg = f"AI tool execution failed ({self.ai_tool_mode}): {str(e)}"
+            self.logger.exception(msg)
+            return False, msg
 
     def process_issue(
         self,
@@ -397,10 +460,18 @@ Do not add Co-Authored-By signature to commits."""
                     "Changes done but MR creation failed",
                 )
         else:
+            # Format error details for Discord with a code block
+            error_details = sanitize_for_log(output, preserve_newlines=True)
+            if error_details:
+                # Limit length for Discord (2000 chars total limit)
+                if len(error_details) > 1800:
+                    error_details = error_details[:1800] + "... (truncated)"
+                error_details = f"```\n{error_details}\n```"
+            
             self.discord.notify_error(
                 project.name,
                 f"Processing failed for issue #{issue.iid}",
-                sanitize_for_log(output),
+                error_details,
             )
 
         self.state.set_processing(project.project_id, False)
@@ -468,10 +539,18 @@ Do not add Co-Authored-By signature to commits."""
                 mr.web_url,
             )
         else:
+            # Format error details for Discord with a code block
+            error_details = sanitize_for_log(output, preserve_newlines=True)
+            if error_details:
+                # Limit length for Discord
+                if len(error_details) > 1800:
+                    error_details = error_details[:1800] + "... (truncated)"
+                error_details = f"```\n{error_details}\n```"
+                
             self.discord.notify_error(
                 project.name,
                 f"Processing failed for MR !{mr.iid}",
-                sanitize_for_log(output),
+                error_details,
             )
 
         self.state.set_processing(project.project_id, False)

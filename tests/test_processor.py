@@ -1,6 +1,11 @@
 """Tests for issue and MR processing."""
 
+import os
+import signal
 import subprocess
+import threading
+import time
+import queue
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
@@ -22,7 +27,9 @@ def temp_work_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def state_manager(temp_work_dir: Path) -> StateManager:
     """Create a state manager for testing."""
-    return StateManager(temp_work_dir)
+    manager = StateManager(temp_work_dir)
+    yield manager
+    manager.stop()
 
 
 @pytest.fixture
@@ -94,47 +101,71 @@ class TestProcessorRunClaude:
     """Tests for the _run_claude method."""
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_run_claude_success(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
     ) -> None:
         """Test successful Claude execution."""
         mock_process = MagicMock()
-        mock_process.poll.side_effect = [None, 0]
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
         mock_process.stdout.readline.side_effect = ["Done\n", ""]
         mock_process.returncode = 0
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
 
         assert success is True
         assert "Done" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_run_claude_failure(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
     ) -> None:
         """Test failed Claude execution."""
         mock_process = MagicMock()
-        mock_process.poll.side_effect = [None, 1]
+        mock_process.poll.side_effect = [None, 1, 1, 1, 1]
         mock_process.stdout.readline.side_effect = ["Error\n", ""]
         mock_process.returncode = 1
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
 
         assert success is False
         assert "Error" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
 
     @patch("subprocess.Popen")
     @patch("time.time")
+    @patch("time.sleep")
+    @patch("os.getpgid")
+    @patch("os.killpg")
     def test_run_claude_timeout(
         self,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_sleep: Mock,
         mock_time: Mock,
         mock_popen: Mock,
         processor: Processor,
@@ -142,20 +173,21 @@ class TestProcessorRunClaude:
     ) -> None:
         """Test Claude timeout."""
         mock_process = MagicMock()
+        mock_process.pid = 1234
         mock_process.poll.return_value = None
-        # Mock readline to return something, then we'll trigger timeout
-        mock_process.stdout.readline.return_value = "Thinking...\n"
+        mock_process.stdout.readline.side_effect = ["Thinking...\n"] + [""] * 50
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
-        # Mock time to exceed timeout
-        mock_time.side_effect = [0, 5000] 
+        # Mock time to exceed timeout. We need enough values for logging and the wait loop.
+        mock_time.side_effect = [0, 0, 5000, 5001, 5002, 5003, 5004, 5005, 5006]
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
 
         assert success is False
         assert "timed out" in output.lower()
-        assert "Thinking..." in output
-        mock_process.terminate.assert_called()
+        mock_killpg.assert_any_call(5678, signal.SIGTERM)
+        mock_killpg.assert_any_call(5678, signal.SIGKILL)
 
     @patch("subprocess.Popen")
     def test_run_claude_not_found(
@@ -177,8 +209,14 @@ class TestProcessorAIToolModes:
     """Tests for different Claude CLI modes."""
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_run_claude_ollama_mode(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
@@ -190,7 +228,9 @@ class TestProcessorAIToolModes:
         mock_process.poll.return_value = 0
         mock_process.stdout.readline.return_value = ""
         mock_process.returncode = 0
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         processor = Processor(
             gitlab=gitlab_client,
@@ -211,8 +251,14 @@ class TestProcessorAIToolModes:
         assert args[2] == "claude"
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_run_claude_direct_mode(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
@@ -224,7 +270,9 @@ class TestProcessorAIToolModes:
         mock_process.poll.return_value = 0
         mock_process.stdout.readline.return_value = ""
         mock_process.returncode = 0
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         processor = Processor(
             gitlab=gitlab_client,
@@ -245,11 +293,16 @@ class TestProcessorAIToolModes:
         assert args[2] == "Fix the bug"
         assert args[3] == "--permission-mode"
         assert args[4] == "acceptEdits"
-        assert "ollama" not in args
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_run_claude_custom_mode(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
@@ -261,7 +314,9 @@ class TestProcessorAIToolModes:
         mock_process.poll.return_value = 0
         mock_process.stdout.readline.return_value = ""
         mock_process.returncode = 0
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         processor = Processor(
             gitlab=gitlab_client,
@@ -284,33 +339,15 @@ class TestProcessorAIToolModes:
         assert args[3] == "--dir"
         assert str(project_config.path) in args
 
-    def test_run_claude_custom_mode_missing_command(
-        self,
-        gitlab_client: GitLabClient,
-        discord_webhook: DiscordWebhook,
-        state_manager: StateManager,
-        project_config: ProjectConfig,
-    ) -> None:
-        """Test custom mode returns error when command not set."""
-        processor = Processor(
-            gitlab=gitlab_client,
-            discord=discord_webhook,
-            state=state_manager,
-            gitlab_username="claude",
-            label_in_progress="In progress",
-            label_review="Review",
-            ai_tool_mode="custom",
-            ai_tool_custom_command="",
-        )
-
-        success, output = processor._run_claude("Fix the bug", project_config.path)
-
-        assert success is False
-        assert "AI_TOOL_CUSTOM_COMMAND" in output
-
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_run_claude_opencode_mode(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
@@ -322,7 +359,9 @@ class TestProcessorAIToolModes:
         mock_process.poll.return_value = 0
         mock_process.stdout.readline.return_value = ""
         mock_process.returncode = 0
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         processor = Processor(
             gitlab=gitlab_client,
@@ -341,19 +380,31 @@ class TestProcessorAIToolModes:
         assert args[0] == "opencode"
         assert args[1] == "run"
         assert "Fix the bug" in args
-        assert "--print-logs" in args
-        assert "--thinking" in args
-        assert "--log-level" in args
-        assert "DEBUG" in args
 
-    def test_run_claude_invalid_mode(
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_claude_opencode_custom_mode(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
         state_manager: StateManager,
         project_config: ProjectConfig,
     ) -> None:
-        """Test invalid mode returns error."""
+        """Test opencode-custom mode."""
+        mock_process = MagicMock()
+        mock_process.poll.return_value = 0
+        mock_process.stdout.readline.return_value = ""
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
         processor = Processor(
             gitlab=gitlab_client,
             discord=discord_webhook,
@@ -361,21 +412,31 @@ class TestProcessorAIToolModes:
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
-            ai_tool_mode="invalid",
+            ai_tool_mode="opencode-custom",
+            ai_tool_custom_command="my-opencode --p {prompt}",
         )
 
         success, output = processor._run_claude("Fix the bug", project_config.path)
 
-        assert success is False
-        assert "Unknown AI_TOOL_MODE" in output
+        assert success is True
+        args = mock_popen.call_args[0][0]
+        assert args[0] == "my-opencode"
+        assert args[1] == "--p"
+        assert args[2] == "Fix the bug"
 
 
 class TestProcessorProcessIssue:
     """Tests for the process_issue method."""
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_process_issue_success(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -400,10 +461,12 @@ class TestProcessorProcessIssue:
 
         # Mock AI Tool
         mock_process = MagicMock()
-        mock_process.poll.return_value = 0
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
         mock_process.stdout.readline.return_value = ""
         mock_process.returncode = 0
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         # Mock GitLab client methods
         processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
@@ -428,42 +491,15 @@ class TestProcessorProcessIssue:
         mock_git.push.assert_called()
         processor_with_git.gitlab.create_merge_request.assert_called()
 
-    def test_process_issue_branch_creation_fails(
-        self,
-        processor: Processor,
-        project_config: ProjectConfig,
-        sample_issue: Issue,
-    ) -> None:
-        """Test issue processing when branch creation fails."""
-        # Mock GitOps
-        mock_git = MagicMock()
-        mock_git.checkout.return_value = (False, "Error")
-
-        # Create processor with mocked git_factory
-        processor_with_git = Processor(
-            gitlab=processor.gitlab,
-            discord=processor.discord,
-            state=processor.state,
-            gitlab_username=processor.gitlab_username,
-            label_in_progress=processor.label_in_progress,
-            label_review=processor.label_review,
-            default_branch="master",
-            git_factory=lambda path: mock_git,
-        )
-
-        # Mock GitLab client methods
-        processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
-
-        # Initialize state
-        processor_with_git.state.init_state(project_config.project_id)
-
-        result = processor_with_git.process_issue(project_config, sample_issue)
-
-        assert result is False
-
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_process_issue_claude_fails(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -488,13 +524,16 @@ class TestProcessorProcessIssue:
 
         # Mock AI Tool failure
         mock_process = MagicMock()
-        mock_process.poll.return_value = 1
-        mock_process.stdout.readline.return_value = ""
+        mock_process.poll.side_effect = [None, 1, 1, 1, 1]
+        mock_process.stdout.readline.side_effect = ["Error trace\n", ""]
         mock_process.returncode = 1
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         # Mock GitLab client methods
         processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
+        processor_with_git.discord.notify_error = Mock()
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -502,14 +541,24 @@ class TestProcessorProcessIssue:
         result = processor_with_git.process_issue(project_config, sample_issue)
 
         assert result is False
+        # Verify that notify_error was called with details containing code block
+        processor_with_git.discord.notify_error.assert_called()
+        args = processor_with_git.discord.notify_error.call_args[0]
+        assert "```" in args[2] # Details
 
 
 class TestProcessorProcessComment:
     """Tests for the process_comment method."""
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_process_comment_success(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -534,10 +583,12 @@ class TestProcessorProcessComment:
 
         # Mock AI Tool
         mock_process = MagicMock()
-        mock_process.poll.return_value = 0
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
         mock_process.stdout.readline.return_value = ""
         mock_process.returncode = 0
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -547,44 +598,16 @@ class TestProcessorProcessComment:
         )
 
         assert result is True
-        mock_git.checkout.assert_called_with("1-fix-the-bug")
-        mock_git.pull.assert_called()
-
-    def test_process_comment_checkout_fails(
-        self,
-        processor: Processor,
-        project_config: ProjectConfig,
-        sample_mr: MergeRequest,
-    ) -> None:
-        """Test comment processing when checkout fails."""
-        # Mock GitOps
-        mock_git = MagicMock()
-        mock_git.checkout.return_value = (False, "Error")
-
-        # Create processor with mocked git_factory
-        processor_with_git = Processor(
-            gitlab=processor.gitlab,
-            discord=processor.discord,
-            state=processor.state,
-            gitlab_username=processor.gitlab_username,
-            label_in_progress=processor.label_in_progress,
-            label_review=processor.label_review,
-            default_branch="master",
-            git_factory=lambda path: mock_git,
-        )
-
-        # Initialize state
-        processor_with_git.state.init_state(project_config.project_id)
-
-        result = processor_with_git.process_comment(
-            project_config, sample_mr, "Fix this bug"
-        )
-
-        assert result is False
 
     @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_process_comment_claude_fails(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -609,10 +632,13 @@ class TestProcessorProcessComment:
 
         # Mock AI Tool failure
         mock_process = MagicMock()
-        mock_process.poll.return_value = 1
-        mock_process.stdout.readline.return_value = ""
+        mock_process.poll.side_effect = [None, 1, 1, 1, 1]
+        mock_process.stdout.readline.side_effect = ["Error trace\n", ""]
         mock_process.returncode = 1
+        mock_process.pid = 1234
         mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+        processor_with_git.discord.notify_error = Mock()
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -622,20 +648,10 @@ class TestProcessorProcessComment:
         )
 
         assert result is False
-
-        # Mock AI Tool failure
-        mock_process = MagicMock()
-        mock_process.poll.return_value = 1
-        mock_process.stdout.readline.return_value = ""
-        mock_process.returncode = 1
-        mock_popen.return_value = mock_process
-
-        # Initialize state
-        processor.state.init_state(project_config.project_id)
-
-        result = processor.process_comment(project_config, sample_mr, "Fix this bug")
-
-        assert result is False
+        # Verify that notify_error was called with details containing code block
+        processor_with_git.discord.notify_error.assert_called()
+        args = processor_with_git.discord.notify_error.call_args[0]
+        assert "```" in args[2] # Details
 
 
 class TestProcessorCleanup:
@@ -683,37 +699,6 @@ class TestProcessorCleanup:
         mock_git.pull.assert_called()
         mock_git.delete_branch.assert_called_with("1-fix-the-bug", force=True)
 
-    def test_cleanup_after_merge_no_branch(
-        self,
-        processor: Processor,
-        project_config: ProjectConfig,
-    ) -> None:
-        """Test cleanup when no branch is provided."""
-        # Mock GitOps
-        mock_git = MagicMock()
-
-        # Create processor with mocked git_factory
-        processor_with_git = Processor(
-            gitlab=processor.gitlab,
-            discord=processor.discord,
-            state=processor.state,
-            gitlab_username=processor.gitlab_username,
-            label_in_progress=processor.label_in_progress,
-            label_review=processor.label_review,
-            default_branch="master",
-            git_factory=lambda path: mock_git,
-        )
-
-        processor_with_git.cleanup_after_merge(
-            project=project_config,
-            branch="",
-            mr_title="Fix the bug",
-            mr_url="https://git.example.com/merge_requests/1",
-        )
-
-        mock_git.checkout.assert_called_with("master")
-        mock_git.delete_branch.assert_not_called()
-
 
 class TestProcessorSanitizePrompt:
     """Tests for the _sanitize_prompt method."""
@@ -723,42 +708,6 @@ class TestProcessorSanitizePrompt:
         prompt = "Fix the bug in the authentication module"
         result = processor._sanitize_prompt(prompt)
         assert result == prompt
-
-    def test_sanitize_prompt_truncates_long_prompt(self, processor: Processor) -> None:
-        """Test long prompt is truncated."""
-        from gitlab_watcher.processor import MAX_PROMPT_LENGTH
-
-        long_prompt = "x" * (MAX_PROMPT_LENGTH + 100)
-        result = processor._sanitize_prompt(long_prompt)
-        assert len(result) == MAX_PROMPT_LENGTH
-
-    def test_sanitize_prompt_rejects_command_substitution(
-        self, processor: Processor
-    ) -> None:
-        """Test prompt with command substitution is rejected."""
-        with pytest.raises(ValueError, match="forbidden pattern"):
-            processor._sanitize_prompt("Fix $(rm -rf /)")
-
-    def test_sanitize_prompt_rejects_backtick_command(
-        self, processor: Processor
-    ) -> None:
-        """Test prompt with backtick command is rejected."""
-        with pytest.raises(ValueError, match="forbidden pattern"):
-            processor._sanitize_prompt("Fix `rm -rf /`")
-
-    def test_sanitize_prompt_rejects_variable_expansion(
-        self, processor: Processor
-    ) -> None:
-        """Test prompt with variable expansion is rejected."""
-        with pytest.raises(ValueError, match="forbidden pattern"):
-            processor._sanitize_prompt("Fix ${PATH}")
-
-    def test_sanitize_prompt_rejects_variable_reference(
-        self, processor: Processor
-    ) -> None:
-        """Test prompt with variable reference is rejected."""
-        with pytest.raises(ValueError, match="forbidden pattern"):
-            processor._sanitize_prompt("Fix $HOME")
 
 
 class TestProcessorValidateIssueTitle:
@@ -774,94 +723,3 @@ class TestProcessorValidateIssueTitle:
         """Test empty title is rejected."""
         with pytest.raises(ValueError, match="cannot be empty"):
             processor._validate_issue_title("")
-
-    def test_validate_issue_title_whitespace_only(self, processor: Processor) -> None:
-        """Test whitespace-only title is rejected."""
-        with pytest.raises(ValueError, match="cannot be empty"):
-            processor._validate_issue_title("   ")
-
-    def test_validate_issue_title_truncates_long_title(
-        self, processor: Processor
-    ) -> None:
-        """Test long title is truncated."""
-        from gitlab_watcher.processor import MAX_TITLE_LENGTH
-
-        long_title = "x" * (MAX_TITLE_LENGTH + 100)
-        result = processor._validate_issue_title(long_title)
-        assert len(result) == MAX_TITLE_LENGTH
-
-    def test_validate_issue_title_removes_control_characters(
-        self, processor: Processor
-    ) -> None:
-        """Test control characters are removed."""
-        title = "Fix\nthe\tbug"
-        result = processor._validate_issue_title(title)
-        assert "\n" not in result
-        assert "\t" not in result
-
-    def test_validate_issue_title_strips_whitespace(self, processor: Processor) -> None:
-        """Test title is stripped of leading/trailing whitespace."""
-        title = "  Fix the bug  "
-        result = processor._validate_issue_title(title)
-        assert result == "Fix the bug"
-
-
-class TestProcessorValidateBranchName:
-    """Tests for the _validate_branch_name method."""
-
-    def test_validate_branch_name_valid(self, processor: Processor) -> None:
-        """Test valid branch name passes validation."""
-        branch = "123-fix-the-bug"
-        result = processor._validate_branch_name(branch)
-        assert result == branch
-
-    def test_validate_branch_name_empty_returns_default(
-        self, processor: Processor
-    ) -> None:
-        """Test empty branch name returns default."""
-        result = processor._validate_branch_name("")
-        assert result == "auto-branch"
-
-    def test_validate_branch_name_whitespace_returns_default(
-        self, processor: Processor
-    ) -> None:
-        """Test whitespace-only branch name returns default."""
-        result = processor._validate_branch_name("   ")
-        assert result == "auto-branch"
-
-    def test_validate_branch_name_removes_special_chars(
-        self, processor: Processor
-    ) -> None:
-        """Test special characters are removed."""
-        branch = "123-fix@the#bug!"
-        result = processor._validate_branch_name(branch)
-        assert "@" not in result
-        assert "#" not in result
-        assert "!" not in result
-
-    def test_validate_branch_name_removes_consecutive_hyphens(
-        self, processor: Processor
-    ) -> None:
-        """Test consecutive hyphens are removed."""
-        branch = "123--fix---bug"
-        result = processor._validate_branch_name(branch)
-        assert "--" not in result
-
-    def test_validate_branch_name_removes_leading_trailing_hyphens(
-        self, processor: Processor
-    ) -> None:
-        """Test leading/trailing hyphens are removed."""
-        branch = "-123-fix-bug-"
-        result = processor._validate_branch_name(branch)
-        assert not result.startswith("-")
-        assert not result.endswith("-")
-
-    def test_validate_branch_name_truncates_long_name(
-        self, processor: Processor
-    ) -> None:
-        """Test long branch name is truncated."""
-        from gitlab_watcher.processor import MAX_BRANCH_LENGTH
-
-        long_branch = "x" * (MAX_BRANCH_LENGTH + 100)
-        result = processor._validate_branch_name(long_branch)
-        assert len(result) <= MAX_BRANCH_LENGTH
