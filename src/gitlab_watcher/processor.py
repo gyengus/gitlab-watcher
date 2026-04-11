@@ -23,10 +23,8 @@ from .state import StateManager
 # Security constants for prompt sanitization
 MAX_PROMPT_LENGTH = 10000
 FORBIDDEN_PATTERNS = [
-    r"\$\([^)]+\)",  # Command substitution $(...)
-    r"`[^`]+`",  # Backtick command `...`
-    r"\$\{[^}]+\}",  # Variable expansion ${...}
-    r"\$\w+",  # Variable reference $var
+    r"ignore\s+all\s+previous",
+    r"system\s+message",
 ]
 
 # Input validation constants
