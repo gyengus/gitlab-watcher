@@ -192,9 +192,9 @@ class Processor:
         elif self.ai_tool_mode == "opencode":
             cmd = [
                 "opencode",
+                "--print-logs",
                 "run",
                 safe_prompt,
-                "--print-logs",
                 "--thinking",
                 "--log-level",
                 "DEBUG",
@@ -221,6 +221,7 @@ class Processor:
 
         try:
             # Setup environment for non-interactive execution
+            # Start with current env and override/add specific flags
             env = dict(os.environ)
             env.update({
                 "CI": "true",

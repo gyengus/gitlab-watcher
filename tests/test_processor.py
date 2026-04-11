@@ -377,7 +377,8 @@ class TestProcessorAIToolModes:
         assert success is True
         args = mock_popen.call_args[0][0]
         assert args[0] == "opencode"
-        assert args[1] == "run"
+        assert args[1] == "--print-logs"
+        assert args[2] == "run"
         
         # Verify non-interactive environment variables
         kwargs = mock_popen.call_args[1]
