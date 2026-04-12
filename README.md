@@ -66,6 +66,18 @@ gitlab-watcher --verbose
 
 ## Configuration
 
+### Logging
+
+You can set the log verbosity in `gitlab-watcher.conf`:
+
+```bash
+# LOG_LEVEL options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL="DEBUG"
+```
+
+Command line `--verbose` or `-v` flags will override this and force DEBUG level.
+
+
 Create the default configuration directory:
 
 ```bash

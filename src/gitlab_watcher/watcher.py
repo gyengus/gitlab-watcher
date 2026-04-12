@@ -43,7 +43,11 @@ class Watcher:
         self.verbose = verbose
 
         # Setup logging
-        log_level = logging.DEBUG if verbose else logging.INFO
+        if verbose:
+            log_level = logging.DEBUG
+        else:
+            level_map = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR, "CRITICAL": logging.CRITICAL}
+            log_level = level_map.get(self.config.log_level, logging.INFO)
         log_format = "%(asctime)s [%(levelname)s] %(message)s"
         
         # Only configure basic logging if not already configured (avoids issues in tests)

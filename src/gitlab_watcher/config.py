@@ -36,6 +36,7 @@ class Config:
     ai_tool_custom_command: str = ""
     ai_tool_timeout: int = 3600
     log_file: str = "/var/log/gitlab-watcher.log"
+    log_level: str = "INFO"
     default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
@@ -177,7 +178,9 @@ def load_config(config_path: str) -> Config:
         ai_tool_custom_command=get_str("AI_TOOL_CUSTOM_COMMAND"),
         ai_tool_timeout=get_int("AI_TOOL_TIMEOUT", 3600),
         log_file=get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
+        log_level=get_str("LOG_LEVEL", "INFO").upper(),
     )
+
 
     # Get project directories
     project_dirs = raw_config.get("PROJECT_DIRS", [])
