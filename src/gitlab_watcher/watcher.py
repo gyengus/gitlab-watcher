@@ -271,7 +271,9 @@ class Watcher:
         old_note_id = state.last_note_id
 
         # Find and process the FIRST new valid comment
+        self.logger.debug(f"[{project.name}] MR !{mr.iid} checking {len(notes)} notes. old_note_id: {old_note_id}")
         for note in notes:
+            self.logger.debug(f"  Note {note.id} from {note.author_username}: '{note.body[:30]}...' (system={note.system}, emojis={note.award_emojis})")
             if note.id <= old_note_id:
                 continue
 
