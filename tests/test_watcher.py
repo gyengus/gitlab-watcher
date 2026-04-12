@@ -916,6 +916,84 @@ class TestWatcherExtractFromRemote:
 
         url, token = watcher._extract_from_remote(project.path)
 
-        # SSH URL pattern doesn't match HTTPS regex
-        assert url is None
+        # Now it SHOULD match because we added SSH support
+        assert url == "https://github.com"
         assert token is None
+
+
+@patch("gitlab_watcher.watcher.logging.FileHandler")
+@patch("gitlab_watcher.watcher.Path.mkdir")
+@patch("builtins.open")
+def test_logging_fallback(
+    mock_open: Mock,
+    mock_mkdir: Mock,
+    mock_file_handler: Mock,
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test logging fallback to /tmp when primary log file is not writable."""
+    mock_open.side_effect = [PermissionError("Perm denied"), MagicMock()]
+    
+    with caplog.at_level(logging.WARNING):
+        watcher = Watcher(
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+    
+    assert "Falling back to /tmp/gitlab-watcher/watcher.log" in caplog.text
+
+def test_run_loop_gitlab_error(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test main loop resilient to GitLabError."""
+    watcher = Watcher(
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    
+    watcher.check_mr_status = MagicMock(side_effect=[GitLabError("API Down"), KeyboardInterrupt()])
+    
+    with caplog.at_level(logging.ERROR):
+        watcher.run()
+    
+    assert "GitLab API Error: API Down" in caplog.text
+
+def test_stop_cleanup_resources(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: MagicMock,
+) -> None:
+    """Test cleanup of resources on stop."""
+    watcher = Watcher(
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    
+    mock_handler = MagicMock()
+    watcher.logger.addHandler(mock_handler)
+    watcher._log_handlers.append(mock_handler)
+    
+    watcher.stop()
+    
+    mock_handler.close.assert_called_once()
+    assert mock_handler not in watcher.logger.handlers

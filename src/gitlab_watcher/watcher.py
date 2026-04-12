@@ -116,8 +116,13 @@ class Watcher:
             first_project = self.config.projects[0]
             gitlab_url, gitlab_token = self._extract_from_remote(first_project.path)
 
-        if not gitlab_url or not gitlab_token:
-            raise ValueError("GitLab URL and token must be set in config or git remote")
+        if not gitlab_url:
+            raise ValueError("GitLab URL must be set in config or extractable from git remote")
+        if not gitlab_token:
+            raise ValueError(
+                f"GitLab token not found for {gitlab_url}. "
+                "If using SSH remotes, please provide the 'gitlab_token' in your configuration file."
+            )
 
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
@@ -156,11 +161,20 @@ class Watcher:
         # or: https://user:token@git.example.com/...
 
         # Extract URL
-        url_match = re.match(r"https?://([^@]+@)?([^/]+)", remote_url)
-        if not url_match:
+        host = None
+        # Try https:// format
+        url_match = re.match(r"https?://([^@]+@)?([^/:]+)", remote_url)
+        if url_match:
+            host = url_match.group(2)
+        else:
+            # Try git@host:repo or ssh://git@host[:port]/repo format
+            ssh_match = re.match(r"(?:ssh://)?git@([^:/]+)", remote_url)
+            if ssh_match:
+                host = ssh_match.group(1)
+
+        if not host:
             return None, None
 
-        host = url_match.group(2)
         url = f"https://{host}"
 
         # Extract token
