@@ -256,7 +256,6 @@ class Watcher:
         mrs = self.gitlab.get_merge_requests(
             project_id=project.project_id,
             state="opened",
-            author_username=self.config.gitlab_username,
         )
 
         if not mrs:
