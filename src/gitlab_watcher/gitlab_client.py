@@ -268,15 +268,18 @@ class GitLabClient:
             notes_data = response.json()
             notes = []
             for note in notes_data:
+                author = note.get("author", {})
+                username = author.get("username", "unknown")
                 # The GitLab API uses "award_emojis" (plural) in the Notes response
-                emojis = note.get("award_emojis") or note.get("award_emoji") or []
+                emojis_raw = note.get("award_emojis") or note.get("award_emoji") or []
+                
                 notes.append(
                     Note(
                         id=note["id"],
-                        body=note["body"],
-                        author_username=note["author"]["username"],
+                        body=note.get("body", ""),
+                        author_username=username,
                         system=note.get("system", False),
-                        award_emojis=[e["name"] for e in emojis]
+                        award_emojis=[e["name"] for e in emojis_raw if isinstance(e, dict) and "name" in e]
                     )
                 )
             return notes

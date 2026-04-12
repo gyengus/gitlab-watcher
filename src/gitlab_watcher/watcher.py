@@ -264,6 +264,7 @@ class Watcher:
 
         # Get comments and sort them locally to be sure (oldest first)
         notes = self.gitlab.get_notes(project.project_id, mr.iid)
+        self.logger.debug(f"[{project.name}] MR !{mr.iid} raw notes count: {len(notes)}")
         notes = sorted(notes, key=lambda n: n.id)
         
         # Save the old note_id
