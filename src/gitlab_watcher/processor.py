@@ -99,8 +99,13 @@ class Processor:
             prompt = prompt[:MAX_PROMPT_LENGTH]
 
         for pattern in FORBIDDEN_PATTERNS:
-            if re.search(pattern, prompt):
-                raise ValueError(f"Prompt contains forbidden pattern: {pattern}")
+            match = re.search(pattern, prompt)
+            if match:
+                matched_text = match.group(0)
+                # Truncate matched text if it's very long
+                if len(matched_text) > 100:
+                    matched_text = matched_text[:97] + "..."
+                raise ValueError(f"Prompt contains forbidden pattern: '{pattern}' (found matching text: '{matched_text}')")
 
         return prompt
 
