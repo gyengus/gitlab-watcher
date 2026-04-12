@@ -55,12 +55,12 @@ class MergeRequest:
 @dataclass
 class Note:
     """Represents a GitLab note (comment)."""
-
     id: int
     body: str
     author_username: str
-    system: bool = False
-    award_emojis: list[str] = field(default_factory=list)
+    system: bool
+    award_emojis: list[str]
+    discussion_id: str = ""
     noteable_type: Optional[str] = None
     noteable_iid: Optional[Any] = None
 
@@ -277,24 +277,18 @@ class GitLabClient:
             notes_data = response.json()
             notes = []
             for note in notes_data:
-                author = note.get("author", {})
-                username = author.get("username", "unknown")
-                # The GitLab API uses "award_emojis" (plural) in the Notes response
-                emojis_raw = note.get("award_emojis") or note.get("award_emoji") or []
-                
-                parsed_emojis = [e["name"] for e in emojis_raw if isinstance(e, dict) and "name" in e]
-                if parsed_emojis:
-                    self.logger.debug(f"Parsed emojis for note {note['id']}: {parsed_emojis}")
+                self.logger.debug(f"Parsed emojis for note {note['id']}: {note.get('award_emojis', [])}")
 
                 notes.append(
                     Note(
                         id=note["id"],
-                        body=note.get("body", ""),
-                        author_username=username,
-                        system=note.get("system", False),
-                        award_emojis=parsed_emojis,
+                        body=note["body"],
+                        author_username=note["author"]["username"],
+                        system=note["system"],
+                        award_emojis=[e["name"] for e in note.get("award_emojis", [])],
+                        discussion_id=note.get("discussion_id", ""),
                         noteable_type=note.get("noteable_type"),
-                        noteable_iid=note.get("noteable_iid")
+                        noteable_iid=note.get("noteable_iid"),
                     )
                 )
             return notes
@@ -367,9 +361,9 @@ class GitLabClient:
             self._cache.clear()
 
 
-    def get_note_emojis(self, project_id: int, note_id: int) -> list[str]:
-        """Fetch award emojis for a specific note using the universal Note API."""
-        endpoint = f"/notes/{note_id}/award_emoji"
+    def get_note_emojis(self, project_id: int, mr_iid: int, note_id: int) -> list[str]:
+        """Fetch award emojis for a specific note using the documented MR-scoped API."""
+        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
         try:
             response = self._request("GET", self._api_url(project_id, endpoint))
             emojis_data = response.json()
@@ -378,11 +372,32 @@ class GitLabClient:
             self.logger.debug(f"Could not fetch emojis for note {note_id}: {e}")
             return []
 
-    def create_note_award_emoji(
-        self, project_id: int, note_id: int, emoji_name: str
+    def create_note_reply(
+        self, project_id: int, mr_iid: int, discussion_id: str, body: str
     ) -> bool:
-        """Add an award emoji to a note using the universal Note API."""
-        endpoint = f"/notes/{note_id}/award_emoji"
+        """Create a reply to a discussion thread."""
+        if not discussion_id:
+            return False
+            
+        # GitLab Discussion API for replies:
+        # POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes
+        endpoint = f"/merge_requests/{mr_iid}/discussions/{discussion_id}/notes"
+        try:
+            self._request(
+                "POST", 
+                self._api_url(project_id, endpoint), 
+                data={"body": body}
+            )
+            return True
+        except Exception as e:
+            self.logger.debug(f"Failed to create reply for discussion {discussion_id}: {e}")
+            return False
+
+    def create_note_award_emoji(
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+    ) -> bool:
+        """Add an award emoji to a note using the documented MR-scoped API."""
+        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
         try:
             self._request(
                 "POST", 

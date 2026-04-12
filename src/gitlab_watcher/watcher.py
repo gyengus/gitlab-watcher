@@ -311,8 +311,14 @@ class Watcher:
         # Save the old note_id
         old_note_id = state.last_note_id
 
+        # Find all discussions that are already "done" (have a bot reply)
+        handled_discussions = set()
+        for note in notes:
+            if note.author_username == self.gitlab_username and note.discussion_id:
+                handled_discussions.add(note.discussion_id)
+
         # Find and process the FIRST valid human comment without status emojis
-        self.logger.debug(f"[{project.name}] MR !{mr.iid} checking {len(notes)} notes.")
+        self.logger.debug(f"[{project.name}] MR !{mr.iid} checking {len(notes)} notes. Handled discussions: {len(handled_discussions)}")
         for note in notes:
             # 1. Skip system notes and the bot's own comments
             is_own_note = note.author_username == self.gitlab_username
@@ -321,27 +327,28 @@ class Watcher:
                     self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
 
-            # 2. Skip if already has processing emojis or recently handled in this session
+            # 2. Skip if already handled via emoji, reply, or session cache
             SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
             has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
+            is_handled_discussion = note.discussion_id in handled_discussions
             
-            # DOUBLE CHECK: If no emojis from list, verify directly BEFORE processing
-            # This is the "Truth in Emojis" mechanism.
-            if not has_emojis and note.id not in self._processed_notes:
+            # DOUBLE CHECK: If no emojis and no reply seen yet
+            if not has_emojis and not is_handled_discussion and note.id not in self._processed_notes:
                 self.logger.debug(f"  Double-checking emojis for note {note.id} (type={note.noteable_type})")
-                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, note.id)
+                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
                 has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
                 if has_emojis:
                     self.logger.info(f"  Double-check found emojis on note {note.id}: {refreshed_emojis}")
 
-            if has_emojis or note.id in self._processed_notes:
-                reason = "emojis" if has_emojis else "recently processed"
-                self.logger.debug(f"  Skipping note {note.id} ({reason}). Emojis found: {note.award_emojis if not has_emojis else 'verified'}")
+            is_skipped = has_emojis or is_handled_discussion or note.id in self._processed_notes
+            if is_skipped:
+                reason = "emojis" if has_emojis else ("reply" if is_handled_discussion else "session")
+                self.logger.debug(f"  Skipping note {note.id} ({reason})")
                 if note.id > old_note_id:
                     self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
 
-            # 3. Found the FIRST new valid human comment without emojis
+            # 3. Found the FIRST new valid human comment without status emojis
             self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
             self.state.set_processing(project.project_id, True)
             self._processed_notes.add(note.id)
@@ -349,7 +356,8 @@ class Watcher:
                 project, 
                 mr, 
                 note.id, 
-                note.body
+                note.body,
+                discussion_id=note.discussion_id
             )
             # Update state immediately so we don't re-process this note if restarted
             self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)

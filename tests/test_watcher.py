@@ -113,6 +113,9 @@ def sample_note() -> Note:
         id=123,
         body="Please fix this",
         author_username="reviewer",
+        system=False,
+        award_emojis=[],
+        discussion_id="disc1",
     )
 
 
@@ -682,6 +685,9 @@ class TestWatcherCheckMRStatus:
             id=123,
             body="I made changes",
             author_username="claude",  # Same as gitlab_username
+            system=False,
+            award_emojis=[],
+            discussion_id="disc1",
         )
         mock_gitlab.get_merge_requests.return_value = [sample_mr]
         mock_gitlab.get_notes.return_value = [own_note]
@@ -754,6 +760,8 @@ class TestWatcherCheckMRStatus:
             body="approved this merge request",
             author_username="reviewer",
             system=True,  # System note flag
+            award_emojis=[],
+            discussion_id="disc1",
         )
         mock_gitlab.get_merge_requests.return_value = [sample_mr]
         mock_gitlab.get_notes.return_value = [system_note]
@@ -771,7 +779,6 @@ class TestWatcherCheckMRStatus:
         watcher.check_mr_status(project)
 
         # Should NOT process system notes
-        mock_processor.process_comment.assert_not_called()
         mock_processor.process_comment.assert_not_called()
 
 
@@ -1019,8 +1026,8 @@ def test_check_mr_status_sequential_processing_verified(
 ) -> None:
     """Test that multiple comments are processed one by one in chronological order."""
     notes = [
-        Note(id=100, body="First request", author_username="user", system=False),
-        Note(id=101, body="Second request", author_username="user", system=False),
+        Note(id=100, body="First request", author_username="user", system=False, award_emojis=[], discussion_id="disc1"),
+        Note(id=101, body="Second request", author_username="user", system=False, award_emojis=[], discussion_id="disc1"),
     ]
     mock_gitlab.get_notes.return_value = notes
     mock_mr = MagicMock(iid=1, source_branch="feat", state="opened")
@@ -1047,7 +1054,7 @@ def test_check_mr_status_sequential_processing_verified(
     watcher.check_mr_status(project)
 
     # Verify ONLY the first comment was processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request")
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request", discussion_id="disc1")
 
     # SECOND CALL with updated last_note_id
     mock_processor.process_comment.reset_mock()
@@ -1055,7 +1062,7 @@ def test_check_mr_status_sequential_processing_verified(
     mock_state_mgr.is_processing.return_value = False
     watcher.check_mr_status(project)
 
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request")
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request", discussion_id="disc1")
 
 
 def test_check_mr_status_skips_system_and_self_verified(
@@ -1066,9 +1073,9 @@ def test_check_mr_status_skips_system_and_self_verified(
 ) -> None:
     """Test that system notes and own notes are skipped but acknowledged in state."""
     notes = [
-        Note(id=100, body="System approved", author_username="system", system=True),
-        Note(id=101, body="Claude response", author_username="claude-bot", system=False),
-        Note(id=102, body="Human request", author_username="user", system=False),
+        Note(id=100, body="System approved", author_username="system", system=True, award_emojis=[], discussion_id="disc_sys"),
+        Note(id=101, body="Claude response", author_username="claude-bot", system=False, award_emojis=[], discussion_id="disc_bot"),
+        Note(id=102, body="Human request", author_username="user", system=False, award_emojis=[], discussion_id="disc_human"),
     ]
     mock_gitlab.get_notes.return_value = notes
     mock_mr = MagicMock(iid=1, source_branch="feat", state="opened")
@@ -1096,6 +1103,6 @@ def test_check_mr_status_skips_system_and_self_verified(
     watcher.check_mr_status(project)
 
     # Only note 102 (first human comment) should be processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request")
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", discussion_id="disc2")
     # Last state update should be for 102
     mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, 102, "feat")

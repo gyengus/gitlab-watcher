@@ -146,6 +146,9 @@ class TestGitLabClient:
                     "id": 123,
                     "body": "Test comment",
                     "author": {"username": "reviewer"},
+                    "system": False,
+                    "award_emojis": [],
+                    "discussion_id": "disc1",
                 }
             ],
         )
@@ -156,6 +159,7 @@ class TestGitLabClient:
         assert notes[0].id == 123
         assert notes[0].body == "Test comment"
         assert notes[0].author_username == "reviewer"
+        assert notes[0].discussion_id == "disc1"
 
     @patch("requests.Session.request")
     def test_update_issue_labels(
@@ -315,7 +319,7 @@ class TestDataClasses:
 
     def test_note_dataclass(self) -> None:
         """Test Note dataclass."""
-        note = Note(id=1, body="Comment", author_username="user")
+        note = Note(id=1, body="Comment", author_username="user", system=False, award_emojis=[], discussion_id="disc1")
         assert note.id == 1
         assert note.body == "Comment"
         assert note.author_username == "user"

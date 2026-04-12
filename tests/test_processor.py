@@ -601,7 +601,7 @@ class TestProcessorProcessComment:
         processor_with_git.state.init_state(project_config.project_id)
 
         result = processor_with_git.process_comment(
-            project_config, sample_mr, 999, "Fix this bug"
+            project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
         )
 
         assert result is True

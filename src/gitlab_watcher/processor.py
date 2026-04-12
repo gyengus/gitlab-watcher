@@ -510,8 +510,7 @@ Do not add Co-Authored-By signature to commits."""
         mr: MergeRequest,
         note_id: int,
         comment: str,
-        note_type: Optional[str] = None,
-        noteable_iid: Optional[Any] = None,
+        discussion_id: str = "",
     ) -> bool:
         """Process an MR comment: checkout branch, run Claude, push.
 
@@ -578,11 +577,21 @@ Do not add Co-Authored-By signature to commits."""
             
             # Push changes
             git.push("origin", mr.source_branch)
-            self.gitlab.create_note_award_emoji(
+            success = self.gitlab.create_note_award_emoji(
                 project.project_id, 
+                mr.iid,
                 note_id, 
                 "white_check_mark"
             )
+            
+            if not success and discussion_id:
+                self.logger.warning(f"Failed to add emoji to note {note_id}, using fallback reply to discussion {discussion_id}.")
+                self.gitlab.create_note_reply(
+                    project.project_id,
+                    mr.iid,
+                    discussion_id,
+                    "Handled by AI bot ✅"
+                )
             self.discord.notify_changes_applied(
                 project.name,
                 mr.title,
