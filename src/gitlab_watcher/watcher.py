@@ -271,6 +271,11 @@ class Watcher:
         # Save the old note_id
         old_note_id = state.last_note_id
 
+        # Find and process the FIRST new valid comment
+        for note in notes:
+            if note.id <= old_note_id:
+                continue
+
             # NEW: Check for emojis to avoid re-processing or ID shielding
             if "eyes" in note.award_emojis or "white_check_mark" in note.award_emojis:
                 # Still update state to the latest processed/skipped ID
@@ -299,6 +304,7 @@ class Watcher:
             # Process the comment and RETURN (process only ONE comment per poll cycle)
             self.processor.process_comment(project, mr, note.id, note.body)
             return
+
 
 
     def run(self) -> None:
