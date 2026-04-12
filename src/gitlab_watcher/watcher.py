@@ -3,6 +3,9 @@
 import logging
 import re
 import time
+import os
+import sys
+import fcntl
 from pathlib import Path
 from typing import Optional
 
@@ -48,7 +51,7 @@ class Watcher:
         else:
             level_map = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR, "CRITICAL": logging.CRITICAL}
             log_level = level_map.get(self.config.log_level, logging.INFO)
-        log_format = "%(asctime)s [%(levelname)s] %(message)s"
+        log_format = "%(asctime)s [%(process)d] [%(levelname)s] %(message)s"
         
         # Only configure basic logging if not already configured (avoids issues in tests)
         if not logging.getLogger().handlers:
@@ -162,6 +165,25 @@ class Watcher:
         
         # In-memory deduplication for recently processed notes (solves API lag)
         self._processed_notes: set[int] = set()
+        
+        # Lock file to prevent multiple instances
+        self._lock_file = None
+        self._acquire_lock()
+
+    def _acquire_lock(self) -> None:
+        """Acquire a file lock to prevent multiple instances from running."""
+        lock_path = self.work_dir / "gitlab-watcher.lock"
+        try:
+            self._lock_file = open(lock_path, "w")
+            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._lock_file.write(str(os.getpid()))
+            self._lock_file.flush()
+            self.logger.debug(f"Acquired instance lock at {lock_path}")
+        except (IOError, BlockingIOError):
+            print(f"Error: Another instance of gitlab-watcher is already running (locked {lock_path})", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            self.logger.warning(f"Could not acquire instance lock: {e}")
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, str | None]:
         """Extract GitLab URL and token from git remote.
@@ -301,8 +323,13 @@ class Watcher:
                 continue
 
             # 2. Skip if already has processing emojis or recently handled in this session
-            has_emojis = "eyes" in note.award_emojis or "white_check_mark" in note.award_emojis or "x" in note.award_emojis
+            # Expanded list of emojis to catch all variations of completion/failure
+            SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
+            has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
+            
             if has_emojis or note.id in self._processed_notes:
+                reason = "emojis" if has_emojis else "recently processed"
+                self.logger.debug(f"  Skipping note {note.id} ({reason}). Emojis found: {note.award_emojis}")
                 if note.id > old_note_id:
                     self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
@@ -371,6 +398,15 @@ class Watcher:
 
     def stop(self) -> None:
         """Stop the watcher and cleanup resources."""
+        # Release lock file
+        if self._lock_file:
+            try:
+                fcntl.flock(self._lock_file, fcntl.LOCK_UN)
+                self._lock_file.close()
+            except Exception:
+                pass
+            self._lock_file = None
+
         if hasattr(self, "state"):
             self.state.force_save_all()
             self.state.stop()

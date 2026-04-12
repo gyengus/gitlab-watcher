@@ -280,13 +280,17 @@ class GitLabClient:
                 # The GitLab API uses "award_emojis" (plural) in the Notes response
                 emojis_raw = note.get("award_emojis") or note.get("award_emoji") or []
                 
+                parsed_emojis = [e["name"] for e in emojis_raw if isinstance(e, dict) and "name" in e]
+                if parsed_emojis:
+                    self.logger.debug(f"Parsed emojis for note {note['id']}: {parsed_emojis}")
+
                 notes.append(
                     Note(
                         id=note["id"],
                         body=note.get("body", ""),
                         author_username=username,
                         system=note.get("system", False),
-                        award_emojis=[e["name"] for e in emojis_raw if isinstance(e, dict) and "name" in e]
+                        award_emojis=parsed_emojis
                     )
                 )
             return notes
