@@ -205,9 +205,6 @@ class Watcher:
         if self.state.is_processing(project.project_id):
             return
 
-        self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
-            return
-
         issues = self.gitlab.get_issues(
             project_id=project.project_id,
             state="opened",
@@ -237,9 +234,8 @@ class Watcher:
             return
 
         self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
-            return
-
         state = self.state.load(project.project_id)
+
 
         # Check for merge cleanup BEFORE checking for open MRs
         if state.last_mr_iid is not None:
