@@ -356,18 +356,6 @@ class GitLabClient:
             self._cache.clear()
 
 
-__all__ = [
-    "GitLabClient",
-    "Issue",
-    "MergeRequest",
-    "Note",
-    "DEFAULT_TIMEOUT",
-    "DEFAULT_MAX_RETRIES",
-    "DEFAULT_RETRY_DELAY",
-    "DEFAULT_POOL_CONNECTIONS",
-    "DEFAULT_POOL_MAXSIZE",
-    "DEFAULT_CACHE_TTL",
-]
     def create_note_award_emoji(
         self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
     ) -> bool:
@@ -384,3 +372,18 @@ __all__ = [
             return True
         except Exception:
             return False
+
+
+__all__ = [
+    "GitLabClient",
+    "Issue",
+    "MergeRequest",
+    "Note",
+    "DEFAULT_TIMEOUT",
+    "DEFAULT_MAX_RETRIES",
+    "DEFAULT_RETRY_DELAY",
+    "DEFAULT_POOL_CONNECTIONS",
+    "DEFAULT_POOL_MAXSIZE",
+    "DEFAULT_CACHE_TTL",
+]
+
