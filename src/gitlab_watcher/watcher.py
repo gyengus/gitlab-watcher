@@ -208,6 +208,7 @@ class Watcher:
         issues = self.gitlab.get_issues(
             project_id=project.project_id,
             state="opened",
+            assignee_username=self.config.gitlab_username,
         )
         if not issues:
             return

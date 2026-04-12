@@ -173,11 +173,12 @@ class GitLabClient:
         assignee_username: Optional[str] = None,
     ) -> list[Issue]:
         """Get issues for a project."""
-        endpoint = f"/issues?state={state}"
+        params = {"state": state}
         if assignee_username:
-            endpoint += f"&assignee_username={quote(assignee_username)}"
+            params["assignee_username"] = assignee_username
 
-        response = self._request("GET", self._api_url(project_id, endpoint))
+        endpoint = "/issues"
+        response = self._request("GET", self._api_url(project_id, endpoint), params=params)
         data = response.json()
 
         return [
