@@ -1,3 +1,4 @@
+import logging
 """GitLab API client with retry logic."""
 
 import time
@@ -88,6 +89,7 @@ class GitLabClient:
             pool_maxsize: Maximum connections in pool
             cache_ttl: Cache time-to-live in seconds
         """
+        self.logger = logging.getLogger(__name__)
         self.base_url = url.rstrip("/")
         self._token = token  # Private to avoid accidental logging
         self.max_retries = max_retries
@@ -263,9 +265,10 @@ class GitLabClient:
                 self._api_url(project_id, endpoint),
                 params={"include_award_emojis": "true"}
             )
+            notes_data = response.json()
             notes = []
             for note in notes_data:
-                # The GitLab API uses 'award_emojis' (plural) in the Notes response
+                # The GitLab API uses "award_emojis" (plural) in the Notes response
                 emojis = note.get("award_emojis") or note.get("award_emoji") or []
                 notes.append(
                     Note(
