@@ -273,16 +273,8 @@ class GitLabClient:
                 )
                 for note in notes_data
             ]
-
-        return [
-            Note(
-                id=item["id"],
-                body=item.get("body", ""),
-                author_username=item.get("author", {}).get("username", ""),
-                system=item.get("system", False),
-            )
-            for item in data
-        ]
+        except Exception:
+            return []
 
     def update_issue_labels(
         self,
