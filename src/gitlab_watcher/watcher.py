@@ -201,6 +201,9 @@ class Watcher:
         if self.state.is_processing(project.project_id):
             return
 
+        self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
+            return
+
         issues = self.gitlab.get_issues(
             project_id=project.project_id,
             state="opened",
@@ -227,6 +230,9 @@ class Watcher:
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
         if self.state.is_processing(project.project_id):
+            return
+
+        self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
             return
 
         state = self.state.load(project.project_id)
@@ -258,35 +264,42 @@ class Watcher:
 
         mr = mrs[0]  # Get first open MR
 
-        # Get latest comments
+        # Get comments and sort them locally to be sure (oldest first)
         notes = self.gitlab.get_notes(project.project_id, mr.iid)
-        latest_note = notes[0] if notes else None
-
-        # Save the old note_id BEFORE updating state
+        notes = sorted(notes, key=lambda n: n.id)
+        
+        # Save the old note_id
         old_note_id = state.last_note_id
 
-        # Update state
-        self.state.update_mr_state(
-            project.project_id,
-            mr.iid,
-            mr.state,
-            latest_note.id if latest_note else 0,
-            mr.source_branch,
-        )
+            # NEW: Check for emojis to avoid re-processing or ID shielding
+            if "eyes" in note.award_emojis or "white_check_mark" in note.award_emojis:
+                # Still update state to the latest processed/skipped ID
+                self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
+                continue
 
-        # Check for new comments (not by Claude)
-        if (
-            latest_note
-            and latest_note.id != old_note_id
-            and latest_note.author_username != self.config.gitlab_username
-            and not latest_note.system
-        ):
+            # Found the FIRST new valid human comment
             self._log(
                 project.project_id,
-                f"New comment on MR !{mr.iid}: {sanitize_for_log(latest_note.body)}",
+                f"New comment on MR !{mr.iid}: {sanitize_for_log(note.body)}",
+            )
+            
+            # Put EYE emoji to show we saw it
+            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "eyes")
+            
+            # Update state BEFORE processing (to lock this note and the MR)
+            self.state.update_mr_state(
+                project.project_id,
+                mr.iid,
+                mr.state,
+                note.id,
+                mr.source_branch,
             )
             self.state.set_processing(project.project_id, True)
-            self.processor.process_comment(project, mr, latest_note.body)
+            
+            # Process the comment and RETURN (process only ONE comment per poll cycle)
+            self.processor.process_comment(project, mr, note.id, note.body)
+            return
+
 
     def run(self) -> None:
         """Run the main watcher loop."""

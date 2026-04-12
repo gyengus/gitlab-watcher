@@ -15,14 +15,15 @@ class GitOps:
         """
         self.repo_path = repo_path
 
-    def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        """Run a git command in the repository."""
+    def _run(self, *args: str, check: bool = True, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+        """Run a git command in the repository with a timeout."""
         return subprocess.run(
             ["git"] + list(args),
             cwd=self.repo_path,
             capture_output=True,
             text=True,
             check=check,
+            timeout=timeout,
         )
 
     def fetch(self, remote: str = "origin") -> bool:

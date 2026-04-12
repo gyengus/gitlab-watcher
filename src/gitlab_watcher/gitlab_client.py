@@ -59,6 +59,7 @@ class Note:
     body: str
     author_username: str
     system: bool = False
+    award_emojis: list[str] = None
 
 
 class GitLabClient:
@@ -126,7 +127,7 @@ class GitLabClient:
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic for 5xx errors."""
         # Set default timeout if not provided
-        kwargs.setdefault("timeout", self.timeout)
+        kwargs.setdefault("timeout", 30.0)
 
         last_error: Optional[Exception] = None
 
@@ -267,11 +268,12 @@ class GitLabClient:
                     body=item.get("body", ""),
                     author_username=item.get("author", {}).get("username", ""),
                     system=item.get("system", False),
+                    award_emojis=[e["name"] for e in item.get("award_emojis", [])],
                 )
                 for item in cached
             ]
 
-        endpoint = f"/merge_requests/{mr_iid}/notes?sort={sort}"
+        endpoint = f"/merge_requests/{mr_iid}/notes?sort={sort}&include_award_emojis=true"
 
         response = self._request("GET", self._api_url(project_id, endpoint))
         data = response.json()
@@ -366,3 +368,19 @@ __all__ = [
     "DEFAULT_POOL_MAXSIZE",
     "DEFAULT_CACHE_TTL",
 ]
+    def create_note_award_emoji(
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+    ) -> bool:
+        """Add an award emoji to a note."""
+        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
+        try:
+            self._request(
+                "POST", 
+                self._api_url(project_id, endpoint), 
+                data={"name": emoji_name}
+            )
+            # Invalidate notes cache for this MR as emoji state changed
+            self._cache.delete(f"notes_{project_id}_{mr_iid}")
+            return True
+        except Exception:
+            return False

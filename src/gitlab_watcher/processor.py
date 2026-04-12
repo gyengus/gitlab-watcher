@@ -505,6 +505,7 @@ Do not add Co-Authored-By signature to commits."""
         self,
         project: ProjectConfig,
         mr: MergeRequest,
+        note_id: int,
         comment: str,
     ) -> bool:
         """Process an MR comment: checkout branch, run Claude, push.
@@ -560,6 +561,7 @@ Do not add Co-Authored-By signature to commits."""
             
             if not success:
                 self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
+                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
                 self.discord.notify_error(
                     project.name,
                     f"AI tool failed for merge request !{mr.iid}",
@@ -571,6 +573,7 @@ Do not add Co-Authored-By signature to commits."""
             
             # Push changes
             git.push("origin", mr.source_branch)
+            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "white_check_mark")
             self.discord.notify_changes_applied(
                 project.name,
                 mr.title,
