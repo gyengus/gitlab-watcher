@@ -367,32 +367,22 @@ class GitLabClient:
             self._cache.clear()
 
 
-    def get_note_emojis(self, project_id: int, mr_iid: int, note: Note) -> list[str]:
-        """Fetch award emojis for a specific note directly to overcome list-view limitations."""
-        # Determine the correct endpoint based on noteable_type
-        if note.noteable_type == "Commit" and note.noteable_iid:
-            endpoint = f"/repository/commits/{note.noteable_iid}/notes/{note.id}/award_emoji"
-        else:
-            endpoint = f"/merge_requests/{mr_iid}/notes/{note.id}/award_emoji"
-            
+    def get_note_emojis(self, project_id: int, note_id: int) -> list[str]:
+        """Fetch award emojis for a specific note using the universal Note API."""
+        endpoint = f"/notes/{note_id}/award_emoji"
         try:
             response = self._request("GET", self._api_url(project_id, endpoint))
             emojis_data = response.json()
             return [e["name"] for e in emojis_data if isinstance(e, dict) and "name" in e]
         except Exception as e:
-            self.logger.debug(f"Could not fetch emojis for note {note.id}: {e}")
+            self.logger.debug(f"Could not fetch emojis for note {note_id}: {e}")
             return []
 
     def create_note_award_emoji(
-        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str, note_type: Optional[str] = None, noteable_iid: Optional[Any] = None
+        self, project_id: int, note_id: int, emoji_name: str
     ) -> bool:
-        """Add an award emoji to a note, handling different note types."""
-        # Use commit-specific endpoint if it's a commit note
-        if note_type == "Commit" and noteable_iid:
-            endpoint = f"/repository/commits/{noteable_iid}/notes/{note_id}/award_emoji"
-        else:
-            endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
-            
+        """Add an award emoji to a note using the universal Note API."""
+        endpoint = f"/notes/{note_id}/award_emoji"
         try:
             self._request(
                 "POST", 

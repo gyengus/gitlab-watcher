@@ -314,26 +314,22 @@ class Watcher:
         # Find and process the FIRST valid human comment without status emojis
         self.logger.debug(f"[{project.name}] MR !{mr.iid} checking {len(notes)} notes.")
         for note in notes:
-            self.logger.debug(f"  Note {note.id} from {note.author_username}: '{note.body[:30]}...' (system={note.system}, emojis={note.award_emojis})")
-            
             # 1. Skip system notes and the bot's own comments
             is_own_note = note.author_username == self.gitlab_username
             if note.system or is_own_note:
-                # Still update last_note_id state so we track progress, but don't process
                 if note.id > old_note_id:
                     self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
 
             # 2. Skip if already has processing emojis or recently handled in this session
-            # Expanded list of emojis to catch all variations of completion/failure
             SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
             has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
             
-            # DOUBLE CHECK: If no emojis from list, but note is "new", verify directly 
-            # (solves GitLab list-view consistency issues for Commit notes)
-            if not has_emojis and note.id > old_note_id and note.id not in self._processed_notes:
+            # DOUBLE CHECK: If no emojis from list, verify directly BEFORE processing
+            # This is the "Truth in Emojis" mechanism.
+            if not has_emojis and note.id not in self._processed_notes:
                 self.logger.debug(f"  Double-checking emojis for note {note.id} (type={note.noteable_type})")
-                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note)
+                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, note.id)
                 has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
                 if has_emojis:
                     self.logger.info(f"  Double-check found emojis on note {note.id}: {refreshed_emojis}")
@@ -353,9 +349,7 @@ class Watcher:
                 project, 
                 mr, 
                 note.id, 
-                note.body,
-                note_type=note.noteable_type,
-                noteable_iid=note.noteable_iid
+                note.body
             )
             # Update state immediately so we don't re-process this note if restarted
             self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)

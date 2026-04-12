@@ -580,11 +580,8 @@ Do not add Co-Authored-By signature to commits."""
             git.push("origin", mr.source_branch)
             self.gitlab.create_note_award_emoji(
                 project.project_id, 
-                mr.iid, 
                 note_id, 
-                "white_check_mark",
-                note_type=note_type,
-                noteable_iid=noteable_iid
+                "white_check_mark"
             )
             self.discord.notify_changes_applied(
                 project.name,

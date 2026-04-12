@@ -1047,7 +1047,7 @@ def test_check_mr_status_sequential_processing_verified(
     watcher.check_mr_status(project)
 
     # Verify ONLY the first comment was processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request", note_type=None, noteable_iid=None)
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request")
 
     # SECOND CALL with updated last_note_id
     mock_processor.process_comment.reset_mock()
@@ -1055,7 +1055,7 @@ def test_check_mr_status_sequential_processing_verified(
     mock_state_mgr.is_processing.return_value = False
     watcher.check_mr_status(project)
 
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request", note_type=None, noteable_iid=None)
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request")
 
 
 def test_check_mr_status_skips_system_and_self_verified(
@@ -1096,6 +1096,6 @@ def test_check_mr_status_skips_system_and_self_verified(
     watcher.check_mr_status(project)
 
     # Only note 102 (first human comment) should be processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", note_type=None, noteable_iid=None)
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request")
     # Last state update should be for 102
     mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, 102, "feat")
