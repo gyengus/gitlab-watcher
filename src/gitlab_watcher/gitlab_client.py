@@ -1,7 +1,7 @@
 """GitLab API client with retry logic."""
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -59,7 +59,7 @@ class Note:
     body: str
     author_username: str
     system: bool = False
-    award_emojis: list[str] = None
+    award_emojis: list[str] = field(default_factory=list)
 
 
 class GitLabClient:
@@ -127,7 +127,7 @@ class GitLabClient:
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic for 5xx errors."""
         # Set default timeout if not provided
-        kwargs.setdefault("timeout", 30.0)
+        kwargs.setdefault("timeout", self.timeout)
 
         last_error: Optional[Exception] = None
 

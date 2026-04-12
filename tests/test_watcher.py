@@ -1,5 +1,6 @@
 """Tests for watcher main functionality."""
 
+import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
@@ -8,10 +9,18 @@ import pytest
 
 from gitlab_watcher.config import Config, ProjectConfig
 from gitlab_watcher.discord import DiscordWebhook
+from gitlab_watcher.exceptions import GitLabError
 from gitlab_watcher.gitlab_client import GitLabClient, Issue, MergeRequest, Note
 from gitlab_watcher.processor import Processor
 from gitlab_watcher.state import StateManager, ProjectState
 from gitlab_watcher.watcher import Watcher
+
+
+@pytest.fixture(autouse=True)
+def reset_logger_handlers() -> None:
+    """Reset logger handlers after each test to prevent state leaking between tests."""
+    yield
+    logging.getLogger("gitlab_watcher").handlers.clear()
 
 
 @pytest.fixture
@@ -559,7 +568,6 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_merge_requests.assert_called_once_with(
             project_id=42,
             state="opened",
-            author_username="claude",
         )
 
     def test_check_mr_status_already_processing(
@@ -916,7 +924,7 @@ class TestWatcherExtractFromRemote:
 
         url, token = watcher._extract_from_remote(project.path)
 
-        # Now it SHOULD match because we added SSH support
+        # SSH URL: extract host only, no token
         assert url == "https://github.com"
         assert token is None
 
@@ -999,18 +1007,13 @@ def test_stop_cleanup_resources(
     assert mock_handler not in watcher.logger.handlers
 
 
-
 def test_check_mr_status_sequential_processing_verified(
-    config_file,
-    mock_gitlab,
-    mock_discord,
-    mock_processor,
-    state_manager,
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
 ) -> None:
     """Test that multiple comments are processed one by one in chronological order."""
-    from gitlab_watcher.gitlab_client import Note
-    
-    # Setup multiple human comments (ID 100, 101)
     notes = [
         Note(id=100, body="First request", author_username="user", system=False),
         Note(id=101, body="Second request", author_username="user", system=False),
@@ -1018,49 +1021,46 @@ def test_check_mr_status_sequential_processing_verified(
     mock_gitlab.get_notes.return_value = notes
     mock_mr = MagicMock(iid=1, source_branch="feat", state="opened")
     mock_gitlab.get_merge_requests.return_value = [mock_mr]
-    
-    # Mock state.load()
+    mock_gitlab.get_merge_request.return_value = None
+
+    mock_state_mgr = MagicMock(spec=StateManager)
+    mock_state_mgr.is_processing.return_value = False
     mock_state = MagicMock()
     mock_state.last_note_id = 99
-    state_manager.load.return_value = mock_state
-    state_manager.is_processing.return_value = False
+    mock_state.last_mr_iid = None
+    mock_state_mgr.load.return_value = mock_state
 
     watcher = Watcher(
         config_path=str(config_file),
         gitlab=mock_gitlab,
         discord=mock_discord,
         processor=mock_processor,
-        state=state_manager,
+        state=mock_state_mgr,
     )
     project = watcher.config.projects[0]
 
     # FIRST CALL: Should pick up ID 100 and STOP
     watcher.check_mr_status(project)
-    
+
     # Verify ONLY the first comment was processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, "First request")
-    
-    # Reset mocks for second call
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request")
+
+    # SECOND CALL with updated last_note_id
     mock_processor.process_comment.reset_mock()
-    state_manager.update_mr_state.reset_mock()
-    
-    # SECOND CALL: State now has ID 100 as last_note_id
     mock_state.last_note_id = 100
+    mock_state_mgr.is_processing.return_value = False
     watcher.check_mr_status(project)
-    
-    # Verify ID 101 was processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, "Second request")
+
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request")
+
 
 def test_check_mr_status_skips_system_and_self_verified(
-    config_file,
-    mock_gitlab,
-    mock_discord,
-    mock_processor,
-    state_manager,
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
 ) -> None:
     """Test that system notes and own notes are skipped but acknowledged in state."""
-    from gitlab_watcher.gitlab_client import Note
-    
     notes = [
         Note(id=100, body="System approved", author_username="system", system=True),
         Note(id=101, body="Claude response", author_username="claude-bot", system=False),
@@ -1069,26 +1069,28 @@ def test_check_mr_status_skips_system_and_self_verified(
     mock_gitlab.get_notes.return_value = notes
     mock_mr = MagicMock(iid=1, source_branch="feat", state="opened")
     mock_gitlab.get_merge_requests.return_value = [mock_mr]
-    
+    mock_gitlab.get_merge_request.return_value = None
+
+    mock_state_mgr = MagicMock(spec=StateManager)
+    mock_state_mgr.is_processing.return_value = False
     mock_state = MagicMock()
     mock_state.last_note_id = 99
-    state_manager.load.return_value = mock_state
-    state_manager.is_processing.return_value = False
+    mock_state.last_mr_iid = None
+    mock_state_mgr.load.return_value = mock_state
 
     watcher = Watcher(
         config_path=str(config_file),
         gitlab=mock_gitlab,
         discord=mock_discord,
         processor=mock_processor,
-        state=state_manager,
+        state=mock_state_mgr,
     )
     watcher.config.gitlab_username = "claude-bot"
     project = watcher.config.projects[0]
 
-    # Should skip 100, skip 101, and process 102 in the same poll cycle
     watcher.check_mr_status(project)
-    
-    # Verify only 102 was processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, "Human request")
+
+    # Only note 102 (first human comment) should be processed
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request")
     # Last state update should be for 102
-    state_manager.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, 102, "feat")
+    mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, 102, "feat")

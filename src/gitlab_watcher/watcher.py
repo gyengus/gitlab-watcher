@@ -281,6 +281,14 @@ class Watcher:
                 self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
 
+            # Skip system notes and the bot's own comments
+            is_own_note = note.author_username == self.config.gitlab_username
+            if note.system or is_own_note:
+                self.state.update_mr_state(
+                    project.project_id, mr.iid, mr.state, note.id, mr.source_branch
+                )
+                continue
+
             # Found the FIRST new valid human comment
             self._log(
                 project.project_id,

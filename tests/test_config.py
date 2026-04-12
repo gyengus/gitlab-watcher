@@ -246,34 +246,39 @@ PROJECT_DIRS=(
 
     assert config.log_file == "/tmp/custom.log"
 
-def test_load_config_with_log_level(tmp_path):
+
+def test_load_config_with_log_level(tmp_path: Path) -> None:
     """Test loading log level from config file."""
     config_file = tmp_path / "test.conf"
-    config_file.write_text("""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+    config_file.write_text(f"""
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="secret"
 GITLAB_USERNAME="user"
 LOG_LEVEL="DEBUG"
 PROJECT_DIRS=(
-  "/tmp"
+  "{project_dir}"
 )
 """)
-    # Mock extract_project_id to return something so load_config doesn't fail
-    with patch("gitlab_watcher.config.extract_project_id", return_value=123):
-        config = load_config(str(config_file))
-        assert config.log_level == "DEBUG"
+    config = load_config(str(config_file))
+    assert config.log_level == "DEBUG"
 
-def test_load_config_default_log_level(tmp_path):
+
+def test_load_config_default_log_level(tmp_path: Path) -> None:
     """Test default log level when not specified."""
     config_file = tmp_path / "test_no_log.conf"
-    config_file.write_text("""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+    config_file.write_text(f"""
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="secret"
 GITLAB_USERNAME="user"
 PROJECT_DIRS=(
-  "/tmp"
+  "{project_dir}"
 )
 """)
-    with patch("gitlab_watcher.config.extract_project_id", return_value=123):
-        config = load_config(str(config_file))
-        assert config.log_level == "INFO"
+    config = load_config(str(config_file))
+    assert config.log_level == "INFO"
