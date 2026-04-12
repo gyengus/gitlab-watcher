@@ -320,7 +320,7 @@ class TestWatcherInit:
         state_manager: StateManager,
     ) -> None:
         """Test watcher initialization with injected dependencies."""
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -338,7 +338,7 @@ class TestWatcherInit:
     def test_watcher_missing_config(self) -> None:
         """Test watcher with missing config file."""
         with pytest.raises(FileNotFoundError):
-            Watcher(config_path="/nonexistent/config.conf")
+            Watcher(disable_lock=True, config_path="/nonexistent/config.conf")
 
     def test_watcher_passes_ai_tool_mode_to_processor(
         self,
@@ -356,7 +356,7 @@ class TestWatcherInit:
         )
         config_file.write_text(content)
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -381,7 +381,7 @@ class TestWatcherCheckIssues:
         mock_gitlab.get_issues.return_value = []
         mock_gitlab.get_current_user.return_value = {"username": "claude"}
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -407,7 +407,7 @@ class TestWatcherCheckIssues:
         state_manager: StateManager,
     ) -> None:
         """Test check_issues when already processing."""
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -437,7 +437,7 @@ class TestWatcherCheckIssues:
         mock_gitlab.get_issues.return_value = [sample_issue]
         mock_processor.process_issue.return_value = True
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -468,7 +468,7 @@ class TestWatcherCheckIssues:
         )
         mock_gitlab.get_issues.return_value = [issue_with_label]
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -500,7 +500,7 @@ class TestWatcherCheckIssues:
         )
         mock_gitlab.get_issues.return_value = [issue_with_label]
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -525,7 +525,7 @@ class TestWatcherCheckIssues:
         """Test check_issues returns early when issues list is empty."""
         mock_gitlab.get_issues.return_value = []
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -555,7 +555,7 @@ class TestWatcherCheckMRStatus:
         """Test check_mr_status when there are no MRs."""
         mock_gitlab.get_merge_requests.return_value = []
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -580,7 +580,7 @@ class TestWatcherCheckMRStatus:
         state_manager: StateManager,
     ) -> None:
         """Test check_mr_status when already processing."""
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -615,7 +615,7 @@ class TestWatcherCheckMRStatus:
         )
         mock_gitlab.get_merge_request.return_value = merged_mr
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -653,7 +653,7 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_merge_request.return_value = None
         mock_processor.process_comment.return_value = True
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -688,7 +688,7 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_merge_request.return_value = None
         mock_gitlab.get_current_user.return_value = {"username": "claude"}
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -717,7 +717,7 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_notes.return_value = [sample_note]
         mock_gitlab.get_merge_request.return_value = None
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -759,7 +759,7 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_notes.return_value = [system_note]
         mock_gitlab.get_merge_request.return_value = None
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -795,7 +795,7 @@ class TestWatcherExtractFromRemote:
         )
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -826,7 +826,7 @@ class TestWatcherExtractFromRemote:
         )
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -857,7 +857,7 @@ class TestWatcherExtractFromRemote:
         )
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -886,7 +886,7 @@ class TestWatcherExtractFromRemote:
         mock_git.get_remote_url.return_value = None
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -915,7 +915,7 @@ class TestWatcherExtractFromRemote:
         mock_git.get_remote_url.return_value = "git@github.com:user/repo.git"
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -951,7 +951,7 @@ def test_logging_fallback(
     mock_gitlab.get_current_user.return_value = {"username": "claude"}
     
     with caplog.at_level(logging.WARNING):
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -970,7 +970,7 @@ def test_run_loop_gitlab_error(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test main loop resilient to GitLabError."""
-    watcher = Watcher(
+    watcher = Watcher(disable_lock=True, 
         config_path=str(config_file),
         gitlab=mock_gitlab,
         discord=mock_discord,
@@ -993,7 +993,7 @@ def test_stop_cleanup_resources(
     state_manager: MagicMock,
 ) -> None:
     """Test cleanup of resources on stop."""
-    watcher = Watcher(
+    watcher = Watcher(disable_lock=True, 
         config_path=str(config_file),
         gitlab=mock_gitlab,
         discord=mock_discord,
@@ -1034,7 +1034,7 @@ def test_check_mr_status_sequential_processing_verified(
     mock_state.last_mr_iid = None
     mock_state_mgr.load.return_value = mock_state
 
-    watcher = Watcher(
+    watcher = Watcher(disable_lock=True, 
         config_path=str(config_file),
         gitlab=mock_gitlab,
         discord=mock_discord,
@@ -1047,7 +1047,7 @@ def test_check_mr_status_sequential_processing_verified(
     watcher.check_mr_status(project)
 
     # Verify ONLY the first comment was processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request")
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request", note_type=None, noteable_iid=None)
 
     # SECOND CALL with updated last_note_id
     mock_processor.process_comment.reset_mock()
@@ -1055,7 +1055,7 @@ def test_check_mr_status_sequential_processing_verified(
     mock_state_mgr.is_processing.return_value = False
     watcher.check_mr_status(project)
 
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request")
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request", note_type=None, noteable_iid=None)
 
 
 def test_check_mr_status_skips_system_and_self_verified(
@@ -1083,7 +1083,7 @@ def test_check_mr_status_skips_system_and_self_verified(
     mock_state.last_mr_iid = None
     mock_state_mgr.load.return_value = mock_state
 
-    watcher = Watcher(
+    watcher = Watcher(disable_lock=True, 
         config_path=str(config_file),
         gitlab=mock_gitlab,
         discord=mock_discord,
@@ -1096,6 +1096,6 @@ def test_check_mr_status_skips_system_and_self_verified(
     watcher.check_mr_status(project)
 
     # Only note 102 (first human comment) should be processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request")
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", note_type=None, noteable_iid=None)
     # Last state update should be for 102
     mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, 102, "feat")

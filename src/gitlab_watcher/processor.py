@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Optional
 
 from .config import ProjectConfig
 from .discord import DiscordWebhook
@@ -510,6 +510,8 @@ Do not add Co-Authored-By signature to commits."""
         mr: MergeRequest,
         note_id: int,
         comment: str,
+        note_type: Optional[str] = None,
+        noteable_iid: Optional[Any] = None,
     ) -> bool:
         """Process an MR comment: checkout branch, run Claude, push.
 
@@ -576,7 +578,14 @@ Do not add Co-Authored-By signature to commits."""
             
             # Push changes
             git.push("origin", mr.source_branch)
-            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "white_check_mark")
+            self.gitlab.create_note_award_emoji(
+                project.project_id, 
+                mr.iid, 
+                note_id, 
+                "white_check_mark",
+                note_type=note_type,
+                noteable_iid=noteable_iid
+            )
             self.discord.notify_changes_applied(
                 project.name,
                 mr.title,

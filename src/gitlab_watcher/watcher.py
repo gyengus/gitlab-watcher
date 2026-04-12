@@ -7,7 +7,7 @@ import os
 import sys
 import fcntl
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
@@ -31,6 +31,7 @@ class Watcher:
         discord: Optional[DiscordWebhook] = None,
         processor: Optional[Processor] = None,
         state: Optional[StateManager] = None,
+        disable_lock: bool = False,
     ) -> None:
         """Initialize watcher.
 
@@ -168,7 +169,8 @@ class Watcher:
         
         # Lock file to prevent multiple instances
         self._lock_file = None
-        self._acquire_lock()
+        if not disable_lock:
+            self._acquire_lock()
 
     def _acquire_lock(self) -> None:
         """Acquire a file lock to prevent multiple instances from running."""
@@ -327,18 +329,37 @@ class Watcher:
             SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
             has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
             
+            # DOUBLE CHECK: If no emojis from list, but note is "new", verify directly 
+            # (solves GitLab list-view consistency issues for Commit notes)
+            if not has_emojis and note.id > old_note_id and note.id not in self._processed_notes:
+                self.logger.debug(f"  Double-checking emojis for note {note.id} (type={note.noteable_type})")
+                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note)
+                has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
+                if has_emojis:
+                    self.logger.info(f"  Double-check found emojis on note {note.id}: {refreshed_emojis}")
+
             if has_emojis or note.id in self._processed_notes:
                 reason = "emojis" if has_emojis else "recently processed"
-                self.logger.debug(f"  Skipping note {note.id} ({reason}). Emojis found: {note.award_emojis}")
+                self.logger.debug(f"  Skipping note {note.id} ({reason}). Emojis found: {note.award_emojis if not has_emojis else 'verified'}")
                 if note.id > old_note_id:
                     self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
 
             # 3. Found the FIRST new valid human comment without emojis
-            self._log(
-                project.project_id,
-                f"New comment on MR !{mr.iid}: {sanitize_for_log(note.body)}",
+            self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
+            self.state.set_processing(project.project_id, True)
+            self._processed_notes.add(note.id)
+            self.processor.process_comment(
+                project, 
+                mr, 
+                note.id, 
+                note.body,
+                note_type=note.noteable_type,
+                noteable_iid=note.noteable_iid
             )
+            # Update state immediately so we don't re-process this note if restarted
+            self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
+            return
             
             # Put EYE emoji to show we saw it
             self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "eyes")

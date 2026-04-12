@@ -61,6 +61,8 @@ class Note:
     author_username: str
     system: bool = False
     award_emojis: list[str] = field(default_factory=list)
+    noteable_type: Optional[str] = None
+    noteable_iid: Optional[Any] = None
 
 
 class GitLabClient:
@@ -290,7 +292,9 @@ class GitLabClient:
                         body=note.get("body", ""),
                         author_username=username,
                         system=note.get("system", False),
-                        award_emojis=parsed_emojis
+                        award_emojis=parsed_emojis,
+                        noteable_type=note.get("noteable_type"),
+                        noteable_iid=note.get("noteable_iid")
                     )
                 )
             return notes
@@ -363,21 +367,41 @@ class GitLabClient:
             self._cache.clear()
 
 
+    def get_note_emojis(self, project_id: int, mr_iid: int, note: Note) -> list[str]:
+        """Fetch award emojis for a specific note directly to overcome list-view limitations."""
+        # Determine the correct endpoint based on noteable_type
+        if note.noteable_type == "Commit" and note.noteable_iid:
+            endpoint = f"/repository/commits/{note.noteable_iid}/notes/{note.id}/award_emoji"
+        else:
+            endpoint = f"/merge_requests/{mr_iid}/notes/{note.id}/award_emoji"
+            
+        try:
+            response = self._request("GET", self._api_url(project_id, endpoint))
+            emojis_data = response.json()
+            return [e["name"] for e in emojis_data if isinstance(e, dict) and "name" in e]
+        except Exception as e:
+            self.logger.debug(f"Could not fetch emojis for note {note.id}: {e}")
+            return []
+
     def create_note_award_emoji(
-        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str, note_type: Optional[str] = None, noteable_iid: Optional[Any] = None
     ) -> bool:
-        """Add an award emoji to a note."""
-        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
+        """Add an award emoji to a note, handling different note types."""
+        # Use commit-specific endpoint if it's a commit note
+        if note_type == "Commit" and noteable_iid:
+            endpoint = f"/repository/commits/{noteable_iid}/notes/{note_id}/award_emoji"
+        else:
+            endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
+            
         try:
             self._request(
                 "POST", 
                 self._api_url(project_id, endpoint), 
                 data={"name": emoji_name}
             )
-            # Invalidate notes cache for this MR as emoji state changed
-            self._cache.delete(f"notes_{project_id}_{mr_iid}")
             return True
-        except Exception:
+        except Exception as e:
+            self.logger.debug(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
             return False
 
 
