@@ -691,7 +691,6 @@ class TestProcessorCleanup:
             project_config.project_id,
             mr_iid=1,
             mr_state="merged",
-            note_id=123,
             branch="1-fix-the-bug",
         )
 

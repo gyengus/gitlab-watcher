@@ -615,6 +615,7 @@ Do not add Co-Authored-By signature to commits."""
         branch: str,
         mr_title: str,
         mr_url: str,
+        mr_iid: Optional[int] = None,
     ) -> None:
         """Cleanup after MR merge: switch to default branch, delete branch.
 
@@ -623,6 +624,7 @@ Do not add Co-Authored-By signature to commits."""
             branch: The merged branch name
             mr_title: The MR title
             mr_url: The MR URL
+            mr_iid: Optional MR IID for specific state cleanup
         """
         git = self.git_factory(project.path)
 
@@ -637,8 +639,13 @@ Do not add Co-Authored-By signature to commits."""
             git.delete_branch(branch, force=True)
             self.discord.notify_cleanup_complete(project.name, branch)
 
-        # Reset state
-        self.state.reset(project.project_id)
+        # Reset specific MR state if IID is provided, otherwise we rely on the caller or reset
+        if mr_iid is not None:
+            self.state.remove_tracked_mr(project.project_id, mr_iid)
+        else:
+            # Legacy behavior: reset EVERYTHING if no IID provided
+            # (though Watcher now always tries to be specific)
+            self.state.reset(project.project_id)
 
 
 __all__ = [

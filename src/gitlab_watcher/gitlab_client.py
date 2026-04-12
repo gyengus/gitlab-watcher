@@ -176,6 +176,33 @@ class GitLabClient:
         raise GitLabConnectionError(
             f"Request failed after {self.max_retries} retries. Last error: {last_error}"
         )
+    def _request_all(self, method: str, url: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Make HTTP request and follow pagination to fetch all items."""
+        params = kwargs.get("params", {}).copy()
+        params.setdefault("per_page", 100)
+        kwargs["params"] = params
+
+        results: list[dict[str, Any]] = []
+        current_url: Optional[str] = url
+
+        while current_url:
+            response = self._request(method, current_url, **kwargs)
+            data = response.json()
+            if isinstance(data, list):
+                results.extend(data)
+            else:
+                # Not a list, just return the dict as a single-item list
+                return [data]
+
+            # Check for next page
+            next_page = response.headers.get("X-Next-Page")
+            if next_page and str(next_page).isdigit():
+                params["page"] = int(next_page)
+                kwargs["params"] = params
+            else:
+                current_url = None
+
+        return results
 
     def get_issues(
         self,
@@ -210,12 +237,11 @@ class GitLabClient:
         author_username: Optional[str] = None,
     ) -> list[MergeRequest]:
         """Get merge requests for a project."""
-        endpoint = f"/merge_requests?state={state}"
+        params = {"state": state}
         if author_username:
-            endpoint += f"&author_username={quote(author_username)}"
+            params["author_username"] = author_username
 
-        response = self._request("GET", self._api_url(project_id, endpoint))
-        data = response.json()
+        data = self._request_all("GET", self._api_url(project_id, "/merge_requests"), params=params)
 
         return [
             MergeRequest(
@@ -269,12 +295,11 @@ class GitLabClient:
         """Get notes for a merge request."""
         endpoint = f"/merge_requests/{mr_iid}/notes"
         try:
-            response = self._request(
+            notes_data = self._request_all(
                 "GET", 
                 self._api_url(project_id, endpoint),
                 params={"include_award_emojis": "true"}
             )
-            notes_data = response.json()
             notes = []
             for note in notes_data:
                 self.logger.debug(f"Parsed emojis for note {note['id']}: {note.get('award_emojis', [])}")

@@ -30,7 +30,6 @@ class Config:
     discord_webhook: str = ""
     label_in_progress: str = "In progress"
     label_review: str = "Review"
-    gitlab_username: str = "claude"
     poll_interval: int = 30
     ai_tool_mode: str = "ollama"
     ai_tool_custom_command: str = ""
@@ -172,7 +171,6 @@ def load_config(config_path: str) -> Config:
         discord_webhook=get_str("DISCORD_WEBHOOK"),
         label_in_progress=get_str("LABEL_IN_PROGRESS", "In progress"),
         label_review=get_str("LABEL_REVIEW", "Review"),
-        gitlab_username=get_str("GITLAB_USERNAME", "claude"),
         poll_interval=get_int("POLL_INTERVAL", 30),
         ai_tool_mode=get_str("AI_TOOL_MODE", "ollama"),
         ai_tool_custom_command=get_str("AI_TOOL_CUSTOM_COMMAND"),

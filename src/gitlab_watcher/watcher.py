@@ -135,18 +135,17 @@ class Watcher:
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
         
-        # Auto-detect username if generic or not set
-        self.gitlab_username = self.config.gitlab_username
-        if not self.gitlab_username or self.gitlab_username in ["claude", "bot"]:
-            try:
-                # In tests, mock_gitlab might not return what we expect if not configured
-                user_info = self.gitlab.get_current_user()
-                if isinstance(user_info, dict) and "username" in user_info:
-                    self.gitlab_username = user_info["username"]
-                    self.logger.info(f"Auto-detected GitLab username: {self.gitlab_username}")
-            except Exception as e:
-                # Don't let auto-detection failure break the watcher
-                self.logger.warning(f"Could not auto-detect GitLab username: {e}")
+        # Auto-detect username from GitLab API
+        self.gitlab_username = "claude" # Default fallback
+        try:
+            # In tests, mock_gitlab might not return what we expect if not configured
+            user_info = self.gitlab.get_current_user()
+            if isinstance(user_info, dict) and "username" in user_info:
+                self.gitlab_username = user_info["username"]
+                self.logger.info(f"Auto-detected GitLab username: {self.gitlab_username}")
+        except Exception as e:
+            # Don't let auto-detection failure break the watcher
+            self.logger.warning(f"Could not auto-detect GitLab username: {e}")
 
         self.discord = discord or DiscordWebhook(
             webhook_url=self.config.discord_webhook
@@ -246,6 +245,11 @@ class Watcher:
         if self.state.is_processing(project.project_id):
             return
 
+        # Sequential Processing: Skip if there are any tracked MRs
+        state = self.state.load(project.project_id)
+        if state.tracked_mrs:
+            return
+
         issues = self.gitlab.get_issues(
             project_id=project.project_id,
             state="opened",
@@ -276,110 +280,95 @@ class Watcher:
         self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
         state = self.state.load(project.project_id)
 
+        # 1. Check for merge cleanup on ALL tracked MRs
+        # Create a copy of keys to avoid modification during iteration
+        tracked_iids = list(state.tracked_mrs.keys())
+        for iid_str in tracked_iids:
+            iid = int(iid_str)
+            mr = self.gitlab.get_merge_request(project.project_id, iid)
 
-        # Check for merge cleanup BEFORE checking for open MRs
-        if state.last_mr_iid is not None:
-            mr = self.gitlab.get_merge_request(project.project_id, state.last_mr_iid)
+            if mr and mr.state in ["merged", "closed"]:
+                action = "merged" if mr.state == "merged" else "closed"
+                self._log(project.project_id, f"MR !{iid} was {action}")
 
-            if mr and mr.state == "merged":
-                self._log(project.project_id, f"MR !{state.last_mr_iid} was merged")
-
+                mr_data = state.tracked_mrs.get(iid_str, {})
+                branch = mr_data.get("branch") or ""
+                
+                # Cleanup and remove from tracking
                 self.processor.cleanup_after_merge(
                     project=project,
-                    branch=state.last_branch or "",
+                    branch=branch,
                     mr_title=mr.title,
                     mr_url=mr.web_url,
+                    mr_iid=iid, # Pass iid to be more specific
                 )
+                # Cleanup after merge might have already removed it, but being explicit
+                self.state.remove_tracked_mr(project.project_id, iid)
+                
+                # After one cleanup, return to avoid state complication in this cycle
                 return
 
-        # Check for open MRs
+        # 2. Get currently opened MRs AUTHORED BY THE BOT from GitLab
         mrs = self.gitlab.get_merge_requests(
             project_id=project.project_id,
             state="opened",
+            author_username=self.gitlab_username,
         )
 
         if not mrs:
             return
 
-        mr = mrs[0]  # Get first open MR
+        # 3. Update tracking for all open MRs and ensure they are added
+        for mr in mrs:
+            self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch)
 
-        # Get comments and sort them locally to be sure (oldest first)
-        notes = self.gitlab.get_notes(project.project_id, mr.iid)
-        self.logger.debug(f"[{project.name}] MR !{mr.iid} raw notes count: {len(notes)}")
-        notes = sorted(notes, key=lambda n: n.id)
-        
-        # Save the old note_id
-        old_note_id = state.last_note_id
-
-        # Find all discussions that are already "done" (have a bot reply)
-        handled_discussions = set()
-        for note in notes:
-            if note.author_username == self.gitlab_username and note.discussion_id:
-                handled_discussions.add(note.discussion_id)
-
-        # Find and process the FIRST valid human comment without status emojis
-        self.logger.debug(f"[{project.name}] MR !{mr.iid} checking {len(notes)} notes. Handled discussions: {len(handled_discussions)}")
-        for note in notes:
-            # 1. Skip system notes and the bot's own comments
-            is_own_note = note.author_username == self.gitlab_username
-            if note.system or is_own_note:
-                if note.id > old_note_id:
-                    self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
-                continue
-
-            # 2. Skip if already handled via emoji, reply, or session cache
-            SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
-            has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
-            is_handled_discussion = note.discussion_id in handled_discussions
+        # 4. Check for comments on ALL opened MRs (already filtered by author)
+        for mr in mrs:
+            # Get comments and sort them locally (oldest first)
+            notes = self.gitlab.get_notes(project.project_id, mr.iid)
+            notes = sorted(notes, key=lambda n: n.id)
             
-            # DOUBLE CHECK: If no emojis and no reply seen yet
-            if not has_emojis and not is_handled_discussion and note.id not in self._processed_notes:
-                self.logger.debug(f"  Double-checking emojis for note {note.id} (type={note.noteable_type})")
-                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
-                has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
-                if has_emojis:
-                    self.logger.info(f"  Double-check found emojis on note {note.id}: {refreshed_emojis}")
+            # Find all discussions that are already "done" (have a bot reply)
+            handled_discussions = set()
+            for note in notes:
+                if note.author_username == self.gitlab_username and note.discussion_id:
+                    handled_discussions.add(note.discussion_id)
 
-            is_skipped = has_emojis or is_handled_discussion or note.id in self._processed_notes
-            if is_skipped:
-                reason = "emojis" if has_emojis else ("reply" if is_handled_discussion else "session")
-                self.logger.debug(f"  Skipping note {note.id} ({reason})")
-                if note.id > old_note_id:
-                    self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
-                continue
+            # Find and process the FIRST valid human comment without status emojis
+            for note in notes:
+                # 1. Skip system notes and the bot's own comments
+                is_own_note = note.author_username == self.gitlab_username
+                if note.system or is_own_note:
+                    continue
 
-            # 3. Found the FIRST new valid human comment without status emojis
-            self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
-            self.state.set_processing(project.project_id, True)
-            self._processed_notes.add(note.id)
-            self.processor.process_comment(
-                project, 
-                mr, 
-                note.id, 
-                note.body,
-                discussion_id=note.discussion_id
-            )
-            # Update state immediately so we don't re-process this note if restarted
-            self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
-            return
-            
-            # Put EYE emoji to show we saw it
-            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "eyes")
-            
-            # Update state BEFORE processing (to lock this note and the MR)
-            self.state.update_mr_state(
-                project.project_id,
-                mr.iid,
-                mr.state,
-                note.id,
-                mr.source_branch,
-            )
-            self.state.set_processing(project.project_id, True)
-            self._processed_notes.add(note.id)
-            
-            # Process the comment and RETURN (process only ONE comment per poll cycle)
-            self.processor.process_comment(project, mr, note.id, note.body)
-            return
+                # 2. Skip if already handled via emoji, reply, or session cache
+                SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
+                has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
+                is_handled_discussion = note.discussion_id in handled_discussions
+                
+                # DOUBLE CHECK: If no emojis and no reply seen yet
+                if not has_emojis and not is_handled_discussion and note.id not in self._processed_notes:
+                    refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
+                    has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
+
+                is_skipped = has_emojis or is_handled_discussion or note.id in self._processed_notes
+                if is_skipped:
+                    continue
+
+                # 3. Found the FIRST new valid human comment
+                self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
+                self.state.set_processing(project.project_id, True)
+                self._processed_notes.add(note.id)
+                self.processor.process_comment(
+                    project, 
+                    mr, 
+                    note.id, 
+                    note.body,
+                    discussion_id=note.discussion_id
+                )
+                # Update MR state immediately (branch tracking)
+                self.state.update_mr_state(project.project_id, mr.iid, mr.state, mr.source_branch)
+                return
 
 
 

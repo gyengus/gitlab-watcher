@@ -42,7 +42,6 @@ GITLAB_TOKEN="test-token"
 DISCORD_WEBHOOK=""
 LABEL_IN_PROGRESS="In progress"
 LABEL_REVIEW="Review"
-GITLAB_USERNAME="claude"
 POLL_INTERVAL=30
 
 PROJECT_DIRS=(
@@ -57,7 +56,9 @@ PROJECT_DIRS=(
 @pytest.fixture
 def mock_gitlab() -> MagicMock:
     """Create a mock GitLab client."""
-    return MagicMock(spec=GitLabClient)
+    mock = MagicMock(spec=GitLabClient)
+    mock.get_current_user.return_value = {"username": "claude"}
+    return mock
 
 
 @pytest.fixture
@@ -128,7 +129,6 @@ class TestStateManager:
         state = state_manager.load(42)
 
         assert state.last_mr_iid is None
-        assert state.last_note_id == 0
         assert state.processing is False
 
     def test_save_and_load(self, temp_work_dir: Path) -> None:
@@ -172,26 +172,23 @@ class TestStateManager:
             project_id=42,
             mr_iid=1,
             mr_state="opened",
-            note_id=123,
             branch="feature-branch",
         )
 
         state = state_manager.load(42)
         assert state.last_mr_iid == 1
         assert state.last_mr_state == "opened"
-        assert state.last_note_id == 123
         assert state.last_branch == "feature-branch"
 
     def test_reset(self, temp_work_dir: Path) -> None:
         """Test resetting state."""
         state_manager = StateManager(temp_work_dir)
 
-        state_manager.update_mr_state(42, 1, "opened", 123, "feature")
+        state_manager.update_mr_state(42, 1, "opened", "feature")
         state_manager.reset(42)
 
         state = state_manager.load(42)
         assert state.last_mr_iid is None
-        assert state.last_note_id == 0
         assert state.last_branch is None
 
     def test_get_set_value(self, temp_work_dir: Path) -> None:
@@ -569,7 +566,7 @@ class TestWatcherCheckMRStatus:
 
         watcher.check_mr_status(project)
 
-        mock_gitlab.get_merge_requests.assert_called_once_with(
+        mock_gitlab.get_merge_requests.assert_called_once_with(author_username='claude', 
             project_id=42,
             state="opened",
         )
@@ -632,7 +629,6 @@ class TestWatcherCheckMRStatus:
             project.project_id,
             mr_iid=1,
             mr_state="opened",
-            note_id=0,
             branch="1-fix-the-bug",
         )
 
@@ -737,7 +733,6 @@ class TestWatcherCheckMRStatus:
             project.project_id,
             mr_iid=sample_mr.iid,
             mr_state="opened",
-            note_id=sample_note.id,  # Same note ID
             branch=sample_mr.source_branch,
         )
 
@@ -1037,7 +1032,6 @@ def test_check_mr_status_sequential_processing_verified(
     mock_state_mgr = MagicMock(spec=StateManager)
     mock_state_mgr.is_processing.return_value = False
     mock_state = MagicMock()
-    mock_state.last_note_id = 99
     mock_state.last_mr_iid = None
     mock_state_mgr.load.return_value = mock_state
 
@@ -1056,10 +1050,9 @@ def test_check_mr_status_sequential_processing_verified(
     # Verify ONLY the first comment was processed
     mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request", discussion_id="disc1")
 
-    # SECOND CALL with updated last_note_id
+    # SECOND CALL: mock first note as having an emoji
     mock_processor.process_comment.reset_mock()
-    mock_state.last_note_id = 100
-    mock_state_mgr.is_processing.return_value = False
+    notes[0].award_emojis = ["white_check_mark"]
     watcher.check_mr_status(project)
 
     mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request", discussion_id="disc1")
@@ -1086,7 +1079,6 @@ def test_check_mr_status_skips_system_and_self_verified(
     mock_state_mgr = MagicMock(spec=StateManager)
     mock_state_mgr.is_processing.return_value = False
     mock_state = MagicMock()
-    mock_state.last_note_id = 99
     mock_state.last_mr_iid = None
     mock_state_mgr.load.return_value = mock_state
 
@@ -1097,12 +1089,11 @@ def test_check_mr_status_skips_system_and_self_verified(
         processor=mock_processor,
         state=mock_state_mgr,
     )
-    watcher.config.gitlab_username = "claude-bot"
     project = watcher.config.projects[0]
 
     watcher.check_mr_status(project)
 
     # Only note 102 (first human comment) should be processed
-    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", discussion_id="disc2")
-    # Last state update should be for 102
-    mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, 102, "feat")
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", discussion_id="disc_human")
+    # Last state update should be for the branch
+    mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, "feat")

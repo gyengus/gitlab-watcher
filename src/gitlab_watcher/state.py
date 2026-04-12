@@ -3,9 +3,9 @@
 import json
 import logging
 import threading
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,9 @@ class ProjectState:
 
     last_mr_iid: Optional[int] = None
     last_mr_state: Optional[str] = None
-    last_note_id: int = 0
     last_branch: Optional[str] = None
     processing: bool = False
+    tracked_mrs: dict[str, dict] = field(default_factory=dict)
 
 
 class StateManager:
@@ -64,8 +64,23 @@ class StateManager:
         if state_file.exists():
             try:
                 data = json.loads(state_file.read_text())
-                state = ProjectState(**data)
-            except (json.JSONDecodeError, TypeError):
+                
+                # Migration logic: if we have legacy data but no tracked_mrs, migrate it
+                if "tracked_mrs" not in data:
+                    data["tracked_mrs"] = {}
+                
+                last_iid = data.get("last_mr_iid")
+                if last_iid and str(last_iid) not in data["tracked_mrs"]:
+                    data["tracked_mrs"][str(last_iid)] = {
+                        "branch": data.get("last_branch"),
+                    }
+                
+                # Filter data to only include valid ProjectState fields
+                valid_fields = {f.name for f in ProjectState.__dataclass_fields__.values()}
+                filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+                state = ProjectState(**filtered_data)
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                logger.warning(f"Failed to load state for project {project_id}: {e}. Creating new state.")
                 state = ProjectState()
         else:
             state = ProjectState()
@@ -199,18 +214,53 @@ class StateManager:
     def update_mr_state(
         self,
         project_id: int,
-        mr_iid: Optional[int],
+        mr_iid: int,
         mr_state: Optional[str],
-        note_id: int,
         branch: Optional[str],
     ) -> None:
         """Update MR tracking state and force an immediate save."""
         state = self.load(project_id)
+        
+        # Update legacy fields for backward compatibility
         state.last_mr_iid = mr_iid
         state.last_mr_state = mr_state
-        state.last_note_id = note_id
         state.last_branch = branch
+        
+        # Update multi-MR tracking
+        mr_id_str = str(mr_iid)
+        if mr_id_str not in state.tracked_mrs:
+            state.tracked_mrs[mr_id_str] = {}
+        
+        state.tracked_mrs[mr_id_str].update({
+            "branch": branch,
+        })
+        
         self.force_save(project_id)
+
+    def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str) -> None:
+        """Add an MR to the tracked list if not already present."""
+        state = self.load(project_id)
+        mr_id_str = str(mr_iid)
+        if mr_id_str not in state.tracked_mrs:
+            state.tracked_mrs[mr_id_str] = {
+                "branch": branch,
+            }
+            self.force_save(project_id)
+
+    def remove_tracked_mr(self, project_id: int, mr_iid: int) -> None:
+        """Remove an MR from the tracked list."""
+        state = self.load(project_id)
+        mr_id_str = str(mr_iid)
+        if mr_id_str in state.tracked_mrs:
+            del state.tracked_mrs[mr_id_str]
+            
+            # If this was the last_mr_iid, clear legacy fields too
+            if state.last_mr_iid == mr_iid:
+                state.last_mr_iid = None
+                state.last_branch = None
+                state.last_mr_state = None
+                
+            self.force_save(project_id)
 
     def reset(self, project_id: int) -> None:
         """Reset state for a project."""
