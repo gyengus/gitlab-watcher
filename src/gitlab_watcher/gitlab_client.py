@@ -252,34 +252,27 @@ class GitLabClient:
         )
 
     def get_notes(
-        self,
-        project_id: int,
-        mr_iid: int,
-        sort: str = "desc",
+        self, project_id: int, mr_iid: int
     ) -> list[Note]:
-        """Get notes (comments) for a merge request with caching."""
-        cache_key = f"notes_{project_id}_{mr_iid}"
-        cached = self._cache.get(cache_key)
-
-        if cached is not None:
+        """Get notes for a merge request."""
+        endpoint = f"/merge_requests/{mr_iid}/notes"
+        try:
+            response = self._request(
+                "GET", 
+                self._api_url(project_id, endpoint),
+                params={"include_award_emojis": "true"}
+            )
+            notes_data = response.json()
             return [
                 Note(
-                    id=item["id"],
-                    body=item.get("body", ""),
-                    author_username=item.get("author", {}).get("username", ""),
-                    system=item.get("system", False),
-                    award_emojis=[e["name"] for e in item.get("award_emojis", [])],
+                    id=note["id"],
+                    body=note["body"],
+                    author_username=note["author"]["username"],
+                    system=note.get("system", False),
+                    award_emojis=[e["name"] for e in note.get("award_emoji", [])]
                 )
-                for item in cached
+                for note in notes_data
             ]
-
-        endpoint = f"/merge_requests/{mr_iid}/notes?sort={sort}&include_award_emojis=true"
-
-        response = self._request("GET", self._api_url(project_id, endpoint))
-        data = response.json()
-
-        # Cache the raw response
-        self._cache.set(cache_key, data)
 
         return [
             Note(
