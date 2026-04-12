@@ -270,28 +270,26 @@ class Watcher:
         # Save the old note_id
         old_note_id = state.last_note_id
 
-        # Find and process the FIRST new valid comment
-        self.logger.debug(f"[{project.name}] MR !{mr.iid} checking {len(notes)} notes. old_note_id: {old_note_id}")
+        # Find and process the FIRST valid human comment without status emojis
+        self.logger.debug(f"[{project.name}] MR !{mr.iid} checking {len(notes)} notes.")
         for note in notes:
             self.logger.debug(f"  Note {note.id} from {note.author_username}: '{note.body[:30]}...' (system={note.system}, emojis={note.award_emojis})")
-            if note.id <= old_note_id:
-                continue
-
-            # NEW: Check for emojis to avoid re-processing or ID shielding
-            if "eyes" in note.award_emojis or "white_check_mark" in note.award_emojis:
-                # Still update state to the latest processed/skipped ID
-                self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
-                continue
-
-            # Skip system notes and the bot's own comments
+            
+            # 1. Skip system notes and the bot's own comments
             is_own_note = note.author_username == self.config.gitlab_username
             if note.system or is_own_note:
-                self.state.update_mr_state(
-                    project.project_id, mr.iid, mr.state, note.id, mr.source_branch
-                )
+                # Still update last_note_id state so we track progress, but don't process
+                if note.id > old_note_id:
+                    self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
 
-            # Found the FIRST new valid human comment
+            # 2. Skip if already has processing emojis (status tracking on GitLab)
+            if "eyes" in note.award_emojis or "white_check_mark" in note.award_emojis or "x" in note.award_emojis:
+                if note.id > old_note_id:
+                    self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
+                continue
+
+            # 3. Found the FIRST new valid human comment without emojis
             self._log(
                 project.project_id,
                 f"New comment on MR !{mr.iid}: {sanitize_for_log(note.body)}",
