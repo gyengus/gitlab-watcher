@@ -263,18 +263,22 @@ class GitLabClient:
                 self._api_url(project_id, endpoint),
                 params={"include_award_emojis": "true"}
             )
-            notes_data = response.json()
-            return [
-                Note(
-                    id=note["id"],
-                    body=note["body"],
-                    author_username=note["author"]["username"],
-                    system=note.get("system", False),
-                    award_emojis=[e["name"] for e in note.get("award_emoji", [])]
+            notes = []
+            for note in notes_data:
+                # The GitLab API uses 'award_emojis' (plural) in the Notes response
+                emojis = note.get("award_emojis") or note.get("award_emoji") or []
+                notes.append(
+                    Note(
+                        id=note["id"],
+                        body=note["body"],
+                        author_username=note["author"]["username"],
+                        system=note.get("system", False),
+                        award_emojis=[e["name"] for e in emojis]
+                    )
                 )
-                for note in notes_data
-            ]
-        except Exception:
+            return notes
+        except Exception as e:
+            self.logger.error(f"Error parsing notes: {e}")
             return []
 
     def update_issue_labels(
