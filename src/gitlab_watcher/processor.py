@@ -332,7 +332,8 @@ class Processor:
                 self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
                 return (
                     False,
-                    f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n\n"
+                    f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n"
+                    f"Command: `{shlex.join(cmd[:3])}...` (truncated)\n\n"
                     f"--- Captured Output ---\n{full_output}",
                 )
 
@@ -409,7 +410,7 @@ class Processor:
             self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                "Git preparation failed (fetch/checkout/pull)",
+                f"Git preparation failed on branch `{self.default_branch}` (fetch/checkout/pull)",
                 details=str(e),
             )
             self.state.set_processing(project.project_id, False)
@@ -534,7 +535,7 @@ Do not add Co-Authored-By signature to commits."""
             self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                "Git preparation failed (fetch/checkout/pull)",
+                f"Git preparation failed on branch `{mr.source_branch}` (fetch/checkout/pull)",
                 details=str(e),
             )
             self.state.set_processing(project.project_id, False)
