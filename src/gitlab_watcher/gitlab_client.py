@@ -122,9 +122,16 @@ class GitLabClient:
         from .logging_utils import sanitize_for_log
         return f"GitLabClient(url={sanitize_for_log(self.base_url)!r})"
 
-    def _api_url(self, project_id: int, endpoint: str) -> str:
-        """Build full API URL for a project endpoint."""
-        return f"{self.base_url}/api/v4/projects/{project_id}{endpoint}"
+    def _api_url(self, project_id: Optional[int], endpoint: str) -> str:
+        """Build full API URL for a project endpoint or general endpoint."""
+        if project_id is not None:
+            return f"{self.base_url}/api/v4/projects/{project_id}{endpoint}"
+        return f"{self.base_url}/api/v4{endpoint}"
+
+    def get_current_user(self) -> dict[str, Any]:
+        """Get the authenticated user's details."""
+        response = self._request("GET", self._api_url(None, "/user"))
+        return response.json()
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic for 5xx errors."""

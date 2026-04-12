@@ -379,6 +379,7 @@ class TestWatcherCheckIssues:
     ) -> None:
         """Test check_issues when there are no issues."""
         mock_gitlab.get_issues.return_value = []
+        mock_gitlab.get_current_user.return_value = {"username": "claude"}
 
         watcher = Watcher(
             config_path=str(config_file),
@@ -685,6 +686,7 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_merge_requests.return_value = [sample_mr]
         mock_gitlab.get_notes.return_value = [own_note]
         mock_gitlab.get_merge_request.return_value = None
+        mock_gitlab.get_current_user.return_value = {"username": "claude"}
 
         watcher = Watcher(
             config_path=str(config_file),
@@ -945,6 +947,8 @@ def test_logging_fallback(
 ) -> None:
     """Test logging fallback to /tmp when primary log file is not writable."""
     mock_open.side_effect = [PermissionError("Perm denied"), MagicMock()]
+    mock_file_handler.return_value.level = logging.INFO
+    mock_gitlab.get_current_user.return_value = {"username": "claude"}
     
     with caplog.at_level(logging.WARNING):
         watcher = Watcher(
@@ -1070,6 +1074,7 @@ def test_check_mr_status_skips_system_and_self_verified(
     mock_mr = MagicMock(iid=1, source_branch="feat", state="opened")
     mock_gitlab.get_merge_requests.return_value = [mock_mr]
     mock_gitlab.get_merge_request.return_value = None
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
 
     mock_state_mgr = MagicMock(spec=StateManager)
     mock_state_mgr.is_processing.return_value = False

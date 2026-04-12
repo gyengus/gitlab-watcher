@@ -192,8 +192,9 @@ class StateManager:
         return state.processing
 
     def set_processing(self, project_id: int, processing: bool) -> None:
-        """Set the processing flag."""
+        """Set the processing flag and force an immediate save."""
         self.set(project_id, "processing", processing)
+        self.force_save(project_id)
 
     def update_mr_state(
         self,
@@ -203,13 +204,13 @@ class StateManager:
         note_id: int,
         branch: Optional[str],
     ) -> None:
-        """Update MR tracking state."""
+        """Update MR tracking state and force an immediate save."""
         state = self.load(project_id)
         state.last_mr_iid = mr_iid
         state.last_mr_state = mr_state
         state.last_note_id = note_id
         state.last_branch = branch
-        self.save(project_id)
+        self.force_save(project_id)
 
     def reset(self, project_id: int) -> None:
         """Reset state for a project."""

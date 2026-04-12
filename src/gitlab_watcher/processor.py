@@ -249,6 +249,9 @@ class Processor:
                 preexec_fn=os.setsid,  # Create new process group for cleanup
             )
 
+            # Record PGID immediately while process is alive
+            pgid = os.getpgid(process.pid)
+
             all_output = []
             output_queue: queue.Queue = queue.Queue()
 
@@ -291,8 +294,8 @@ class Processor:
                         break
             finally:
                 # Always cleanup the process group (including orphans)
+                # Using saved pgid to work even if the leader process is already dead
                 try:
-                    pgid = os.getpgid(process.pid)
                     # Use SIGTERM first
                     os.killpg(pgid, signal.SIGTERM)
                     
@@ -307,10 +310,10 @@ class Processor:
                     if process.poll() is None:
                         os.killpg(pgid, signal.SIGKILL)
                 except ProcessLookupError:
-                    # Process or process group already gone
+                    # Process group already gone
                     pass
                 except Exception as e:
-                    self.logger.error(f"Error cleaning up process group: {e}")
+                    self.logger.error(f"Error cleaning up process group {pgid}: {e}")
 
             # Ensure pipe is closed to unblock reader if process is gone
             try:

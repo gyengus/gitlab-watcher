@@ -130,6 +130,20 @@ class Watcher:
 
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
+        
+        # Auto-detect username if generic or not set
+        self.gitlab_username = self.config.gitlab_username
+        if not self.gitlab_username or self.gitlab_username in ["claude", "bot"]:
+            try:
+                # In tests, mock_gitlab might not return what we expect if not configured
+                user_info = self.gitlab.get_current_user()
+                if isinstance(user_info, dict) and "username" in user_info:
+                    self.gitlab_username = user_info["username"]
+                    self.logger.info(f"Auto-detected GitLab username: {self.gitlab_username}")
+            except Exception as e:
+                # Don't let auto-detection failure break the watcher
+                self.logger.warning(f"Could not auto-detect GitLab username: {e}")
+
         self.discord = discord or DiscordWebhook(
             webhook_url=self.config.discord_webhook
         )
@@ -137,7 +151,7 @@ class Watcher:
             gitlab=self.gitlab,
             discord=self.discord,
             state=self.state,
-            gitlab_username=self.config.gitlab_username,
+            gitlab_username=self.gitlab_username,
             label_in_progress=self.config.label_in_progress,
             label_review=self.config.label_review,
             ai_tool_mode=self.config.ai_tool_mode,
@@ -145,6 +159,9 @@ class Watcher:
             ai_tool_timeout=self.config.ai_tool_timeout,
             default_branch=self.config.default_branch,
         )
+        
+        # In-memory deduplication for recently processed notes (solves API lag)
+        self._processed_notes: set[int] = set()
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, str | None]:
         """Extract GitLab URL and token from git remote.
@@ -208,7 +225,7 @@ class Watcher:
         issues = self.gitlab.get_issues(
             project_id=project.project_id,
             state="opened",
-            assignee_username=self.config.gitlab_username,
+            assignee_username=self.gitlab_username,
         )
         if not issues:
             return
@@ -276,15 +293,16 @@ class Watcher:
             self.logger.debug(f"  Note {note.id} from {note.author_username}: '{note.body[:30]}...' (system={note.system}, emojis={note.award_emojis})")
             
             # 1. Skip system notes and the bot's own comments
-            is_own_note = note.author_username == self.config.gitlab_username
+            is_own_note = note.author_username == self.gitlab_username
             if note.system or is_own_note:
                 # Still update last_note_id state so we track progress, but don't process
                 if note.id > old_note_id:
                     self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
 
-            # 2. Skip if already has processing emojis (status tracking on GitLab)
-            if "eyes" in note.award_emojis or "white_check_mark" in note.award_emojis or "x" in note.award_emojis:
+            # 2. Skip if already has processing emojis or recently handled in this session
+            has_emojis = "eyes" in note.award_emojis or "white_check_mark" in note.award_emojis or "x" in note.award_emojis
+            if has_emojis or note.id in self._processed_notes:
                 if note.id > old_note_id:
                     self.state.update_mr_state(project.project_id, mr.iid, mr.state, note.id, mr.source_branch)
                 continue
@@ -307,6 +325,7 @@ class Watcher:
                 mr.source_branch,
             )
             self.state.set_processing(project.project_id, True)
+            self._processed_notes.add(note.id)
             
             # Process the comment and RETURN (process only ONE comment per poll cycle)
             self.processor.process_comment(project, mr, note.id, note.body)
