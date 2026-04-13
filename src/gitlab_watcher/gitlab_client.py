@@ -427,11 +427,11 @@ class GitLabClient:
             self._request(
                 "POST", 
                 self._api_url(project_id, endpoint), 
-                data={"name": emoji_name}
+                json={"name": emoji_name}
             )
             return True
         except Exception as e:
-            self.logger.debug(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
             return False
 
 
