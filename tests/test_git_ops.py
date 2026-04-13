@@ -274,6 +274,40 @@ class TestGitOps:
 
         assert result is None
     @patch("subprocess.run")
+    def test_has_unpushed_work_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_work returns True when commits exist ahead of default."""
+        mock_run.return_value = Mock(
+            stdout="abc1234 Some commit\ndef5678 Another commit\n", returncode=0
+        )
+
+        result = git_ops.has_unpushed_work("master")
+
+        assert result is True
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "log" in cmd
+        assert "master..HEAD" in cmd
+        assert "--oneline" in cmd
+
+    @patch("subprocess.run")
+    def test_has_unpushed_work_false(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_work returns False when no commits ahead of default."""
+        mock_run.return_value = Mock(stdout="\n", returncode=0)
+
+        result = git_ops.has_unpushed_work("master")
+
+        assert result is False
+
+    @patch("subprocess.run")
+    def test_has_unpushed_work_error(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_work returns False on git error."""
+        mock_run.side_effect = subprocess.CalledProcessError(1, "git")
+
+        result = git_ops.has_unpushed_work("master")
+
+        assert result is False
+
+    @patch("subprocess.run")
     def test_checkout_already_on_branch(self, mock_run: Mock, git_ops: GitOps) -> None:
         """Test checkout when already on the target branch."""
         mock_run.return_value = Mock(stdout="feature\n", returncode=0)

@@ -107,6 +107,21 @@ class GitOps:
         except subprocess.CalledProcessError:
             return False
 
+    def has_unpushed_work(self, default_branch: str) -> bool:
+        """Check if the current branch has commits beyond the default branch.
+
+        Args:
+            default_branch: The default branch to compare against
+
+        Returns:
+            True if there are commits ahead of the default branch, False otherwise
+        """
+        try:
+            result = self._run("log", f"{default_branch}..HEAD", "--oneline", check=False)
+            return bool(result.stdout.strip())
+        except Exception:
+            return False
+
     def branch_exists(self, branch: str) -> bool:
         """Check if a branch exists locally."""
         try:

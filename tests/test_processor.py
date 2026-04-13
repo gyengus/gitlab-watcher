@@ -660,6 +660,116 @@ class TestProcessorProcessComment:
         # args = processor_with_git.discord.notify_error.call_args[0]
         assert True # Details
 
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_process_comment_adds_eyes_emoji(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test that process_comment adds eyes emoji to the note."""
+        # Mock GitOps
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_unpushed_work.return_value = False
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        # Mock AI Tool success
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.return_value = ""
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        # Mock create_note_award_emoji
+        processor_with_git.gitlab.create_note_award_emoji = Mock()
+
+        # Initialize state
+        processor_with_git.state.init_state(project_config.project_id)
+
+        processor_with_git.process_comment(
+            project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
+        )
+
+        # Verify eyes emoji was added
+        emoji_calls = processor_with_git.gitlab.create_note_award_emoji.call_args_list
+        eyes_call = [c for c in emoji_calls if c[0][3] == "eyes"]
+        assert len(eyes_call) == 1, f"Expected one 'eyes' emoji call, got: {emoji_calls}"
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_process_comment_continue_with_unpushed_work(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test that process_comment includes continue instruction when unpushed work exists."""
+        # Mock GitOps
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_unpushed_work.return_value = True
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        # Mock AI Tool success
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.return_value = ""
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        # Mock create_note_award_emoji
+        processor_with_git.gitlab.create_note_award_emoji = Mock()
+
+        # Initialize state
+        processor_with_git.state.init_state(project_config.project_id)
+
+        processor_with_git.process_comment(
+            project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
+        )
+
+        # Verify has_unpushed_work was called
+        mock_git.has_unpushed_work.assert_called_once_with("master")
+
 
 class TestProcessorCleanup:
     """Tests for the cleanup_after_merge method."""

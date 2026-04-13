@@ -259,6 +259,13 @@ class Watcher:
             return
 
         # Find first issue without workflow labels (backlog)
+        # Also retry issues with "In progress" label but no MR (timed out previously)
+        open_mrs = self.gitlab.get_merge_requests(
+            project_id=project.project_id,
+            state="opened",
+            author_username=self.gitlab_username,
+        )
+
         for issue in issues:
             has_in_progress = self.config.label_in_progress in issue.labels
             has_review = self.config.label_review in issue.labels
@@ -271,6 +278,24 @@ class Watcher:
                 self.state.set_processing(project.project_id, True)
                 self.processor.process_issue(project, issue)
                 break
+
+            # Retry: "In progress" but no MR exists (likely timed out)
+            if has_in_progress and not has_review:
+                # Check if any open MR has a source branch matching this issue
+                # Branch names follow the pattern: {iid}-{slug}
+                has_matching_mr = any(
+                    mr.source_branch.startswith(f"{issue.iid}-")
+                    for mr in open_mrs
+                ) if open_mrs else False
+
+                if not has_matching_mr:
+                    self._log(
+                        project.project_id,
+                        f"Retrying stuck issue #{issue.iid} (In progress but no MR found)",
+                    )
+                    self.state.set_processing(project.project_id, True)
+                    self.processor.process_issue(project, issue)
+                    break
 
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""

@@ -92,5 +92,16 @@ class GitOperations(Protocol):
         """
         ...
 
+    def has_unpushed_work(self, default_branch: str) -> bool:
+        """Check if current branch has commits beyond the default branch.
+
+        Args:
+            default_branch: The default branch to compare against
+
+        Returns:
+            True if there are commits ahead of the default branch
+        """
+        ...
+
 
 __all__ = ["GitOperations"]

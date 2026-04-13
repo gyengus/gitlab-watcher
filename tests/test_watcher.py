@@ -458,7 +458,7 @@ class TestWatcherCheckIssues:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test check_issues skips issues with In progress label."""
+        """Test check_issues skips issues with In progress label when MR exists."""
         issue_with_label = Issue(
             iid=1,
             title="Fix the bug",
@@ -467,6 +467,16 @@ class TestWatcherCheckIssues:
             labels=["bug", "In progress"],
         )
         mock_gitlab.get_issues.return_value = [issue_with_label]
+        # Simulate that an MR exists for this issue (branch starts with "1-")
+        mock_gitlab.get_merge_requests.return_value = [
+            MergeRequest(
+                iid=10,
+                title="Fix the bug",
+                source_branch="1-fix-the-bug",
+                web_url="https://git.example.com/merge_requests/10",
+                state="opened",
+            )
+        ]
 
         watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
@@ -479,7 +489,7 @@ class TestWatcherCheckIssues:
 
         watcher.check_issues(project)
 
-        # Should not process issue with In progress label
+        # Should not process issue with In progress label when MR exists
         mock_processor.process_issue.assert_not_called()
 
     def test_check_issues_skips_review(
@@ -499,6 +509,7 @@ class TestWatcherCheckIssues:
             labels=["bug", "Review"],
         )
         mock_gitlab.get_issues.return_value = [issue_with_label]
+        mock_gitlab.get_merge_requests.return_value = []
 
         watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
@@ -513,6 +524,40 @@ class TestWatcherCheckIssues:
 
         # Should not process issue with Review label
         mock_processor.process_issue.assert_not_called()
+
+    def test_check_issues_retries_in_progress_without_mr(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test check_issues retries issues with In progress label but no MR (timed out)."""
+        issue_with_label = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Description",
+            web_url="https://git.example.com/issues/1",
+            labels=["bug", "In progress"],
+        )
+        mock_gitlab.get_issues.return_value = [issue_with_label]
+        # No MRs exist for this issue
+        mock_gitlab.get_merge_requests.return_value = []
+
+        watcher = Watcher(disable_lock=True, 
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_issues(project)
+
+        # Should retry issue with In progress label when no MR exists
+        mock_processor.process_issue.assert_called_once()
 
     def test_check_issues_empty_issues_list(
         self,

@@ -431,6 +431,16 @@ class Processor:
             self.state.set_processing(project.project_id, False)
             return False
 
+        # Check for previous work on this branch (e.g. from a timed-out run)
+        continue_instruction = ""
+        if git.has_unpushed_work(self.default_branch):
+            continue_instruction = (
+
+                "\n\nNote: This branch already has previous work (commits exist). "
+                "Please review the current state of the code with git log and git diff, "
+                "then continue from where the previous work left off. Do not start over."
+            )
+
         # Build prompt for Claude (truncate description if too long)
         description = issue.description or ""
         if len(description) > MAX_DESCRIPTION_LENGTH:
@@ -444,7 +454,7 @@ Issue description:
 Please complete this task. Make the necessary changes and commit them.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits."""
+Do not add Co-Authored-By signature to commits.{continue_instruction}"""
 
         # Run AI tool
         try:
@@ -530,6 +540,9 @@ Do not add Co-Authored-By signature to commits."""
             f"Starting to work on: {comment}"
         )
 
+        # Add eyes emoji to indicate processing has started
+        self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "eyes")
+
         # Switch to MR branch
         try:
             self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull/rebase)")
@@ -547,6 +560,15 @@ Do not add Co-Authored-By signature to commits."""
             return False
 
         # Build prompt for Claude
+        continue_instruction = ""
+        if git.has_unpushed_work(self.default_branch):
+            continue_instruction = (
+
+                "\n\nNote: This branch already has previous work (commits exist). "
+                "Please review the current state of the code with git log and git diff, "
+                "then continue from where the previous work left off. Do not start over."
+            )
+
         prompt = f"""You are working on a merge request titled: {mr.title}
 Branch: {mr.source_branch}
 
@@ -556,7 +578,7 @@ A reviewer left this feedback:
 Please address this feedback. Make the necessary changes and commit them.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits."""
+Do not add Co-Authored-By signature to commits.{continue_instruction}"""
 
         # Run AI tool
         try:
