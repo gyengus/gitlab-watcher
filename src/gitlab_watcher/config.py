@@ -126,23 +126,22 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
 def extract_project_id(project_file_path: Path) -> Optional[int]:
     """Extract Project ID from PROJECT.md, AGENTS.md, or CLAUDE.md file.
 
-    Case-insensitive. Supports markdown formatting:
+    Case-insensitive. Supports markdown formatting on the value, label, or entire line:
     - Project ID: 31
     - project id: 31
     - PROJECT_ID: 31
-    - Project ID: **31**
-    - Project ID: *31*
-    - Project ID: ***31***
-    - Project ID: __31__
-    - Project ID: _31_
+    - Project ID: **31** / *31* / ***31***
+    - Project ID: __31__ / _31_
     - Project ID: `31`
+    - **Project ID: 31** / **Project ID:** 31
+    - `Project ID: 31`
     """
     if not project_file_path.exists():
         return None
 
     content = project_file_path.read_text()
 
-    match = re.search(r"(?i)project[_\s]*id:?\s*(?:\*{1,3}|_{1,3}|`+)?(\d+)(?:\*{1,3}|_{1,3}|`+)?", content)
+    match = re.search(r"(?i)(?:\*{1,3}|_{1,3}|`{1,2})?project[_\s]*id:?[*_`\s]*(\d+)(?:\*{1,3}|_{1,3}|`{1,2})?", content)
     if match:
         return int(match.group(1))
 

@@ -181,6 +181,36 @@ class TestExtractProjectId:
                 project_id = extract_project_id(claude_md)
                 assert project_id == 42, f"Failed for: {text}"
 
+    def test_extract_formatted_label(self) -> None:
+        """Test extracting project ID when the label itself is formatted."""
+        for content in [
+            "**Project ID:** 42",
+            "**Project ID:** 42",
+            "*Project ID:* 42",
+            "__Project ID:__ 42",
+        ]:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                claude_md = Path(tmpdir) / "CLAUDE.md"
+                claude_md.write_text(content)
+
+                project_id = extract_project_id(claude_md)
+                assert project_id == 42, f"Failed for: {content}"
+
+    def test_extract_entire_line_formatted(self) -> None:
+        """Test extracting project ID when the entire line is formatted."""
+        for content in [
+            "**Project ID: 42**",
+            "*Project ID: 42*",
+            "`Project ID: 42`",
+            "**PROJECT ID: 42**",
+        ]:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                claude_md = Path(tmpdir) / "CLAUDE.md"
+                claude_md.write_text(content)
+
+                project_id = extract_project_id(claude_md)
+                assert project_id == 42, f"Failed for: {content}"
+
     def test_extract_with_underscore(self) -> None:
         """Test extracting project ID with underscore."""
         content = "project_id: 123"
