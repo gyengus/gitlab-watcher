@@ -50,6 +50,7 @@ class MergeRequest:
     web_url: str
     source_branch: str
     state: str
+    author: str = ""
 
 
 @dataclass
@@ -250,6 +251,7 @@ class GitLabClient:
                 web_url=item.get("web_url", ""),
                 source_branch=item.get("source_branch", ""),
                 state=item.get("state", ""),
+                author=item.get("author", {}).get("username", ""),
             )
             for item in data
         ]
@@ -266,6 +268,7 @@ class GitLabClient:
                 web_url=cached.get("web_url", ""),
                 source_branch=cached.get("source_branch", ""),
                 state=cached.get("state", ""),
+                author=cached.get("author", {}).get("username", ""),
             )
 
         try:
@@ -287,6 +290,7 @@ class GitLabClient:
             web_url=data.get("web_url", ""),
             source_branch=data.get("source_branch", ""),
             state=data.get("state", ""),
+            author=data.get("author", {}).get("username", ""),
         )
 
     def get_notes(

@@ -318,7 +318,13 @@ class Watcher:
 
                 mr_data = state.tracked_mrs.get(iid_str, {})
                 branch = mr_data.get("branch") or ""
-                
+                created_by_watcher = mr_data.get("created_by_watcher", False)
+
+                if not created_by_watcher:
+                    self._log(project.project_id, f"MR !{iid} merged/closed but not created by watcher — skipping cleanup")
+                    self.state.remove_tracked_mr(project.project_id, iid)
+                    return
+
                 # Cleanup and remove from tracking
                 self.processor.cleanup_after_merge(
                     project=project,

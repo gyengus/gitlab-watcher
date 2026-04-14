@@ -485,6 +485,8 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             )
 
             if mr:
+                # Track the MR we just created so the watcher knows it's ours
+                self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
                 # Move issue to Review
                 self.gitlab.update_issue_labels(
                     project.project_id,

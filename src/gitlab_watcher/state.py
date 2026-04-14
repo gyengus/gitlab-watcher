@@ -228,22 +228,23 @@ class StateManager:
         
         # Update multi-MR tracking
         mr_id_str = str(mr_iid)
-        if mr_id_str not in state.tracked_mrs:
-            state.tracked_mrs[mr_id_str] = {}
+        existing = state.tracked_mrs.get(mr_id_str, {})
+        state.tracked_mrs[mr_id_str] = existing
         
-        state.tracked_mrs[mr_id_str].update({
+        existing.update({
             "branch": branch,
         })
         
         self.force_save(project_id)
 
-    def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str) -> None:
+    def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str, created_by_watcher: bool = False) -> None:
         """Add an MR to the tracked list if not already present."""
         state = self.load(project_id)
         mr_id_str = str(mr_iid)
         if mr_id_str not in state.tracked_mrs:
             state.tracked_mrs[mr_id_str] = {
                 "branch": branch,
+                "created_by_watcher": created_by_watcher,
             }
             self.force_save(project_id)
 

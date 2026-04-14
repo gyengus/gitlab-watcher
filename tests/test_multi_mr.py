@@ -39,9 +39,9 @@ def project_config():
     return ProjectConfig(name="test-project", project_id=1, path=Path("/tmp/test"))
 
 def test_check_mr_status_multi_cleanup(state_manager, mock_gitlab, mock_processor, mock_discord, project_config):
-    # Setup state with two tracked MRs
-    state_manager.add_tracked_mr(1, 12, "branch-12")
-    state_manager.add_tracked_mr(1, 13, "branch-13")
+    # Setup state with two tracked MRs (both created by watcher)
+    state_manager.add_tracked_mr(1, 12, "branch-12", created_by_watcher=True)
+    state_manager.add_tracked_mr(1, 13, "branch-13", created_by_watcher=True)
     
     # Mock GitLab: MR 13 is merged, MR 12 is still opened
     def get_mr_mock(project_id, iid):
