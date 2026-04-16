@@ -34,6 +34,7 @@ jobs:
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -n "$PREVIOUS_TAG" ]; then
             COMMITS=$(git log "${PREVIOUS_TAG}..HEAD" --pretty='- %s')
+            echo "previous_tag=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
           else
             COMMITS=$(git log --pretty='- %s' -20)
           fi
@@ -51,6 +52,8 @@ jobs:
             ## What's Changed
 
             ${{ steps.changelog.outputs.changes }}
+
+            **Full Changelog**: ${{ steps.changelog.outputs.previous_tag && format('https://github.com/{0}/compare/{1}...{2}', github.repository, steps.changelog.outputs.previous_tag, github.ref_name) || '' }}
 
             ---
             📦 **PyPI Package available:** [https://pypi.org/project/gitlab-watcher/](https://pypi.org/project/gitlab-watcher/)
