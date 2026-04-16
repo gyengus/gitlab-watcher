@@ -28,13 +28,29 @@ jobs:
         with:
           fetch-depth: 0
       
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log "${PREVIOUS_TAG}..HEAD" --pretty='- %s')
+          else
+            COMMITS=$(git log --pretty='- %s' -20)
+          fi
+          {
+            echo "changes<<EOF"
+            echo "$COMMITS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
-          generate_release_notes: true
-          append_body: true
           body: |
-            
+            ## What's Changed
+
+            ${{ steps.changelog.outputs.changes }}
+
             ---
             📦 **PyPI Package available:** [https://pypi.org/project/gitlab-watcher/](https://pypi.org/project/gitlab-watcher/)
