@@ -3,9 +3,14 @@
 import logging
 import re
 import shlex
+import os
+import queue
+import signal
 import subprocess
+import threading
+import time
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Optional
 
 from .config import ProjectConfig
 from .discord import DiscordWebhook
@@ -18,10 +23,8 @@ from .state import StateManager
 # Security constants for prompt sanitization
 MAX_PROMPT_LENGTH = 10000
 FORBIDDEN_PATTERNS = [
-    r"\$\([^)]+\)",  # Command substitution $(...)
-    r"`[^`]+`",  # Backtick command `...`
-    r"\$\{[^}]+\}",  # Variable expansion ${...}
-    r"\$\w+",  # Variable reference $var
+    r"ignore\s+all\s+previous",
+    r"system\s+message",
 ]
 
 # Input validation constants
@@ -32,6 +35,7 @@ MAX_BRANCH_LENGTH = 100
 
 # Default AI tool timeout (1 hour)
 DEFAULT_AI_TOOL_TIMEOUT = 3600
+CLAUDE_CLI_TIMEOUT_SECONDS = DEFAULT_AI_TOOL_TIMEOUT
 
 
 class Processor:
@@ -95,8 +99,13 @@ class Processor:
             prompt = prompt[:MAX_PROMPT_LENGTH]
 
         for pattern in FORBIDDEN_PATTERNS:
-            if re.search(pattern, prompt):
-                raise ValueError(f"Prompt contains forbidden pattern: {pattern}")
+            match = re.search(pattern, prompt)
+            if match:
+                matched_text = match.group(0)
+                # Truncate matched text if it's very long
+                if len(matched_text) > 100:
+                    matched_text = matched_text[:97] + "..."
+                raise ValueError(f"Prompt contains forbidden pattern: '{pattern}' (found matching text: '{matched_text}')")
 
         return prompt
 
@@ -153,7 +162,7 @@ class Processor:
 
         return branch or "auto-branch"
 
-    def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
+    def _run_ai_tool(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
         """Run AI tool CLI with a prompt based on configured mode.
 
         Args:
@@ -184,7 +193,23 @@ class Processor:
         elif self.ai_tool_mode == "direct":
             cmd = ["claude", "-p", safe_prompt, "--permission-mode", "acceptEdits"]
         elif self.ai_tool_mode == "opencode":
-            cmd = ["opencode", "run", safe_prompt, "--print-logs"]
+            cmd = [
+                "opencode",
+                "--print-logs",
+                "run",
+                safe_prompt,
+                "--thinking",
+                "--log-level",
+                "DEBUG",
+            ]
+        elif self.ai_tool_mode == "opencode-custom":
+            if not self.ai_tool_custom_command:
+                return False, "AI_TOOL_CUSTOM_COMMAND not set for opencode-custom mode"
+            cmd_parts = shlex.split(self.ai_tool_custom_command)
+            cmd = [
+                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path))
+                for part in cmd_parts
+            ]
         elif self.ai_tool_mode == "custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
@@ -198,46 +223,134 @@ class Processor:
             return False, f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}"
 
         try:
-            env = {"CLAUDECODE": ""}
-            result = subprocess.run(
+            # Setup environment for non-interactive execution
+            # Start with current env and override/add specific flags
+            env = dict(os.environ)
+            env.update({
+                "CI": "true",
+                "PYTHONUNBUFFERED": "1",
+                "DEBIAN_FRONTEND": "noninteractive",
+                "CLAUDECODE": "",
+            })
+            
+            self.logger.info(
+                f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s"
+            )
+
+            process = subprocess.Popen(
                 cmd,
                 cwd=repo_path,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,  # Prevent interactive hangs
                 text=True,
                 env=env,
-                timeout=self.ai_tool_timeout,
+                bufsize=1,  # Line buffered
+                preexec_fn=os.setsid,  # Create new process group for cleanup
             )
-            return result.returncode == 0, result.stdout + result.stderr
-        except subprocess.TimeoutExpired as e:
-            output = ""
-            if e.stdout:
-                output += (
-                    "\n--- STDOUT (partial) ---\n"
-                    + (
-                        e.stdout.decode("utf-8")
-                        if isinstance(e.stdout, bytes)
-                        else e.stdout
-                    )
-                    + "\n"
+
+            # Record PGID immediately while process is alive
+            pgid = os.getpgid(process.pid)
+
+            all_output = []
+            output_queue: queue.Queue = queue.Queue()
+
+            def reader(pipe, q):
+                try:
+                    for line in iter(pipe.readline, ""):
+                        q.put(line)
+                finally:
+                    pipe.close()
+
+            thread = threading.Thread(
+                target=reader, 
+                args=(process.stdout, output_queue),
+                name=f"AiToolReader-{process.pid}"
+            )
+            thread.daemon = True
+            thread.start()
+
+            start_time = time.time()
+            timed_out = False
+            try:
+                while True:
+                    try:
+                        # Check for output every 100ms
+                        line = output_queue.get(timeout=0.1)
+                        all_output.append(line)
+
+                        # Log to watcher log in real-time
+                        stripped = line.strip()
+                        if stripped:
+                            self.logger.info(f"[{self.ai_tool_mode}] {stripped}")
+                    except queue.Empty:
+                        if process.poll() is not None:
+                            # Process finished
+                            break
+
+                    # Check for timeout
+                    if time.time() - start_time > self.ai_tool_timeout:
+                        timed_out = True
+                        break
+            finally:
+                # Always cleanup the process group (including orphans)
+                # Using saved pgid to work even if the leader process is already dead
+                try:
+                    # Use SIGTERM first
+                    os.killpg(pgid, signal.SIGTERM)
+                    
+                    # Give it a moment (up to 2s) to exit gracefully
+                    wait_start = time.time()
+                    while time.time() - wait_start < 2:
+                        if process.poll() is not None:
+                            break
+                        time.sleep(0.1)
+                    
+                    # If still running, use SIGKILL
+                    if process.poll() is None:
+                        os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    # Process group already gone
+                    pass
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up process group {pgid}: {e}")
+
+            # Ensure pipe is closed to unblock reader if process is gone
+            try:
+                process.stdout.close()
+            except Exception:
+                pass
+
+            # Wait for thread to finish reading remaining output
+            thread.join(timeout=2)
+            if thread.is_alive():
+                self.logger.warning(f"Reader thread for process {process.pid} still alive after join timeout")
+
+            full_output = "".join(all_output)
+            
+            if timed_out:
+                tool_name = (
+                    "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
                 )
-            if e.stderr:
-                output += (
-                    "\n--- STDERR (partial) ---\n"
-                    + (
-                        e.stderr.decode("utf-8")
-                        if isinstance(e.stderr, bytes)
-                        else e.stderr
-                    )
-                    + "\n"
+                self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
+                return (
+                    False,
+                    f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n"
+                    f"Command: `{shlex.join(cmd[:3])}...` (truncated)\n\n"
+                    f"--- Captured Output ---\n{full_output}",
                 )
 
-            tool_name = self.ai_tool_mode
-            if tool_name == "direct":
-                tool_name = "Claude"
-
-            return False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.{output}"
+            success = process.returncode == 0
+            if not success:
+                self.logger.error(f"AI tool failed with return code {process.returncode}:\n{full_output}")
+            
+            return success, full_output
         except FileNotFoundError:
             return False, f"AI tool CLI ({cmd[0]}) not found"
+        except Exception as e:
+            msg = f"AI tool execution failed ({self.ai_tool_mode}): {str(e)}"
+            self.logger.exception(msg)
+            return False, msg
 
     def process_issue(
         self,
@@ -291,17 +404,42 @@ class Processor:
         )
 
         # Create branch
-        git.fetch()
-        git.checkout(self.default_branch)
-        git.pull()
-
-        if not git.checkout(branch, create=True):
+        try:
+            self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull)")
+            git.fetch()
+            git.checkout(self.default_branch)
+            git.pull()
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Could not create branch `{branch}`",
+                f"Git preparation failed on branch `{self.default_branch}` (fetch/checkout/pull)",
+                details=str(e),
             )
             self.state.set_processing(project.project_id, False)
             return False
+
+        self.logger.info(f"[{project.name}] Creating branch: {branch}")
+        success, error = git.checkout(branch, create=True)
+        if not success:
+            self.logger.error(f"[{project.name}] Could not create branch {branch}: {error}")
+            self.discord.notify_error(
+                project.name,
+                f"Could not create branch `{branch}`",
+                details=error,
+            )
+            self.state.set_processing(project.project_id, False)
+            return False
+
+        # Check for previous work on this branch (e.g. from a timed-out run)
+        continue_instruction = ""
+        if git.has_unpushed_work(self.default_branch):
+            continue_instruction = (
+
+                "\n\nNote: This branch already has previous work (commits exist). "
+                "Please review the current state of the code with git log and git diff, "
+                "then continue from where the previous work left off. Do not start over."
+            )
 
         # Build prompt for Claude (truncate description if too long)
         description = issue.description or ""
@@ -316,12 +454,24 @@ Issue description:
 Please complete this task. Make the necessary changes and commit them.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits."""
+Do not add Co-Authored-By signature to commits.{continue_instruction}"""
 
-        # Run Claude
-        success, output = self._run_claude(prompt, project.path)
+        # Run AI tool
+        try:
+            self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
+            success, output = self._run_ai_tool(prompt, project.path)
+            
+            if not success:
+                self.logger.error(f"[{project.name}] AI tool failed for issue #{issue.iid}: {output}")
+                self.discord.notify_error(
+                    project.name,
+                    f"AI tool failed for issue #{issue.iid}",
+                    details=output,
+                )
+                return False
 
-        if success:
+            self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
+            
             # Push branch
             git.push("origin", branch, set_upstream=True)
 
@@ -335,6 +485,8 @@ Do not add Co-Authored-By signature to commits."""
             )
 
             if mr:
+                # Track the MR we just created so the watcher knows it's ours
+                self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
                 # Move issue to Review
                 self.gitlab.update_issue_labels(
                     project.project_id,
@@ -352,21 +504,25 @@ Do not add Co-Authored-By signature to commits."""
                     project.name,
                     "Changes done but MR creation failed",
                 )
-        else:
+            return True
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Processing failed for issue #{issue.iid}",
-                sanitize_for_log(output),
+                f"Unexpected error during AI tool execution (issue #{issue.iid})",
+                details=str(e),
             )
-
-        self.state.set_processing(project.project_id, False)
-        return success
+            return False
+        finally:
+            self.state.set_processing(project.project_id, False)
 
     def process_comment(
         self,
         project: ProjectConfig,
         mr: MergeRequest,
+        note_id: int,
         comment: str,
+        discussion_id: str = "",
     ) -> bool:
         """Process an MR comment: checkout branch, run Claude, push.
 
@@ -386,19 +542,35 @@ Do not add Co-Authored-By signature to commits."""
             f"Starting to work on: {comment}"
         )
 
+        # Add eyes emoji to indicate processing has started
+        self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "eyes")
+
         # Switch to MR branch
-        git.fetch()
-        if not git.checkout(mr.source_branch):
+        try:
+            self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull/rebase)")
+            git.fetch()
+            git.checkout(mr.source_branch)
+            git.pull("origin", mr.source_branch)
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Could not checkout branch `{mr.source_branch}`",
+                f"Git preparation failed on branch `{mr.source_branch}` (fetch/checkout/pull)",
+                details=str(e),
             )
             self.state.set_processing(project.project_id, False)
             return False
 
-        git.pull("origin", mr.source_branch)
-
         # Build prompt for Claude
+        continue_instruction = ""
+        if git.has_unpushed_work(self.default_branch):
+            continue_instruction = (
+
+                "\n\nNote: This branch already has previous work (commits exist). "
+                "Please review the current state of the code with git log and git diff, "
+                "then continue from where the previous work left off. Do not start over."
+            )
+
         prompt = f"""You are working on a merge request titled: {mr.title}
 Branch: {mr.source_branch}
 
@@ -408,28 +580,58 @@ A reviewer left this feedback:
 Please address this feedback. Make the necessary changes and commit them.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits."""
+Do not add Co-Authored-By signature to commits.{continue_instruction}"""
 
-        # Run Claude
-        success, output = self._run_claude(prompt, project.path)
+        # Run AI tool
+        try:
+            self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
+            success, output = self._run_ai_tool(prompt, project.path)
+            
+            if not success:
+                self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
+                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
+                self.discord.notify_error(
+                    project.name,
+                    f"AI tool failed for merge request !{mr.iid}",
+                    details=output,
+                )
+                return False
 
-        if success:
+            self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
+            
             # Push changes
             git.push("origin", mr.source_branch)
+            success = self.gitlab.create_note_award_emoji(
+                project.project_id, 
+                mr.iid,
+                note_id, 
+                "white_check_mark"
+            )
+            
+            if not success and discussion_id:
+                self.logger.warning(f"Failed to add emoji to note {note_id}, using fallback reply to discussion {discussion_id}.")
+                self.gitlab.create_note_reply(
+                    project.project_id,
+                    mr.iid,
+                    discussion_id,
+                    "Handled by AI bot ✅"
+                )
             self.discord.notify_changes_applied(
                 project.name,
                 mr.title,
                 mr.web_url,
             )
-        else:
+            return True
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Processing failed for MR !{mr.iid}",
-                sanitize_for_log(output),
+                f"Unexpected error during AI tool execution (MR !{mr.iid})",
+                details=str(e),
             )
-
-        self.state.set_processing(project.project_id, False)
-        return success
+            return False
+        finally:
+            self.state.set_processing(project.project_id, False)
 
     def cleanup_after_merge(
         self,
@@ -437,6 +639,7 @@ Do not add Co-Authored-By signature to commits."""
         branch: str,
         mr_title: str,
         mr_url: str,
+        mr_iid: Optional[int] = None,
     ) -> None:
         """Cleanup after MR merge: switch to default branch, delete branch.
 
@@ -445,6 +648,7 @@ Do not add Co-Authored-By signature to commits."""
             branch: The merged branch name
             mr_title: The MR title
             mr_url: The MR URL
+            mr_iid: Optional MR IID for specific state cleanup
         """
         git = self.git_factory(project.path)
 
@@ -459,8 +663,13 @@ Do not add Co-Authored-By signature to commits."""
             git.delete_branch(branch, force=True)
             self.discord.notify_cleanup_complete(project.name, branch)
 
-        # Reset state
-        self.state.reset(project.project_id)
+        # Reset specific MR state if IID is provided, otherwise we rely on the caller or reset
+        if mr_iid is not None:
+            self.state.remove_tracked_mr(project.project_id, mr_iid)
+        else:
+            # Legacy behavior: reset EVERYTHING if no IID provided
+            # (though Watcher now always tries to be specific)
+            self.state.reset(project.project_id)
 
 
 __all__ = [

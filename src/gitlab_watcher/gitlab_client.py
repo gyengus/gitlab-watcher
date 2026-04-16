@@ -1,7 +1,8 @@
+import logging
 """GitLab API client with retry logic."""
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -49,15 +50,20 @@ class MergeRequest:
     web_url: str
     source_branch: str
     state: str
+    author: str = ""
 
 
 @dataclass
 class Note:
     """Represents a GitLab note (comment)."""
-
     id: int
     body: str
     author_username: str
+    system: bool
+    award_emojis: list[str]
+    discussion_id: str = ""
+    noteable_type: Optional[str] = None
+    noteable_iid: Optional[Any] = None
 
 
 class GitLabClient:
@@ -86,6 +92,7 @@ class GitLabClient:
             pool_maxsize: Maximum connections in pool
             cache_ttl: Cache time-to-live in seconds
         """
+        self.logger = logging.getLogger(__name__)
         self.base_url = url.rstrip("/")
         self._token = token  # Private to avoid accidental logging
         self.max_retries = max_retries
@@ -118,9 +125,16 @@ class GitLabClient:
         from .logging_utils import sanitize_for_log
         return f"GitLabClient(url={sanitize_for_log(self.base_url)!r})"
 
-    def _api_url(self, project_id: int, endpoint: str) -> str:
-        """Build full API URL for a project endpoint."""
-        return f"{self.base_url}/api/v4/projects/{project_id}{endpoint}"
+    def _api_url(self, project_id: Optional[int], endpoint: str) -> str:
+        """Build full API URL for a project endpoint or general endpoint."""
+        if project_id is not None:
+            return f"{self.base_url}/api/v4/projects/{project_id}{endpoint}"
+        return f"{self.base_url}/api/v4{endpoint}"
+
+    def get_current_user(self) -> dict[str, Any]:
+        """Get the authenticated user's details."""
+        response = self._request("GET", self._api_url(None, "/user"))
+        return response.json()
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic for 5xx errors."""
@@ -163,6 +177,33 @@ class GitLabClient:
         raise GitLabConnectionError(
             f"Request failed after {self.max_retries} retries. Last error: {last_error}"
         )
+    def _request_all(self, method: str, url: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Make HTTP request and follow pagination to fetch all items."""
+        params = kwargs.get("params", {}).copy()
+        params.setdefault("per_page", 100)
+        kwargs["params"] = params
+
+        results: list[dict[str, Any]] = []
+        current_url: Optional[str] = url
+
+        while current_url:
+            response = self._request(method, current_url, **kwargs)
+            data = response.json()
+            if isinstance(data, list):
+                results.extend(data)
+            else:
+                # Not a list, just return the dict as a single-item list
+                return [data]
+
+            # Check for next page
+            next_page = response.headers.get("X-Next-Page")
+            if next_page and str(next_page).isdigit():
+                params["page"] = int(next_page)
+                kwargs["params"] = params
+            else:
+                current_url = None
+
+        return results
 
     def get_issues(
         self,
@@ -171,11 +212,12 @@ class GitLabClient:
         assignee_username: Optional[str] = None,
     ) -> list[Issue]:
         """Get issues for a project."""
-        endpoint = f"/issues?state={state}"
+        params = {"state": state}
         if assignee_username:
-            endpoint += f"&assignee_username={quote(assignee_username)}"
+            params["assignee_username"] = assignee_username
 
-        response = self._request("GET", self._api_url(project_id, endpoint))
+        endpoint = "/issues"
+        response = self._request("GET", self._api_url(project_id, endpoint), params=params)
         data = response.json()
 
         return [
@@ -196,12 +238,11 @@ class GitLabClient:
         author_username: Optional[str] = None,
     ) -> list[MergeRequest]:
         """Get merge requests for a project."""
-        endpoint = f"/merge_requests?state={state}"
+        params = {"state": state}
         if author_username:
-            endpoint += f"&author_username={quote(author_username)}"
+            params["author_username"] = author_username
 
-        response = self._request("GET", self._api_url(project_id, endpoint))
-        data = response.json()
+        data = self._request_all("GET", self._api_url(project_id, "/merge_requests"), params=params)
 
         return [
             MergeRequest(
@@ -210,6 +251,7 @@ class GitLabClient:
                 web_url=item.get("web_url", ""),
                 source_branch=item.get("source_branch", ""),
                 state=item.get("state", ""),
+                author=item.get("author", {}).get("username", ""),
             )
             for item in data
         ]
@@ -226,6 +268,7 @@ class GitLabClient:
                 web_url=cached.get("web_url", ""),
                 source_branch=cached.get("source_branch", ""),
                 state=cached.get("state", ""),
+                author=cached.get("author", {}).get("username", ""),
             )
 
         try:
@@ -247,44 +290,40 @@ class GitLabClient:
             web_url=data.get("web_url", ""),
             source_branch=data.get("source_branch", ""),
             state=data.get("state", ""),
+            author=data.get("author", {}).get("username", ""),
         )
 
     def get_notes(
-        self,
-        project_id: int,
-        mr_iid: int,
-        sort: str = "desc",
+        self, project_id: int, mr_iid: int
     ) -> list[Note]:
-        """Get notes (comments) for a merge request with caching."""
-        cache_key = f"notes_{project_id}_{mr_iid}"
-        cached = self._cache.get(cache_key)
-
-        if cached is not None:
-            return [
-                Note(
-                    id=item["id"],
-                    body=item.get("body", ""),
-                    author_username=item.get("author", {}).get("username", ""),
-                )
-                for item in cached
-            ]
-
-        endpoint = f"/merge_requests/{mr_iid}/notes?sort={sort}"
-
-        response = self._request("GET", self._api_url(project_id, endpoint))
-        data = response.json()
-
-        # Cache the raw response
-        self._cache.set(cache_key, data)
-
-        return [
-            Note(
-                id=item["id"],
-                body=item.get("body", ""),
-                author_username=item.get("author", {}).get("username", ""),
+        """Get notes for a merge request."""
+        endpoint = f"/merge_requests/{mr_iid}/notes"
+        try:
+            notes_data = self._request_all(
+                "GET", 
+                self._api_url(project_id, endpoint),
+                params={"include_award_emojis": "true"}
             )
-            for item in data
-        ]
+            notes = []
+            for note in notes_data:
+                self.logger.debug(f"Parsed emojis for note {note['id']}: {note.get('award_emojis', [])}")
+
+                notes.append(
+                    Note(
+                        id=note["id"],
+                        body=note["body"],
+                        author_username=note["author"]["username"],
+                        system=note["system"],
+                        award_emojis=[e["name"] for e in note.get("award_emojis", [])],
+                        discussion_id=note.get("discussion_id", ""),
+                        noteable_type=note.get("noteable_type"),
+                        noteable_iid=note.get("noteable_iid"),
+                    )
+                )
+            return notes
+        except Exception as e:
+            self.logger.error(f"Error parsing notes: {e}")
+            return []
 
     def update_issue_labels(
         self,
@@ -351,6 +390,55 @@ class GitLabClient:
             self._cache.clear()
 
 
+    def get_note_emojis(self, project_id: int, mr_iid: int, note_id: int) -> list[str]:
+        """Fetch award emojis for a specific note using the documented MR-scoped API."""
+        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
+        try:
+            response = self._request("GET", self._api_url(project_id, endpoint))
+            emojis_data = response.json()
+            return [e["name"] for e in emojis_data if isinstance(e, dict) and "name" in e]
+        except Exception as e:
+            self.logger.debug(f"Could not fetch emojis for note {note_id}: {e}")
+            return []
+
+    def create_note_reply(
+        self, project_id: int, mr_iid: int, discussion_id: str, body: str
+    ) -> bool:
+        """Create a reply to a discussion thread."""
+        if not discussion_id:
+            return False
+            
+        # GitLab Discussion API for replies:
+        # POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes
+        endpoint = f"/merge_requests/{mr_iid}/discussions/{discussion_id}/notes"
+        try:
+            self._request(
+                "POST", 
+                self._api_url(project_id, endpoint), 
+                data={"body": body}
+            )
+            return True
+        except Exception as e:
+            self.logger.debug(f"Failed to create reply for discussion {discussion_id}: {e}")
+            return False
+
+    def create_note_award_emoji(
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+    ) -> bool:
+        """Add an award emoji to a note using the documented MR-scoped API."""
+        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
+        try:
+            self._request(
+                "POST", 
+                self._api_url(project_id, endpoint), 
+                json={"name": emoji_name}
+            )
+            return True
+        except Exception as e:
+            self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            return False
+
+
 __all__ = [
     "GitLabClient",
     "Issue",
@@ -363,3 +451,4 @@ __all__ = [
     "DEFAULT_POOL_MAXSIZE",
     "DEFAULT_CACHE_TTL",
 ]
+

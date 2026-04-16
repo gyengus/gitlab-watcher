@@ -3,8 +3,11 @@
 import logging
 import re
 import time
+import os
+import sys
+import fcntl
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
@@ -28,6 +31,7 @@ class Watcher:
         discord: Optional[DiscordWebhook] = None,
         processor: Optional[Processor] = None,
         state: Optional[StateManager] = None,
+        disable_lock: bool = False,
     ) -> None:
         """Initialize watcher.
 
@@ -43,20 +47,68 @@ class Watcher:
         self.verbose = verbose
 
         # Setup logging
-        log_level = logging.DEBUG if verbose else logging.INFO
-        logging.basicConfig(
-            level=log_level,
-            format="%(asctime)s [%(levelname)s] %(message)s",
-        )
-        self.logger = logging.getLogger(__name__)
+        if verbose:
+            log_level = logging.DEBUG
+        else:
+            level_map = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR, "CRITICAL": logging.CRITICAL}
+            log_level = level_map.get(self.config.log_level, logging.INFO)
+        log_format = "%(asctime)s [%(process)d] [%(levelname)s] %(message)s"
+        
+        # Only configure basic logging if not already configured (avoids issues in tests)
+        if not logging.getLogger().handlers:
+            logging.basicConfig(
+                level=log_level,
+                format=log_format,
+            )
+        
+        self.logger = logging.getLogger("gitlab_watcher")
+        self.logger.setLevel(log_level)
+        self.logger.propagate = True # Allow root logger to catch if configured
 
-        # Add sensitive data filter to prevent token leakage in logs
-        sensitive_filter = SensitiveDataFilter()
-        self.logger.addFilter(sensitive_filter)
-        # Also add to root logger for comprehensive coverage
-        logging.getLogger().addFilter(sensitive_filter)
+        # Setup file logging with fallback
+        self._log_handlers: list[logging.Handler] = []
+        log_path = Path(self.config.log_file)
+        handler_path = None
 
-        # Create work directory
+        try:
+            # Ensure the directory exists
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # Check if file is writable (or can be created)
+            with open(log_path, "a"):
+                pass
+            handler_path = log_path
+        except (PermissionError, OSError) as e:
+            # Fallback to work directory in /tmp
+            fallback_dir = Path("/tmp/gitlab-watcher")
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            fallback_path = fallback_dir / "watcher.log"
+            try:
+                with open(fallback_path, "a"):
+                    pass
+                handler_path = fallback_path
+                self.logger.warning(
+                    f"Could not use log file {log_path} ({e}). "
+                    f"Falling back to {fallback_path}"
+                )
+            except (PermissionError, OSError) as e2:
+                self.logger.error(f"Failed to setup file logging: {e2}")
+
+        if handler_path:
+            file_handler = logging.FileHandler(handler_path)
+            file_handler.setFormatter(logging.Formatter(log_format))
+            # Add to our specific logger instead of root logger to avoid global leak in tests
+            self.logger.addHandler(file_handler)
+            self._log_handlers.append(file_handler)
+
+        # Add sensitive data filter
+        self._sensitive_filter = SensitiveDataFilter()
+        self.logger.addFilter(self._sensitive_filter)
+        
+        # In production mode (not tests), we might want to add to root logger
+        # but for now let's keep it to our logger to fix the memory leak.
+        # If the user really wants root coverage, they can add it once in cli.py.
+
+        # Create work directory (for state files)
         self.work_dir = Path("/tmp/gitlab-watcher")
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -72,11 +124,29 @@ class Watcher:
             first_project = self.config.projects[0]
             gitlab_url, gitlab_token = self._extract_from_remote(first_project.path)
 
-        if not gitlab_url or not gitlab_token:
-            raise ValueError("GitLab URL and token must be set in config or git remote")
+        if not gitlab_url:
+            raise ValueError("GitLab URL must be set in config or extractable from git remote")
+        if not gitlab_token:
+            raise ValueError(
+                f"GitLab token not found for {gitlab_url}. "
+                "If using SSH remotes, please provide the 'gitlab_token' in your configuration file."
+            )
 
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
+        
+        # Auto-detect username from GitLab API
+        self.gitlab_username = "claude" # Default fallback
+        try:
+            # In tests, mock_gitlab might not return what we expect if not configured
+            user_info = self.gitlab.get_current_user()
+            if isinstance(user_info, dict) and "username" in user_info:
+                self.gitlab_username = user_info["username"]
+                self.logger.info(f"Auto-detected GitLab username: {self.gitlab_username}")
+        except Exception as e:
+            # Don't let auto-detection failure break the watcher
+            self.logger.warning(f"Could not auto-detect GitLab username: {e}")
+
         self.discord = discord or DiscordWebhook(
             webhook_url=self.config.discord_webhook
         )
@@ -84,7 +154,7 @@ class Watcher:
             gitlab=self.gitlab,
             discord=self.discord,
             state=self.state,
-            gitlab_username=self.config.gitlab_username,
+            gitlab_username=self.gitlab_username,
             label_in_progress=self.config.label_in_progress,
             label_review=self.config.label_review,
             ai_tool_mode=self.config.ai_tool_mode,
@@ -92,6 +162,29 @@ class Watcher:
             ai_tool_timeout=self.config.ai_tool_timeout,
             default_branch=self.config.default_branch,
         )
+        
+        # In-memory deduplication for recently processed notes (solves API lag)
+        self._processed_notes: set[int] = set()
+        
+        # Lock file to prevent multiple instances
+        self._lock_file = None
+        if not disable_lock:
+            self._acquire_lock()
+
+    def _acquire_lock(self) -> None:
+        """Acquire a file lock to prevent multiple instances from running."""
+        lock_path = self.work_dir / "gitlab-watcher.lock"
+        try:
+            self._lock_file = open(lock_path, "w")
+            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._lock_file.write(str(os.getpid()))
+            self._lock_file.flush()
+            self.logger.debug(f"Acquired instance lock at {lock_path}")
+        except (IOError, BlockingIOError):
+            print(f"Error: Another instance of gitlab-watcher is already running (locked {lock_path})", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            self.logger.warning(f"Could not acquire instance lock: {e}")
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, str | None]:
         """Extract GitLab URL and token from git remote.
@@ -112,11 +205,20 @@ class Watcher:
         # or: https://user:token@git.example.com/...
 
         # Extract URL
-        url_match = re.match(r"https?://([^@]+@)?([^/]+)", remote_url)
-        if not url_match:
+        host = None
+        # Try https:// format
+        url_match = re.match(r"https?://([^@]+@)?([^/:]+)", remote_url)
+        if url_match:
+            host = url_match.group(2)
+        else:
+            # Try git@host:repo or ssh://git@host[:port]/repo format
+            ssh_match = re.match(r"(?:ssh://)?git@([^:/]+)", remote_url)
+            if ssh_match:
+                host = ssh_match.group(1)
+
+        if not host:
             return None, None
 
-        host = url_match.group(2)
         url = f"https://{host}"
 
         # Extract token
@@ -143,16 +245,27 @@ class Watcher:
         if self.state.is_processing(project.project_id):
             return
 
+        # Sequential Processing: Skip if there are any tracked MRs
+        state = self.state.load(project.project_id)
+        if state.tracked_mrs:
+            return
+
         issues = self.gitlab.get_issues(
             project_id=project.project_id,
             state="opened",
-            assignee_username=self.config.gitlab_username,
+            assignee_username=self.gitlab_username,
         )
-
         if not issues:
             return
 
         # Find first issue without workflow labels (backlog)
+        # Also retry issues with "In progress" label but no MR (timed out previously)
+        open_mrs = self.gitlab.get_merge_requests(
+            project_id=project.project_id,
+            state="opened",
+            author_username=self.gitlab_username,
+        )
+
         for issue in issues:
             has_in_progress = self.config.label_in_progress in issue.labels
             has_review = self.config.label_review in issue.labels
@@ -166,68 +279,136 @@ class Watcher:
                 self.processor.process_issue(project, issue)
                 break
 
+            # Retry: "In progress" but no MR exists (likely timed out)
+            if has_in_progress and not has_review:
+                # Check if any open MR has a source branch matching this issue
+                # Branch names follow the pattern: {iid}-{slug}
+                has_matching_mr = any(
+                    mr.source_branch.startswith(f"{issue.iid}-")
+                    for mr in open_mrs
+                ) if open_mrs else False
+
+                if not has_matching_mr:
+                    self._log(
+                        project.project_id,
+                        f"Retrying stuck issue #{issue.iid} (In progress but no MR found)",
+                    )
+                    self.state.set_processing(project.project_id, True)
+                    self.processor.process_issue(project, issue)
+                    break
+
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
         if self.state.is_processing(project.project_id):
             return
 
+        self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
         state = self.state.load(project.project_id)
 
-        # Check for merge cleanup BEFORE checking for open MRs
-        if state.last_mr_iid is not None:
-            mr = self.gitlab.get_merge_request(project.project_id, state.last_mr_iid)
+        # 1. Check for merge cleanup on ALL tracked MRs
+        # Create a copy of keys to avoid modification during iteration
+        tracked_iids = list(state.tracked_mrs.keys())
+        for iid_str in tracked_iids:
+            iid = int(iid_str)
+            mr = self.gitlab.get_merge_request(project.project_id, iid)
 
-            if mr and mr.state == "merged":
-                self._log(project.project_id, f"MR !{state.last_mr_iid} was merged")
+            if mr and mr.state in ["merged", "closed"]:
+                action = "merged" if mr.state == "merged" else "closed"
+                self._log(project.project_id, f"MR !{iid} was {action}")
 
+                mr_data = state.tracked_mrs.get(iid_str, {})
+                branch = mr_data.get("branch") or ""
+                created_by_watcher = mr_data.get("created_by_watcher", False)
+
+                if not created_by_watcher:
+                    self._log(project.project_id, f"MR !{iid} merged/closed but not created by watcher — skipping cleanup")
+                    self.state.remove_tracked_mr(project.project_id, iid)
+                    return
+
+                # Cleanup and remove from tracking
                 self.processor.cleanup_after_merge(
                     project=project,
-                    branch=state.last_branch or "",
+                    branch=branch,
                     mr_title=mr.title,
                     mr_url=mr.web_url,
+                    mr_iid=iid, # Pass iid to be more specific
                 )
+                # Cleanup after merge might have already removed it, but being explicit
+                self.state.remove_tracked_mr(project.project_id, iid)
+                
+                # After one cleanup, return to avoid state complication in this cycle
                 return
 
-        # Check for open MRs
+        # 2. Get currently opened MRs AUTHORED BY THE BOT from GitLab
         mrs = self.gitlab.get_merge_requests(
             project_id=project.project_id,
             state="opened",
-            author_username=self.config.gitlab_username,
+            author_username=self.gitlab_username,
         )
 
         if not mrs:
             return
 
-        mr = mrs[0]  # Get first open MR
+        # 3. Update tracking for all open MRs and ensure they are added
+        for mr in mrs:
+            self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch)
 
-        # Get latest comments
-        notes = self.gitlab.get_notes(project.project_id, mr.iid)
-        latest_note = notes[0] if notes else None
+        # 4. Check for comments on ALL opened MRs (already filtered by author)
+        for mr in mrs:
+            # Get comments and sort them locally (oldest first)
+            notes = self.gitlab.get_notes(project.project_id, mr.iid)
+            notes = sorted(notes, key=lambda n: n.id)
+            
+            # Find all discussions that are already "done" (have a bot reply)
+            handled_discussions = set()
+            for note in notes:
+                if note.author_username == self.gitlab_username and note.discussion_id:
+                    handled_discussions.add(note.discussion_id)
 
-        # Save the old note_id BEFORE updating state
-        old_note_id = state.last_note_id
+            # Find and process the FIRST valid human comment without status emojis
+            for note in notes:
+                # 1. Skip system notes and the bot's own comments
+                is_own_note = note.author_username == self.gitlab_username
+                if note.system or is_own_note:
+                    continue
 
-        # Update state
-        self.state.update_mr_state(
-            project.project_id,
-            mr.iid,
-            mr.state,
-            latest_note.id if latest_note else 0,
-            mr.source_branch,
-        )
+                # 2. Skip if already handled via emoji, reply, or session cache
+                SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
+                has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
+                is_handled_discussion = note.discussion_id in handled_discussions
+                
+                # DOUBLE CHECK: If no emojis and no reply seen yet
+                if not has_emojis and not is_handled_discussion and note.id not in self._processed_notes:
+                    refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
+                    has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
 
-        # Check for new comments (not by Claude)
-        if (
-            latest_note
-            and latest_note.id != old_note_id
-            and latest_note.author_username != self.config.gitlab_username
-        ):
-            self._log(
-                project.project_id,
-                f"New comment on MR !{mr.iid}: {sanitize_for_log(latest_note.body)}",
-            )
-            self.state.set_processing(project.project_id, True)
-            self.processor.process_comment(project, mr, latest_note.body)
+                is_skipped = has_emojis or is_handled_discussion or note.id in self._processed_notes
+                if is_skipped:
+                    continue
+
+                # 3. Skip comments that explicitly indicate no action needed
+                if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS\s*(\n|$)", note.body):
+                    self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} has no recommendations — skipping")
+                    self._processed_notes.add(note.id)
+                    self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
+                    continue
+
+                # 4. Found the FIRST new valid human comment
+                self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
+                self.state.set_processing(project.project_id, True)
+                self._processed_notes.add(note.id)
+                self.processor.process_comment(
+                    project, 
+                    mr, 
+                    note.id, 
+                    note.body,
+                    discussion_id=note.discussion_id
+                )
+                # Update MR state immediately (branch tracking)
+                self.state.update_mr_state(project.project_id, mr.iid, mr.state, mr.source_branch)
+                return
+
+
 
     def run(self) -> None:
         """Run the main watcher loop."""
@@ -263,7 +444,32 @@ class Watcher:
         finally:
             # Ensure all pending state is saved before shutdown
             print("\nShutting down...")
+            self.stop()
+
+    def stop(self) -> None:
+        """Stop the watcher and cleanup resources."""
+        # Release lock file
+        if self._lock_file:
+            try:
+                fcntl.flock(self._lock_file, fcntl.LOCK_UN)
+                self._lock_file.close()
+            except Exception:
+                pass
+            self._lock_file = None
+
+        if hasattr(self, "state"):
             self.state.force_save_all()
+            self.state.stop()
+        
+        # Remove our handlers from the logger
+        if hasattr(self, "_log_handlers"):
+            for handler in self._log_handlers:
+                self.logger.removeHandler(handler)
+                handler.close()
+            self._log_handlers.clear()
+        
+        if hasattr(self, "_sensitive_filter"):
+            self.logger.removeFilter(self._sensitive_filter)
 
 
 __all__ = ["Watcher"]

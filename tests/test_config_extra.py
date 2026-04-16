@@ -121,6 +121,96 @@ class TestExtractProjectId:
             project_id = extract_project_id(claude_md)
             assert project_id == 42
 
+    def test_extract_with_italic(self) -> None:
+        """Test extracting project ID with markdown italic."""
+        content = "Project ID: *42*"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            claude_md = Path(tmpdir) / "CLAUDE.md"
+            claude_md.write_text(content)
+
+            project_id = extract_project_id(claude_md)
+            assert project_id == 42
+
+    def test_extract_with_bold_italic(self) -> None:
+        """Test extracting project ID with markdown bold+italic."""
+        content = "Project ID: ***42***"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            claude_md = Path(tmpdir) / "CLAUDE.md"
+            claude_md.write_text(content)
+
+            project_id = extract_project_id(claude_md)
+            assert project_id == 42
+
+    def test_extract_with_underscore_bold(self) -> None:
+        """Test extracting project ID with underscore bold."""
+        content = "Project ID: __42__"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            claude_md = Path(tmpdir) / "CLAUDE.md"
+            claude_md.write_text(content)
+
+            project_id = extract_project_id(claude_md)
+            assert project_id == 42
+
+    def test_extract_with_underscore_italic(self) -> None:
+        """Test extracting project ID with underscore italic."""
+        content = "Project ID: _42_"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            claude_md = Path(tmpdir) / "CLAUDE.md"
+            claude_md.write_text(content)
+
+            project_id = extract_project_id(claude_md)
+            assert project_id == 42
+
+    def test_extract_with_inline_code(self) -> None:
+        """Test extracting project ID with inline code."""
+        content = "Project ID: `42`"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            claude_md = Path(tmpdir) / "CLAUDE.md"
+            claude_md.write_text(content)
+
+            project_id = extract_project_id(claude_md)
+            assert project_id == 42
+
+    def test_extract_case_insensitive(self) -> None:
+        """Test that project ID extraction is case-insensitive."""
+        for text in ["PROJECT ID: 42", "project id: 42", "Project Id: 42", "PROJECT_ID: 42"]:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                claude_md = Path(tmpdir) / "CLAUDE.md"
+                claude_md.write_text(text)
+
+                project_id = extract_project_id(claude_md)
+                assert project_id == 42, f"Failed for: {text}"
+
+    def test_extract_formatted_label(self) -> None:
+        """Test extracting project ID when the label itself is formatted."""
+        for content in [
+            "**Project ID:** 42",
+            "**Project ID:** 42",
+            "*Project ID:* 42",
+            "__Project ID:__ 42",
+        ]:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                claude_md = Path(tmpdir) / "CLAUDE.md"
+                claude_md.write_text(content)
+
+                project_id = extract_project_id(claude_md)
+                assert project_id == 42, f"Failed for: {content}"
+
+    def test_extract_entire_line_formatted(self) -> None:
+        """Test extracting project ID when the entire line is formatted."""
+        for content in [
+            "**Project ID: 42**",
+            "*Project ID: 42*",
+            "`Project ID: 42`",
+            "**PROJECT ID: 42**",
+        ]:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                claude_md = Path(tmpdir) / "CLAUDE.md"
+                claude_md.write_text(content)
+
+                project_id = extract_project_id(claude_md)
+                assert project_id == 42, f"Failed for: {content}"
+
     def test_extract_with_underscore(self) -> None:
         """Test extracting project ID with underscore."""
         content = "project_id: 123"

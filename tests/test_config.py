@@ -222,3 +222,63 @@ PROJECT_DIRS=(
     config = load_config(str(config_file))
 
     assert config.ai_tool_timeout == 1234
+
+
+def test_load_config_with_log_file(tmp_path: Path) -> None:
+    """Test loading config with LOG_FILE."""
+    config_file = tmp_path / "gitlab_watcher.conf"
+    config_file.write_text(
+        """
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="test-token"
+LOG_FILE="/tmp/custom.log"
+PROJECT_DIRS=(
+    "{}"
+)
+""".format(tmp_path / "project")
+    )
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+
+    config = load_config(str(config_file))
+
+    assert config.log_file == "/tmp/custom.log"
+
+
+def test_load_config_with_log_level(tmp_path: Path) -> None:
+    """Test loading log level from config file."""
+    config_file = tmp_path / "test.conf"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+    config_file.write_text(f"""
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="secret"
+GITLAB_USERNAME="user"
+LOG_LEVEL="DEBUG"
+PROJECT_DIRS=(
+  "{project_dir}"
+)
+""")
+    config = load_config(str(config_file))
+    assert config.log_level == "DEBUG"
+
+
+def test_load_config_default_log_level(tmp_path: Path) -> None:
+    """Test default log level when not specified."""
+    config_file = tmp_path / "test_no_log.conf"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+    config_file.write_text(f"""
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="secret"
+GITLAB_USERNAME="user"
+PROJECT_DIRS=(
+  "{project_dir}"
+)
+""")
+    config = load_config(str(config_file))
+    assert config.log_level == "INFO"

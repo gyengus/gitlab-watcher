@@ -30,11 +30,12 @@ class Config:
     discord_webhook: str = ""
     label_in_progress: str = "In progress"
     label_review: str = "Review"
-    gitlab_username: str = "claude"
     poll_interval: int = 30
     ai_tool_mode: str = "ollama"
     ai_tool_custom_command: str = ""
     ai_tool_timeout: int = 3600
+    log_file: str = "/var/log/gitlab-watcher.log"
+    log_level: str = "INFO"
     default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
@@ -125,17 +126,22 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
 def extract_project_id(project_file_path: Path) -> Optional[int]:
     """Extract Project ID from PROJECT.md, AGENTS.md, or CLAUDE.md file.
 
-    Supports formats like:
+    Case-insensitive. Supports markdown formatting on the value, label, or entire line:
     - Project ID: 31
-    - Project ID: **31**
-    - project_id: 31
+    - project id: 31
+    - PROJECT_ID: 31
+    - Project ID: **31** / *31* / ***31***
+    - Project ID: __31__ / _31_
+    - Project ID: `31`
+    - **Project ID: 31** / **Project ID:** 31
+    - `Project ID: 31`
     """
     if not project_file_path.exists():
         return None
 
     content = project_file_path.read_text()
 
-    match = re.search(r"(?i)project[_\s]*id:?\s*\*{0,2}(\d+)\*{0,2}", content)
+    match = re.search(r"(?i)(?:\*{1,3}|_{1,3}|`{1,2})?project[_\s]*id:?[*_`\s]*(\d+)(?:\*{1,3}|_{1,3}|`{1,2})?", content)
     if match:
         return int(match.group(1))
 
@@ -170,12 +176,14 @@ def load_config(config_path: str) -> Config:
         discord_webhook=get_str("DISCORD_WEBHOOK"),
         label_in_progress=get_str("LABEL_IN_PROGRESS", "In progress"),
         label_review=get_str("LABEL_REVIEW", "Review"),
-        gitlab_username=get_str("GITLAB_USERNAME", "claude"),
         poll_interval=get_int("POLL_INTERVAL", 30),
         ai_tool_mode=get_str("AI_TOOL_MODE", "ollama"),
         ai_tool_custom_command=get_str("AI_TOOL_CUSTOM_COMMAND"),
         ai_tool_timeout=get_int("AI_TOOL_TIMEOUT", 3600),
+        log_file=get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
+        log_level=get_str("LOG_LEVEL", "INFO").upper(),
     )
+
 
     # Get project directories
     project_dirs = raw_config.get("PROJECT_DIRS", [])

@@ -37,7 +37,7 @@ When an MR is merged:
 - **Python 3.11** or higher
 - **Git** installed and available in your system path
 - **GitLab Access Token** with API access
-- **Claude CLI** (or `opencode`) must be installed and available in your PATH. (`ollama` is optional but supported for launching Claude).
+- **AI Tools**: Claude CLI (`claude`) or OpenCode (`opencode`) must be installed and available in your PATH. Note: Plugins that modify agent names (like `oh-my-opencode`) may cause issues in non-interactive background mode.
 
 ## Installation
 
@@ -66,6 +66,18 @@ gitlab-watcher --verbose
 
 ## Configuration
 
+### Logging
+
+You can set the log verbosity in `gitlab-watcher.conf`:
+
+```bash
+# LOG_LEVEL options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL="DEBUG"
+```
+
+Command line `--verbose` or `-v` flags will override this and force DEBUG level.
+
+
 Create the default configuration directory:
 
 ```bash
@@ -92,6 +104,9 @@ AI_TOOL_MODE="ollama"
 
 # Maximum execution time for AI tool in seconds (default: 3600 / 1 hour)
 AI_TOOL_TIMEOUT=3600
+
+# Path to log file (default: /var/log/gitlab-watcher.log)
+LOG_FILE="/var/log/gitlab-watcher.log"
 
 # List of absolute paths to project directories to monitor
 PROJECT_DIRS=(
@@ -126,9 +141,18 @@ AI_TOOL_MODE="ollama"  # or "direct", "opencode", "custom"
 AI_TOOL_TIMEOUT=3600   # default is 1 hour
 ```
 
-### Timeout Diagnostics
+### Timeout & Error Diagnostics
 
-If an AI tool exceeds the configured `AI_TOOL_TIMEOUT`, the watcher will attempt to capture and display any partial output (`stdout`/`stderr`) generated before the process was terminated. This helps in diagnosing why a tool might be hanging or taking longer than expected.
+If an AI tool exceeds the configured `AI_TOOL_TIMEOUT` or fails with an error, the watcher will attempt to capture and display the partial output (`stdout`/`stderr`) generated before termination. These details are sent to Discord in a formatted code block and logged locally for troubleshooting.
+
+## Troubleshooting
+
+### "Default agent not found" (OpenCode)
+If you are using `oh-my-opencode` or similar plugins that add rejtett (hidden) characters to agent names, OpenCode might fail to find the agent in non-interactive mode.
+**Solution**: Define an explicit `default_agent` in your `~/.config/opencode/opencode.json` without hidden characters or special sorting prefixes.
+
+### Discord Log Formatting
+The watcher sanitizes output but preserves newlines for stack traces. If your Discord messages are too long, they will be automatically truncated to fit within Discord's 2000-character limit.
 
 ## Development
 

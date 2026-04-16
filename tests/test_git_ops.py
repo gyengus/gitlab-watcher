@@ -71,25 +71,37 @@ class TestGitOps:
     @patch("subprocess.run")
     def test_checkout_existing_branch(self, mock_run: Mock, git_ops: GitOps) -> None:
         """Test checking out an existing branch."""
-        mock_run.return_value = Mock(returncode=0)
+        # Mock current branch and exists check
+        mock_run.side_effect = [
+            Mock(stdout="main\n", returncode=0),  # rev-parse --abbrev-ref HEAD
+            Mock(returncode=0),  # checkout main
+        ]
 
-        result = git_ops.checkout("main")
+        success, error = git_ops.checkout("feature")
 
-        assert result is True
-        args = mock_run.call_args[0][0]
+        assert success is True
+        assert error == ""
+        # Second call is the checkout
+        args = mock_run.call_args_list[1][0][0]
         assert "checkout" in args
-        assert "main" in args
+        assert "feature" in args
         assert "-b" not in args
 
     @patch("subprocess.run")
     def test_checkout_create_branch(self, mock_run: Mock, git_ops: GitOps) -> None:
         """Test creating and checking out a new branch."""
-        mock_run.return_value = Mock(returncode=0)
+        # Mock current branch, exists check, and checkout -b
+        mock_run.side_effect = [
+            Mock(stdout="main\n", returncode=0),  # get_current_branch
+            subprocess.CalledProcessError(1, "git"),  # branch_exists -> False
+            Mock(returncode=0),  # checkout -b
+        ]
 
-        result = git_ops.checkout("feature", create=True)
+        success, error = git_ops.checkout("feature", create=True)
 
-        assert result is True
-        args = mock_run.call_args[0][0]
+        assert success is True
+        assert error == ""
+        args = mock_run.call_args_list[2][0][0]
         assert "checkout" in args
         assert "-b" in args
         assert "feature" in args
@@ -97,11 +109,15 @@ class TestGitOps:
     @patch("subprocess.run")
     def test_checkout_failure(self, mock_run: Mock, git_ops: GitOps) -> None:
         """Test failed checkout."""
-        mock_run.side_effect = subprocess.CalledProcessError(1, "git")
+        mock_run.side_effect = [
+            Mock(stdout="main\n", returncode=0),  # get_current_branch
+            subprocess.CalledProcessError(1, "git", stderr="Branch not found"),
+        ]
 
-        result = git_ops.checkout("nonexistent")
+        success, error = git_ops.checkout("nonexistent")
 
-        assert result is False
+        assert success is False
+        assert "Branch not found" in error
 
     @patch("subprocess.run")
     def test_pull_success(self, mock_run: Mock, git_ops: GitOps) -> None:
@@ -257,3 +273,49 @@ class TestGitOps:
         result = git_ops.get_remote_url("origin")
 
         assert result is None
+    @patch("subprocess.run")
+    def test_has_unpushed_work_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_work returns True when commits exist ahead of default."""
+        mock_run.return_value = Mock(
+            stdout="abc1234 Some commit\ndef5678 Another commit\n", returncode=0
+        )
+
+        result = git_ops.has_unpushed_work("master")
+
+        assert result is True
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "log" in cmd
+        assert "master..HEAD" in cmd
+        assert "--oneline" in cmd
+
+    @patch("subprocess.run")
+    def test_has_unpushed_work_false(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_work returns False when no commits ahead of default."""
+        mock_run.return_value = Mock(stdout="\n", returncode=0)
+
+        result = git_ops.has_unpushed_work("master")
+
+        assert result is False
+
+    @patch("subprocess.run")
+    def test_has_unpushed_work_error(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_work returns False on git error."""
+        mock_run.side_effect = subprocess.CalledProcessError(1, "git")
+
+        result = git_ops.has_unpushed_work("master")
+
+        assert result is False
+
+    @patch("subprocess.run")
+    def test_checkout_already_on_branch(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test checkout when already on the target branch."""
+        mock_run.return_value = Mock(stdout="feature\n", returncode=0)
+
+        success, error = git_ops.checkout("feature")
+
+        assert success is True
+        assert error == ""
+        # Only rev-parse called, no checkout
+        assert mock_run.call_count == 1
+        assert "rev-parse" in mock_run.call_args[0][0]

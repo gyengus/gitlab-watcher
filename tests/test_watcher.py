@@ -1,5 +1,6 @@
 """Tests for watcher main functionality."""
 
+import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
@@ -8,10 +9,18 @@ import pytest
 
 from gitlab_watcher.config import Config, ProjectConfig
 from gitlab_watcher.discord import DiscordWebhook
+from gitlab_watcher.exceptions import GitLabError
 from gitlab_watcher.gitlab_client import GitLabClient, Issue, MergeRequest, Note
 from gitlab_watcher.processor import Processor
 from gitlab_watcher.state import StateManager, ProjectState
 from gitlab_watcher.watcher import Watcher
+
+
+@pytest.fixture(autouse=True)
+def reset_logger_handlers() -> None:
+    """Reset logger handlers after each test to prevent state leaking between tests."""
+    yield
+    logging.getLogger("gitlab_watcher").handlers.clear()
 
 
 @pytest.fixture
@@ -33,7 +42,6 @@ GITLAB_TOKEN="test-token"
 DISCORD_WEBHOOK=""
 LABEL_IN_PROGRESS="In progress"
 LABEL_REVIEW="Review"
-GITLAB_USERNAME="claude"
 POLL_INTERVAL=30
 
 PROJECT_DIRS=(
@@ -48,7 +56,9 @@ PROJECT_DIRS=(
 @pytest.fixture
 def mock_gitlab() -> MagicMock:
     """Create a mock GitLab client."""
-    return MagicMock(spec=GitLabClient)
+    mock = MagicMock(spec=GitLabClient)
+    mock.get_current_user.return_value = {"username": "claude"}
+    return mock
 
 
 @pytest.fixture
@@ -68,7 +78,9 @@ def state_manager(tmp_path: Path) -> StateManager:
     """Create a state manager with temp directory."""
     work_dir = tmp_path / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
-    return StateManager(work_dir)
+    manager = StateManager(work_dir)
+    yield manager
+    manager.stop()
 
 
 @pytest.fixture
@@ -102,6 +114,9 @@ def sample_note() -> Note:
         id=123,
         body="Please fix this",
         author_username="reviewer",
+        system=False,
+        award_emojis=[],
+        discussion_id="disc1",
     )
 
 
@@ -114,7 +129,6 @@ class TestStateManager:
         state = state_manager.load(42)
 
         assert state.last_mr_iid is None
-        assert state.last_note_id == 0
         assert state.processing is False
 
     def test_save_and_load(self, temp_work_dir: Path) -> None:
@@ -158,26 +172,23 @@ class TestStateManager:
             project_id=42,
             mr_iid=1,
             mr_state="opened",
-            note_id=123,
             branch="feature-branch",
         )
 
         state = state_manager.load(42)
         assert state.last_mr_iid == 1
         assert state.last_mr_state == "opened"
-        assert state.last_note_id == 123
         assert state.last_branch == "feature-branch"
 
     def test_reset(self, temp_work_dir: Path) -> None:
         """Test resetting state."""
         state_manager = StateManager(temp_work_dir)
 
-        state_manager.update_mr_state(42, 1, "opened", 123, "feature")
+        state_manager.update_mr_state(42, 1, "opened", "feature")
         state_manager.reset(42)
 
         state = state_manager.load(42)
         assert state.last_mr_iid is None
-        assert state.last_note_id == 0
         assert state.last_branch is None
 
     def test_get_set_value(self, temp_work_dir: Path) -> None:
@@ -309,7 +320,7 @@ class TestWatcherInit:
         state_manager: StateManager,
     ) -> None:
         """Test watcher initialization with injected dependencies."""
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -327,7 +338,7 @@ class TestWatcherInit:
     def test_watcher_missing_config(self) -> None:
         """Test watcher with missing config file."""
         with pytest.raises(FileNotFoundError):
-            Watcher(config_path="/nonexistent/config.conf")
+            Watcher(disable_lock=True, config_path="/nonexistent/config.conf")
 
     def test_watcher_passes_ai_tool_mode_to_processor(
         self,
@@ -345,7 +356,7 @@ class TestWatcherInit:
         )
         config_file.write_text(content)
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -368,8 +379,9 @@ class TestWatcherCheckIssues:
     ) -> None:
         """Test check_issues when there are no issues."""
         mock_gitlab.get_issues.return_value = []
+        mock_gitlab.get_current_user.return_value = {"username": "claude"}
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -395,7 +407,7 @@ class TestWatcherCheckIssues:
         state_manager: StateManager,
     ) -> None:
         """Test check_issues when already processing."""
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -425,7 +437,7 @@ class TestWatcherCheckIssues:
         mock_gitlab.get_issues.return_value = [sample_issue]
         mock_processor.process_issue.return_value = True
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -446,7 +458,7 @@ class TestWatcherCheckIssues:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test check_issues skips issues with In progress label."""
+        """Test check_issues skips issues with In progress label when MR exists."""
         issue_with_label = Issue(
             iid=1,
             title="Fix the bug",
@@ -455,8 +467,18 @@ class TestWatcherCheckIssues:
             labels=["bug", "In progress"],
         )
         mock_gitlab.get_issues.return_value = [issue_with_label]
+        # Simulate that an MR exists for this issue (branch starts with "1-")
+        mock_gitlab.get_merge_requests.return_value = [
+            MergeRequest(
+                iid=10,
+                title="Fix the bug",
+                source_branch="1-fix-the-bug",
+                web_url="https://git.example.com/merge_requests/10",
+                state="opened",
+            )
+        ]
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -467,7 +489,7 @@ class TestWatcherCheckIssues:
 
         watcher.check_issues(project)
 
-        # Should not process issue with In progress label
+        # Should not process issue with In progress label when MR exists
         mock_processor.process_issue.assert_not_called()
 
     def test_check_issues_skips_review(
@@ -487,8 +509,9 @@ class TestWatcherCheckIssues:
             labels=["bug", "Review"],
         )
         mock_gitlab.get_issues.return_value = [issue_with_label]
+        mock_gitlab.get_merge_requests.return_value = []
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -502,6 +525,40 @@ class TestWatcherCheckIssues:
         # Should not process issue with Review label
         mock_processor.process_issue.assert_not_called()
 
+    def test_check_issues_retries_in_progress_without_mr(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test check_issues retries issues with In progress label but no MR (timed out)."""
+        issue_with_label = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Description",
+            web_url="https://git.example.com/issues/1",
+            labels=["bug", "In progress"],
+        )
+        mock_gitlab.get_issues.return_value = [issue_with_label]
+        # No MRs exist for this issue
+        mock_gitlab.get_merge_requests.return_value = []
+
+        watcher = Watcher(disable_lock=True, 
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_issues(project)
+
+        # Should retry issue with In progress label when no MR exists
+        mock_processor.process_issue.assert_called_once()
+
     def test_check_issues_empty_issues_list(
         self,
         config_file: Path,
@@ -513,7 +570,7 @@ class TestWatcherCheckIssues:
         """Test check_issues returns early when issues list is empty."""
         mock_gitlab.get_issues.return_value = []
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -543,7 +600,7 @@ class TestWatcherCheckMRStatus:
         """Test check_mr_status when there are no MRs."""
         mock_gitlab.get_merge_requests.return_value = []
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -554,10 +611,9 @@ class TestWatcherCheckMRStatus:
 
         watcher.check_mr_status(project)
 
-        mock_gitlab.get_merge_requests.assert_called_once_with(
+        mock_gitlab.get_merge_requests.assert_called_once_with(author_username='claude', 
             project_id=42,
             state="opened",
-            author_username="claude",
         )
 
     def test_check_mr_status_already_processing(
@@ -569,7 +625,7 @@ class TestWatcherCheckMRStatus:
         state_manager: StateManager,
     ) -> None:
         """Test check_mr_status when already processing."""
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -594,7 +650,7 @@ class TestWatcherCheckMRStatus:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test check_mr_status when MR is merged."""
+        """Test check_mr_status when MR is merged and was created by watcher."""
         merged_mr = MergeRequest(
             iid=1,
             title="Fix the bug",
@@ -604,7 +660,7 @@ class TestWatcherCheckMRStatus:
         )
         mock_gitlab.get_merge_request.return_value = merged_mr
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -613,13 +669,9 @@ class TestWatcherCheckMRStatus:
         )
         project = watcher.config.projects[0]
 
-        # Set up state as if we were tracking an MR
-        state_manager.update_mr_state(
-            project.project_id,
-            mr_iid=1,
-            mr_state="opened",
-            note_id=0,
-            branch="1-fix-the-bug",
+        # Set up state as if we tracked an MR created by the watcher
+        state_manager.add_tracked_mr(
+            project.project_id, 1, "1-fix-the-bug", created_by_watcher=True
         )
 
         watcher.check_mr_status(project)
@@ -642,7 +694,7 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_merge_request.return_value = None
         mock_processor.process_comment.return_value = True
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -671,12 +723,16 @@ class TestWatcherCheckMRStatus:
             id=123,
             body="I made changes",
             author_username="claude",  # Same as gitlab_username
+            system=False,
+            award_emojis=[],
+            discussion_id="disc1",
         )
         mock_gitlab.get_merge_requests.return_value = [sample_mr]
         mock_gitlab.get_notes.return_value = [own_note]
         mock_gitlab.get_merge_request.return_value = None
+        mock_gitlab.get_current_user.return_value = {"username": "claude"}
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -705,7 +761,7 @@ class TestWatcherCheckMRStatus:
         mock_gitlab.get_notes.return_value = [sample_note]
         mock_gitlab.get_merge_request.return_value = None
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -719,14 +775,272 @@ class TestWatcherCheckMRStatus:
             project.project_id,
             mr_iid=sample_mr.iid,
             mr_state="opened",
-            note_id=sample_note.id,  # Same note ID
             branch=sample_mr.source_branch,
         )
 
-        watcher.check_mr_status(project)
-
         # Should not process the same comment again
         mock_processor.process_comment.assert_not_called()
+
+    def test_check_mr_status_ignores_system_notes(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test check_mr_status ignores system-generated notes (e.g. MR approval)."""
+        # System note (e.g. "approved this merge request")
+        system_note = Note(
+            id=123,
+            body="approved this merge request",
+            author_username="reviewer",
+            system=True,  # System note flag
+            award_emojis=[],
+            discussion_id="disc1",
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [system_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(disable_lock=True, 
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_mr_status(project)
+
+        # Should NOT process system notes
+        mock_processor.process_comment.assert_not_called()
+
+    def test_check_mr_status_skips_no_recommendations(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test that comments containing NO RECOMMENDATIONS are skipped."""
+        no_rec_note = Note(
+            id=456,
+            body="I reviewed the code.\n\nNO RECOMMENDATIONS",
+            author_username="reviewer",
+            system=False,
+            award_emojis=[],
+            discussion_id="disc2",
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [no_rec_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_mr_status(project)
+
+        # Should NOT process comment — just mark as handled
+        mock_processor.process_comment.assert_not_called()
+        mock_gitlab.create_note_award_emoji.assert_called_once_with(
+            project.project_id, sample_mr.iid, 456, "white_check_mark"
+        )
+
+    def test_check_mr_status_skips_no_recommendations_case_insensitive(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test that NO RECOMMENDATIONS matching is case-insensitive."""
+        no_rec_note = Note(
+            id=789,
+            body="Code looks good.\nNo recommendations\nDone.",
+            author_username="reviewer",
+            system=False,
+            award_emojis=[],
+            discussion_id="disc3",
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [no_rec_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_mr_status(project)
+
+        mock_processor.process_comment.assert_not_called()
+
+    def test_check_mr_status_does_not_skip_embedded_no_recommendations(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+        sample_note: Note,
+    ) -> None:
+        """Test that 'no recommendations' embedded in a sentence is NOT skipped."""
+        # "There are no recommendations I disagree with" should still be processed
+        embedded_note = Note(
+            id=999,
+            body="There are no recommendations I disagree with here.",
+            author_username="reviewer",
+            system=False,
+            award_emojis=[],
+            discussion_id="disc4",
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [embedded_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_mr_status(project)
+
+        # Should STILL process — "no recommendations" is not on its own line
+        mock_processor.process_comment.assert_called_once()
+
+
+    def test_check_mr_status_merged_not_created_by_watcher(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that MR merged/closed but not created by watcher skips cleanup."""
+        merged_mr = MergeRequest(
+            iid=5,
+            title="External MR",
+            web_url="https://git.example.com/merge_requests/5",
+            source_branch="5-external-branch",
+            state="merged",
+        )
+        mock_gitlab.get_merge_request.return_value = merged_mr
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        # Set up state tracking MR NOT created by watcher
+        state_manager.add_tracked_mr(project.project_id, 5, "5-external-branch", created_by_watcher=False)
+
+        watcher.check_mr_status(project)
+
+        # Should NOT call cleanup_after_merge
+        mock_processor.cleanup_after_merge.assert_not_called()
+        # Should remove from tracked MRs since it's no longer relevant
+        state = state_manager.load(project.project_id)
+        assert "5" not in state.tracked_mrs
+
+    def test_check_mr_status_merged_created_by_watcher(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that MR merged and created by watcher proceeds with cleanup."""
+        merged_mr = MergeRequest(
+            iid=1,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/1",
+            source_branch="1-fix-the-bug",
+            state="merged",
+        )
+        mock_gitlab.get_merge_request.return_value = merged_mr
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        # Set up state tracking MR created by watcher
+        state_manager.add_tracked_mr(project.project_id, 1, "1-fix-the-bug", created_by_watcher=True)
+
+        watcher.check_mr_status(project)
+
+        # Should call cleanup_after_merge since created_by_watcher=True
+        mock_processor.cleanup_after_merge.assert_called_once()
+
+    def test_check_mr_status_closed_not_created_by_watcher(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that closed MR not created by watcher skips cleanup."""
+        closed_mr = MergeRequest(
+            iid=7,
+            title="Closed external MR",
+            web_url="https://git.example.com/merge_requests/7",
+            source_branch="7-closed-branch",
+            state="closed",
+        )
+        mock_gitlab.get_merge_request.return_value = closed_mr
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        # Set up state tracking MR NOT created by watcher
+        state_manager.add_tracked_mr(project.project_id, 7, "7-closed-branch", created_by_watcher=False)
+
+        watcher.check_mr_status(project)
+
+        # Should NOT call cleanup_after_merge
+        mock_processor.cleanup_after_merge.assert_not_called()
+        # Should remove from tracked MRs
+        state = state_manager.load(project.project_id)
+        assert "7" not in state.tracked_mrs
 
 
 class TestWatcherExtractFromRemote:
@@ -749,7 +1063,7 @@ class TestWatcherExtractFromRemote:
         )
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -780,7 +1094,7 @@ class TestWatcherExtractFromRemote:
         )
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -811,7 +1125,7 @@ class TestWatcherExtractFromRemote:
         )
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -840,7 +1154,7 @@ class TestWatcherExtractFromRemote:
         mock_git.get_remote_url.return_value = None
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -869,7 +1183,7 @@ class TestWatcherExtractFromRemote:
         mock_git.get_remote_url.return_value = "git@github.com:user/repo.git"
         mock_git_ops_class.return_value = mock_git
 
-        watcher = Watcher(
+        watcher = Watcher(disable_lock=True, 
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -880,6 +1194,172 @@ class TestWatcherExtractFromRemote:
 
         url, token = watcher._extract_from_remote(project.path)
 
-        # SSH URL pattern doesn't match HTTPS regex
-        assert url is None
+        # SSH URL: extract host only, no token
+        assert url == "https://github.com"
         assert token is None
+
+
+@patch("gitlab_watcher.watcher.logging.FileHandler")
+@patch("gitlab_watcher.watcher.Path.mkdir")
+@patch("builtins.open")
+def test_logging_fallback(
+    mock_open: Mock,
+    mock_mkdir: Mock,
+    mock_file_handler: Mock,
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test logging fallback to /tmp when primary log file is not writable."""
+    mock_open.side_effect = [PermissionError("Perm denied"), MagicMock()]
+    mock_file_handler.return_value.level = logging.INFO
+    mock_gitlab.get_current_user.return_value = {"username": "claude"}
+    
+    with caplog.at_level(logging.WARNING):
+        watcher = Watcher(disable_lock=True, 
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+    
+    assert "Falling back to /tmp/gitlab-watcher/watcher.log" in caplog.text
+
+def test_run_loop_gitlab_error(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test main loop resilient to GitLabError."""
+    watcher = Watcher(disable_lock=True, 
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    
+    watcher.check_mr_status = MagicMock(side_effect=[GitLabError("API Down"), KeyboardInterrupt()])
+    
+    with caplog.at_level(logging.ERROR):
+        watcher.run()
+    
+    assert "GitLab API Error: API Down" in caplog.text
+
+def test_stop_cleanup_resources(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: MagicMock,
+) -> None:
+    """Test cleanup of resources on stop."""
+    watcher = Watcher(disable_lock=True, 
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    
+    mock_handler = MagicMock()
+    watcher.logger.addHandler(mock_handler)
+    watcher._log_handlers.append(mock_handler)
+    
+    watcher.stop()
+    
+    mock_handler.close.assert_called_once()
+    assert mock_handler not in watcher.logger.handlers
+
+
+def test_check_mr_status_sequential_processing_verified(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+) -> None:
+    """Test that multiple comments are processed one by one in chronological order."""
+    notes = [
+        Note(id=100, body="First request", author_username="user", system=False, award_emojis=[], discussion_id="disc1"),
+        Note(id=101, body="Second request", author_username="user", system=False, award_emojis=[], discussion_id="disc1"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+    mock_mr = MagicMock(iid=1, source_branch="feat", state="opened")
+    mock_gitlab.get_merge_requests.return_value = [mock_mr]
+    mock_gitlab.get_merge_request.return_value = None
+
+    mock_state_mgr = MagicMock(spec=StateManager)
+    mock_state_mgr.is_processing.return_value = False
+    mock_state = MagicMock()
+    mock_state.last_mr_iid = None
+    mock_state_mgr.load.return_value = mock_state
+
+    watcher = Watcher(disable_lock=True, 
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=mock_state_mgr,
+    )
+    project = watcher.config.projects[0]
+
+    # FIRST CALL: Should pick up ID 100 and STOP
+    watcher.check_mr_status(project)
+
+    # Verify ONLY the first comment was processed
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 100, "First request", discussion_id="disc1")
+
+    # SECOND CALL: mock first note as having an emoji
+    mock_processor.process_comment.reset_mock()
+    notes[0].award_emojis = ["white_check_mark"]
+    watcher.check_mr_status(project)
+
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 101, "Second request", discussion_id="disc1")
+
+
+def test_check_mr_status_skips_system_and_self_verified(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+) -> None:
+    """Test that system notes and own notes are skipped but acknowledged in state."""
+    notes = [
+        Note(id=100, body="System approved", author_username="system", system=True, award_emojis=[], discussion_id="disc_sys"),
+        Note(id=101, body="Claude response", author_username="claude-bot", system=False, award_emojis=[], discussion_id="disc_bot"),
+        Note(id=102, body="Human request", author_username="user", system=False, award_emojis=[], discussion_id="disc_human"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+    mock_mr = MagicMock(iid=1, source_branch="feat", state="opened")
+    mock_gitlab.get_merge_requests.return_value = [mock_mr]
+    mock_gitlab.get_merge_request.return_value = None
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
+
+    mock_state_mgr = MagicMock(spec=StateManager)
+    mock_state_mgr.is_processing.return_value = False
+    mock_state = MagicMock()
+    mock_state.last_mr_iid = None
+    mock_state_mgr.load.return_value = mock_state
+
+    watcher = Watcher(disable_lock=True, 
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=mock_state_mgr,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    # Only note 102 (first human comment) should be processed
+    mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", discussion_id="disc_human")
+    # Last state update should be for the branch
+    mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, "feat")
