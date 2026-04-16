@@ -387,7 +387,7 @@ class Watcher:
                     continue
 
                 # 3. Skip comments that explicitly indicate no action needed
-                if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS\s*(\n|$)", note.body):
+                if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS(?:\.|\s+|$)", note.body):
                     self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} has no recommendations — skipping")
                     self._processed_notes.add(note.id)
                     self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
