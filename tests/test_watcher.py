@@ -818,6 +818,118 @@ class TestWatcherCheckMRStatus:
         # Should NOT process system notes
         mock_processor.process_comment.assert_not_called()
 
+    def test_check_mr_status_skips_no_recommendations(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test that comments containing NO RECOMMENDATIONS are skipped."""
+        no_rec_note = Note(
+            id=456,
+            body="I reviewed the code.\n\nNO RECOMMENDATIONS",
+            author_username="reviewer",
+            system=False,
+            award_emojis=[],
+            discussion_id="disc2",
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [no_rec_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_mr_status(project)
+
+        # Should NOT process comment — just mark as handled
+        mock_processor.process_comment.assert_not_called()
+        mock_gitlab.create_note_award_emoji.assert_called_once_with(
+            project.project_id, sample_mr.iid, 456, "white_check_mark"
+        )
+
+    def test_check_mr_status_skips_no_recommendations_case_insensitive(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Test that NO RECOMMENDATIONS matching is case-insensitive."""
+        no_rec_note = Note(
+            id=789,
+            body="Code looks good.\nNo recommendations\nDone.",
+            author_username="reviewer",
+            system=False,
+            award_emojis=[],
+            discussion_id="disc3",
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [no_rec_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_mr_status(project)
+
+        mock_processor.process_comment.assert_not_called()
+
+    def test_check_mr_status_does_not_skip_embedded_no_recommendations(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+        sample_mr: MergeRequest,
+        sample_note: Note,
+    ) -> None:
+        """Test that 'no recommendations' embedded in a sentence is NOT skipped."""
+        # "There are no recommendations I disagree with" should still be processed
+        embedded_note = Note(
+            id=999,
+            body="There are no recommendations I disagree with here.",
+            author_username="reviewer",
+            system=False,
+            award_emojis=[],
+            discussion_id="disc4",
+        )
+        mock_gitlab.get_merge_requests.return_value = [sample_mr]
+        mock_gitlab.get_notes.return_value = [embedded_note]
+        mock_gitlab.get_merge_request.return_value = None
+
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+
+        watcher.check_mr_status(project)
+
+        # Should STILL process — "no recommendations" is not on its own line
+        mock_processor.process_comment.assert_called_once()
+
 
     def test_check_mr_status_merged_not_created_by_watcher(
         self,

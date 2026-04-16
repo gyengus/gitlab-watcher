@@ -386,7 +386,14 @@ class Watcher:
                 if is_skipped:
                     continue
 
-                # 3. Found the FIRST new valid human comment
+                # 3. Skip comments that explicitly indicate no action needed
+                if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS\s*(\n|$)", note.body):
+                    self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} has no recommendations — skipping")
+                    self._processed_notes.add(note.id)
+                    self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
+                    continue
+
+                # 4. Found the FIRST new valid human comment
                 self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
                 self.state.set_processing(project.project_id, True)
                 self._processed_notes.add(note.id)
