@@ -892,7 +892,7 @@ class TestWatcherCheckMRStatus:
 
         mock_processor.process_comment.assert_not_called()
 
-    def test_check_mr_status_does_not_skip_embedded_no_recommendations(
+    def test_check_mr_status_skips_no_recommendations_with_text_after(
         self,
         config_file: Path,
         mock_gitlab: MagicMock,
@@ -900,20 +900,18 @@ class TestWatcherCheckMRStatus:
         mock_processor: MagicMock,
         state_manager: StateManager,
         sample_mr: MergeRequest,
-        sample_note: Note,
     ) -> None:
-        """Test that 'no recommendations' embedded in a sentence is NOT skipped."""
-        # "There are no recommendations I disagree with" should still be processed
-        embedded_note = Note(
-            id=999,
-            body="There are no recommendations I disagree with here.",
+        """Test that NO RECOMMENDATIONS followed by text is skipped."""
+        no_rec_note = Note(
+            id=555,
+            body="AI Code Review\nNO RECOMMENDATIONS. The update effectively improves the CI/CD pipeline...",
             author_username="reviewer",
             system=False,
             award_emojis=[],
-            discussion_id="disc4",
+            discussion_id="disc5",
         )
         mock_gitlab.get_merge_requests.return_value = [sample_mr]
-        mock_gitlab.get_notes.return_value = [embedded_note]
+        mock_gitlab.get_notes.return_value = [no_rec_note]
         mock_gitlab.get_merge_request.return_value = None
 
         watcher = Watcher(disable_lock=True,
@@ -927,8 +925,11 @@ class TestWatcherCheckMRStatus:
 
         watcher.check_mr_status(project)
 
-        # Should STILL process — "no recommendations" is not on its own line
-        mock_processor.process_comment.assert_called_once()
+        # Should skip
+        mock_processor.process_comment.assert_not_called()
+        mock_gitlab.create_note_award_emoji.assert_called_once_with(
+            project.project_id, sample_mr.iid, 555, "white_check_mark"
+        )
 
 
     def test_check_mr_status_merged_not_created_by_watcher(
