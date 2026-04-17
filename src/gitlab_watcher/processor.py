@@ -27,6 +27,20 @@ FORBIDDEN_PATTERNS = [
     r"system\s+message",
 ]
 
+AI_TOOL_ERROR_PATTERNS = [
+    r"Forbidden",
+    r"AI_APICallError",
+    r"Authentication failed",
+    r"Unauthorized",
+    r"Permission denied",
+    r"Access denied",
+    r"Invalid credentials",
+    r"Token expired",
+    r"Rate limit exceeded",
+    r"Quota exceeded",
+]
+
+
 # Input validation constants
 MAX_TITLE_LENGTH = 255
 MAX_DESCRIPTION_LENGTH = 50000
@@ -341,6 +355,24 @@ class Processor:
                 )
 
             success = process.returncode == 0
+            
+            # Additional output inspection for error patterns
+            # Some tools return exit code 0 but output error messages
+            if success and full_output:
+                for pattern in AI_TOOL_ERROR_PATTERNS:
+                    if re.search(pattern, full_output, re.IGNORECASE):
+                        self.logger.error(
+                            f"AI tool returned exit code 0 but output contains error pattern: '{pattern}'"
+                        )
+                        success = False
+                        # Enhance error message with context
+                        full_output = (
+                            f"AI tool execution failed (error pattern detected: '{pattern}')\n"
+                            f"Exit code: {process.returncode}\n"
+                            f"Output:\n{full_output}"
+                        )
+                        break
+            
             if not success:
                 self.logger.error(f"AI tool failed with return code {process.returncode}:\n{full_output}")
             
@@ -473,7 +505,13 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
             
             # Push branch
-            git.push("origin", branch, set_upstream=True)
+            if not git.push("origin", branch, set_upstream=True):
+                self.logger.error(f"[{project.name}] Could not push branch {branch}")
+                self.discord.notify_error(
+                    project.name,
+                    f"Could not push branch `{branch}`",
+                )
+                return False
 
             # Create MR
             mr = self.gitlab.create_merge_request(
@@ -600,7 +638,15 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
             
             # Push changes
-            git.push("origin", mr.source_branch)
+            if not git.push("origin", mr.source_branch):
+                self.logger.error(f"[{project.name}] Failed to push changes to MR !{mr.iid}")
+                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
+                self.discord.notify_error(
+                    project.name,
+                    f"Failed to push changes to merge request !{mr.iid}",
+                )
+                return False
+
             success = self.gitlab.create_note_award_emoji(
                 project.project_id, 
                 mr.iid,
@@ -680,4 +726,5 @@ __all__ = [
     "MAX_SLUG_LENGTH",
     "MAX_BRANCH_LENGTH",
     "CLAUDE_CLI_TIMEOUT_SECONDS",
+    "AI_TOOL_ERROR_PATTERNS",
 ]
