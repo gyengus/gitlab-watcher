@@ -22,6 +22,7 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: 'true'
+  SAST_EXCLUDED_PATHS: "spec, test, tests, tmp, target, logs, .git, .mvn, .settings, .vscode"
 
 .test_template:
   before_script:
@@ -71,12 +72,10 @@ semgrep-sast:
   stage: security-scans
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_BRANCH == "test"
+    - if: $CI_COMMIT_BRANCH
 
 secret_detection:
   stage: security-scans
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_BRANCH == "test"
+    - if: $CI_COMMIT_BRANCH
