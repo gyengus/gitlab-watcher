@@ -190,19 +190,116 @@ class TestProcessorRunClaude:
         mock_killpg.assert_any_call(5678, signal.SIGKILL)
 
     @patch("subprocess.Popen")
-    def test_run_ai_tool_not_found(
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_forbidden_in_output(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
     ) -> None:
-        """Test Claude CLI not found."""
-        mock_popen.side_effect = FileNotFoundError()
+        """Test that 'Forbidden' in output triggers failure even if returncode is 0."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Error: Forbidden access\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is False
-        assert "not found" in output.lower()
+        assert "Forbidden" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_error_pattern_with_failure(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that error patterns are correctly identified when returncode is non-zero."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 1, 1, 1, 1]
+        mock_process.stdout.readline.side_effect = ["AI_APICallError: Rate limit exceeded\n", ""]
+        mock_process.returncode = 1
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
+
+        assert success is False
+        assert "AI_APICallError" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_success_clean_output(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test successful execution with no error patterns."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Everything is fine\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
+
+        assert success is True
+        assert "Everything is fine" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_case_insensitive_error(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that error pattern matching is case-insensitive."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["error: FORBIDDEN access\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
+
+        assert success is False
+        assert "Forbidden" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
 
 
 class TestProcessorAIToolModes:
