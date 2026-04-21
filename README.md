@@ -44,11 +44,6 @@ When an MR is merged:
 ```bash
 # From PyPI (recommended)
 pip install gitlab-watcher
-
-# From source (development mode)
-git clone https://git.gyengus.hu/gyengus/gitlab-watcher.git
-cd gitlab-watcher
-pip install -e ".[dev]"
 ```
 
 ## Usage
@@ -122,6 +117,64 @@ Each monitored project directory must have a `PROJECT.md`, `AGENTS.md`, or `CLAU
 ```markdown
 Project ID: 31
 ```
+
+## AI Configuration & Rules
+
+### Recommended: Configure AI Coding Rules
+
+For optimal AI-assisted development, it's highly recommended to configure AI coding rules at both global and project levels:
+
+#### Global Rules (System-wide)
+Create `~/.config/opencode/AGENTS.md` or `~/.claude/CLAUDE.md` with general coding guidelines that apply to all projects:
+
+```markdown
+# Global AI Rules
+
+## Core Requirements
+- Run tests after all code changes
+- Use conventional commit messages (if applicable to your workflow)
+- Follow security best practices
+- Include proper error handling
+
+## Testing Requirements
+- Minimum 85% test coverage
+- Fix any failing tests immediately
+- Run `pytest` after completing any task
+```
+
+#### Project-specific Rules
+Add `CLAUDE.md` or `AGENTS.md` to your project directory for project-specific guidelines:
+
+```markdown
+# Project ID: 31
+
+## AI Coding Rules
+### Language Specific
+- Python: Use Objects.requireNonNull() for null checks
+- JavaScript: Use Optional chaining
+
+### Testing Requirements
+- Run pytest after all code changes
+- Maintain 90%+ test coverage
+
+### Commit Guidelines
+- Use conventional commits: feat:, fix:, etc.
+```
+
+### How It Works
+
+1. **Automatic Rule Loading**: OpenCode automatically loads rules from:
+   - Project `AGENTS.md` (preferred)
+   - Project `CLAUDE.md` (fallback)
+   - Global `~/.config/opencode/AGENTS.md`
+   - Global `~/.claude/CLAUDE.md`
+
+2. **Rule Priority**: Project-specific rules override global rules
+3. **No Manual Configuration Required**: The GitLab Watcher automatically uses these rules when processing issues and MR comments
+
+### Contributing Guidelines
+
+For detailed development guidelines, testing requirements, and troubleshooting tips, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Supported AI Tools
 
