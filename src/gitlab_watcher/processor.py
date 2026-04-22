@@ -347,6 +347,12 @@ class Processor:
                     "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
                 )
                 self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
+                # Notify Discord about the timeout – the watcher will retry later if applicable
+                self.discord.notify_error(
+                    "AI Tool",
+                    f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.",
+                    details="The AI process exceeded the allowed timeout. It will be retried on the next run.",
+                )
                 return (
                     False,
                     f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n"
@@ -416,6 +422,10 @@ class Processor:
         slug = GitOps.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
         branch = self._validate_branch_name(f"{issue.iid}-{slug}")
 
+        # Prevent duplicate start notifications if a previous run is still marked as processing
+        if self.state.is_processing(project.project_id):
+            self.logger.info(f"[{project.name}] Issue #{issue.iid} is already being processed – skipping duplicate start notification.")
+            return False
         self.logger.info(
             f"[{project.name}] Processing issue #{issue.iid}: {sanitize_for_log(validated_title)}"
         )
