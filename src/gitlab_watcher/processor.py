@@ -507,9 +507,11 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             # Push branch
             if not git.push("origin", branch, set_upstream=True):
                 self.logger.error(f"[{project.name}] Could not push branch {branch}")
+                # Notify Discord about push failure
                 self.discord.notify_error(
                     project.name,
                     f"Could not push branch `{branch}`",
+                    details="Git push returned failure. No changes were pushed to remote.",
                 )
                 return False
 
@@ -641,9 +643,11 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             if not git.push("origin", mr.source_branch):
                 self.logger.error(f"[{project.name}] Failed to push changes to MR !{mr.iid}")
                 self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
+                # Notify Discord about push failure with details
                 self.discord.notify_error(
                     project.name,
                     f"Failed to push changes to merge request !{mr.iid}",
+                    details="Git push returned failure. No changes were pushed to remote.",
                 )
                 return False
 

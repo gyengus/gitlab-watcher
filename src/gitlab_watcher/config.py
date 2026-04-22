@@ -19,6 +19,7 @@ class ProjectConfig:
     path: Path
     name: str
     default_branch: str = "master"
+    discord_webhook_url: str = ""
 
 
 @dataclass
@@ -147,6 +148,18 @@ def extract_project_id(project_file_path: Path) -> Optional[int]:
 
     return None
 
+
+class ConfigLoader:
+    """Utility class to load configuration and provide lookup helpers."""
+
+    @staticmethod
+    def load(config_path: str = DEFAULT_CONFIG_PATH) -> Config:
+        """Load configuration from the default or provided path.
+
+        Returns:
+            Config: The loaded configuration object.
+        """
+        return load_config(config_path)
 
 def load_config(config_path: str) -> Config:
     """Load configuration from file and discover projects."""

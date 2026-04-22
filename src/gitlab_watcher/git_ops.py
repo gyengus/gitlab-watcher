@@ -1,6 +1,7 @@
 """Git operations via subprocess."""
 
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -76,21 +77,40 @@ class GitOps:
         remote: str = "origin",
         branch: str | None = None,
         set_upstream: bool = False,
+        retries: int = 3,
+        retry_delay: int = 10,
     ) -> bool:
-        """Push to remote."""
-        try:
-            args = ["push"]
-            if set_upstream and branch:
-                args.extend(["-u", remote, branch])
-            elif branch:
-                args.extend([remote, branch])
-            else:
-                args.append(remote)
+        """Push to remote with optional retry on failure.
 
-            self._run(*args)
-            return True
-        except subprocess.CalledProcessError:
-            return False
+        Args:
+            remote: Remote name (default "origin").
+            branch: Branch to push; if ``None`` pushes the current branch.
+            set_upstream: Whether to add ``-u`` flag (sets upstream).
+            retries: Number of retry attempts on failure (default 3).
+            retry_delay: Seconds to wait between retries (default 10).
+        """
+        args = ["push"]
+        if set_upstream and branch:
+            args.extend(["-u", remote, branch])
+        elif branch:
+            args.extend([remote, branch])
+        else:
+            args.append(remote)
+
+        attempt = 0
+        while attempt <= retries:
+            try:
+                self._run(*args)
+                return True
+            except subprocess.CalledProcessError as e:
+                # Network‑related failures often surface as non‑zero exit codes.
+                # Log and retry for a limited number of attempts.
+                attempt += 1
+                if attempt > retries:
+                    return False
+                # Simple back‑off before next try
+                time.sleep(retry_delay)
+                continue
 
     def delete_branch(self, branch: str, force: bool = False) -> bool:
         """Delete a local branch."""
