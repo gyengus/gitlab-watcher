@@ -394,16 +394,29 @@ class Processor:
         self,
         project: ProjectConfig,
         issue: Issue,
+        retry_count: int = 0,
     ) -> bool:
         """Process an issue: create branch, run Claude, push, create MR.
 
         Args:
             project: Project configuration
             issue: The issue to process
+            retry_count: Number of retries attempted (to prevent infinite loops)
 
         Returns:
-            True if successful, False otherwise
+            True if successful, False if retry is needed (but only if retry_count < MAX_RETRIES)
         """
+        # Prevent infinite retry loops
+        MAX_RETRIES = 3
+        if retry_count >= MAX_RETRIES:
+            self.logger.error(f"[{project.name}] Maximum retries ({MAX_RETRIES}) reached for issue #{issue.iid} - aborting")
+            self.discord.notify_error(
+                project.name,
+                f"Maximum retries ({MAX_RETRIES}) reached for issue #{issue.iid}",
+                details="Giving up on MR creation after multiple attempts."
+            )
+            self.state.set_processing(project.project_id, False)
+            return True  # Return True to prevent further retries
         git = self.git_factory(project.path)
 
         # Validate issue title
@@ -426,8 +439,13 @@ class Processor:
         if self.state.is_processing(project.project_id):
             self.logger.info(f"[{project.name}] Issue #{issue.iid} is already being processed – skipping duplicate start notification.")
             return False
+        
+        # Check if this is a retry after a failed MR creation
+        is_retry = self.state.has_branch_failed_mr(project.project_id, branch)
+        
         self.logger.info(
             f"[{project.name}] Processing issue #{issue.iid}: {sanitize_for_log(validated_title)}"
+            f" ({'retry' if is_retry else 'new'})"
         )
         self.logger.debug(f"[{project.name}] Creating branch: {branch}")
 
@@ -436,6 +454,7 @@ class Processor:
             validated_title,
             issue.web_url,
             branch,
+            is_retry=is_retry,
         )
 
         # Add "In progress" label
@@ -475,9 +494,8 @@ class Processor:
 
         # Check for previous work on this branch (e.g. from a timed-out run)
         continue_instruction = ""
-        if git.has_unpushed_work(self.default_branch):
+        if git.has_unpushed_work(branch):
             continue_instruction = (
-
                 "\n\nNote: This branch already has previous work (commits exist). "
                 "Please review the current state of the code with git log and git diff, "
                 "then continue from where the previous work left off. Do not start over."
@@ -550,10 +568,40 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
                     issue.iid,
                 )
             else:
+                # MR creation failed - get error details from GitLab API
+                try:
+                    # Try to get the latest error from GitLab API
+                    recent_mrs = self.gitlab.get_merge_requests(
+                        project_id=project.project_id,
+                        source_branch=branch,
+                        state="opened",
+                    )
+                    error_detail = ""
+                    if recent_mrs:
+                        # Find MR with matching source branch
+                        matching_mr = next((mr for mr in recent_mrs if mr.source_branch == branch), None)
+                        if matching_mr and matching_mr.description:
+                            error_detail = matching_mr.description
+                        else:
+                            error_detail = "No specific error details available from GitLab API"
+                    else:
+                        error_detail = "No merge requests found for this branch"
+                except Exception as e:
+                    error_detail = f"Failed to get error details from GitLab: {str(e)}"
+                
+                # Mark branch as having failed MR creation for immediate retry
+                self.state.mark_branch_failed_mr(project.project_id, branch)
+                
+                # Send detailed error notification
                 self.discord.notify_error(
                     project.name,
-                    "Changes done but MR creation failed",
+                    "Changes done but MR creation failed - retrying immediately",
+                    details=f"Branch: `{branch}`\n\nGitLab Error Details:\n{error_detail}\n\nThe watcher will immediately attempt to retry MR creation only."
                 )
+                
+                # Return special indicator that only MR creation needs retry
+                self.logger.warning(f"[{project.name}] MR creation failed for issue #{issue.iid}, returning special MR retry indicator")
+                return "MR_RETRY_NEEDED"
             return True
         except Exception as e:
             self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
@@ -731,6 +779,66 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             # (though Watcher now always tries to be specific)
             self.state.reset(project.project_id)
 
+    def retry_mr_creation_only(
+        self,
+        project: ProjectConfig,
+        issue: Issue,
+        branch: str,
+    ) -> bool:
+        """Retry only MR creation for an issue that already has commits on a branch.
+        
+        Args:
+            project: Project configuration
+            issue: The issue to create MR for
+            branch: The branch name that already exists with commits
+            
+        Returns:
+            True if MR creation successful, False if retry should be attempted later
+        """
+        self.logger.info(f"[{project.name}] Retrying MR creation for issue #{issue.iid} on branch {branch}")
+        
+        try:
+            # Create MR
+            mr = self.gitlab.create_merge_request(
+                project.project_id,
+                source_branch=branch,
+                target_branch=self.default_branch,
+                title=issue.title,
+                description=f"{issue.description}\n\nCloses #{issue.iid}",
+            )
+
+            if mr:
+                # Track the MR we just created so the watcher knows it's ours
+                self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
+                # Move issue to Review
+                self.gitlab.update_issue_labels(
+                    project.project_id,
+                    issue.iid,
+                    [self.label_review],
+                )
+                self.discord.notify_mr_created(
+                    project.name,
+                    issue.title,
+                    mr.web_url,
+                    issue.iid,
+                )
+                self.logger.info(f"[{project.name}] MR creation retry successful for issue #{issue.iid}")
+                return True
+            else:
+                # MR creation failed again - mark it as failed for next cycle
+                self.state.mark_branch_failed_mr(project.project_id, branch)
+                self.logger.error(f"[{project.name}] MR creation retry failed for issue #{issue.iid}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Exception during MR creation retry: {str(e)}")
+            self.discord.notify_error(
+                project.name,
+                "Exception during MR creation retry",
+                details=str(e),
+            )
+            return False
+
 
 __all__ = [
     "Processor",
@@ -741,4 +849,5 @@ __all__ = [
     "MAX_BRANCH_LENGTH",
     "CLAUDE_CLI_TIMEOUT_SECONDS",
     "AI_TOOL_ERROR_PATTERNS",
+    "retry_mr_creation_only",
 ]

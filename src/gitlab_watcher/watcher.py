@@ -13,7 +13,7 @@ from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
 from .exceptions import GitLabError
 from .git_ops import GitOps
-from .gitlab_client import GitLabClient
+from .gitlab_client import GitLabClient, Issue
 from .logging_utils import SensitiveDataFilter, sanitize_for_log
 from .processor import Processor
 from .state import StateManager
@@ -240,6 +240,77 @@ class Watcher:
         )
         self.logger.info("[%s] %s", project_name, message)
 
+    def _handle_mr_retry(self, project: ProjectConfig, issue: Issue) -> bool:
+        """Handle MR creation retry for an issue that already has commits.
+        
+        Args:
+            project: Project configuration
+            issue: The issue to retry MR creation for
+            
+        Returns:
+            True if MR creation successful, False otherwise
+        """
+        self.logger.info(f"[{project.name}] Handling MR creation retry for issue #{issue.iid}")
+        
+        # Get the current branch name (should be {issue.iid}-{slug})
+        slug = GitOps.generate_slug(issue.title, max_length=50)
+        branch = f"{issue.iid}-{slug}"
+        
+        # Check if we've already retried too many times to prevent infinite loops
+        max_retries = 3
+        
+        # Check how many times we've already tried MR creation for this branch
+        state = self.state.load(project.project_id)
+        # Count how many times this branch has failed MR creation
+        failed_attempts = sum(1 for failed_branch in state.branches_with_failed_mr 
+                            if failed_branch.startswith(f"{issue.iid}-"))
+        
+        if failed_attempts >= max_retries:
+            self.logger.error(f"[{project.name}] Maximum retries ({max_retries}) reached for issue #{issue.iid} - marking as stuck")
+            self.discord.notify_error(
+                project.name,
+                f"MR creation retry failed - maximum retries reached",
+                details=f"Branch: `{branch}`\n\nAttempted MR creation {failed_attempts} times without success. Manual intervention required."
+            )
+            # Keep the In Progress label but mark it as "stuck" for manual intervention
+            current_labels = issue.labels or []
+            # Add a special label to indicate it's stuck
+            if "stuck-mr-creation" not in current_labels:
+                updated_labels = current_labels + ["stuck-mr-creation"]
+                self.gitlab.update_issue_labels(
+                    project.project_id,
+                    issue.iid,
+                    updated_labels,
+                )
+            return False
+        
+        # Use the processor's retry method
+        retry_success = self.processor.retry_mr_creation_only(project, issue, branch)
+        
+        if retry_success:
+            # Clear the failed MR flag
+            self.state.clear_failed_mr_flag(project.project_id, branch)
+            self.logger.info(f"[{project.name}] MR creation retry successful for issue #{issue.iid}")
+            # Remove the "stuck-mr-creation" label if it was added
+            current_labels = issue.labels or []
+            if "stuck-mr-creation" in current_labels:
+                updated_labels = [label for label in current_labels if label != "stuck-mr-creation"]
+                self.gitlab.update_issue_labels(
+                    project.project_id,
+                    issue.iid,
+                    updated_labels,
+                )
+        else:
+            # MR creation failed again - notify but don't retry immediately in this cycle
+            self.discord.notify_error(
+                project.name,
+                f"MR creation retry failed (attempt {failed_attempts + 1}/{max_retries})",
+                details=f"Branch: `{branch}`\n\nWill retry on next cycle if still needed."
+            )
+            self.logger.error(f"[{project.name}] MR creation retry failed for issue #{issue.iid}")
+        
+        return retry_success
+
     def check_issues(self, project: ProjectConfig) -> None:
         """Check for new issues to process."""
         if self.state.is_processing(project.project_id):
@@ -269,6 +340,12 @@ class Watcher:
         for issue in issues:
             has_in_progress = self.config.label_in_progress in issue.labels
             has_review = self.config.label_review in issue.labels
+            is_stuck = "stuck-mr-creation" in (issue.labels or [])
+
+            # Skip issues that are stuck and waiting for manual intervention
+            if is_stuck:
+                self.logger.info(f"[{project.name}] Issue #{issue.iid} is stuck with MR creation - skipping")
+                continue
 
             if not has_in_progress and not has_review:
                 self._log(
@@ -276,7 +353,29 @@ class Watcher:
                     f"Found backlog issue #{issue.iid}: {sanitize_for_log(issue.title)}",
                 )
                 self.state.set_processing(project.project_id, True)
-                self.processor.process_issue(project, issue)
+                
+                # Check if immediate retry is needed (failed MR creation)
+                is_retry = self.state.has_branch_failed_mr(project.project_id, f"{issue.iid}-")
+                
+                result = self.processor.process_issue(project, issue, retry_count=1 if is_retry else 0)
+                
+                # Handle different return values from process_issue
+                if result == "MR_RETRY_NEEDED":
+                    # Only MR creation failed - retry just the MR creation
+                    self.logger.info(f"[{project.name}] MR creation retry triggered for issue #{issue.iid}")
+                    
+                    # Handle MR retry (this will check retry limits)
+                    retry_success = self._handle_mr_retry(project, issue)
+                    
+                    # If retry failed, we return and let the next cycle handle it
+                    if not retry_success:
+                        self.logger.info(f"[{project.name}] MR creation retry failed, will retry on next cycle")
+                        return  # Exit this cycle to prevent infinite loops
+                
+                elif result is False:
+                    # Full process failed - this shouldn't happen with our current logic
+                    self.logger.error(f"[{project.name}] Full process failed for issue #{issue.iid}")
+                
                 break
 
             # Retry: "In progress" but no MR exists (likely timed out)

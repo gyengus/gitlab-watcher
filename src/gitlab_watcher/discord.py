@@ -40,13 +40,29 @@ class DiscordWebhook:
         issue_title: str,
         issue_url: str,
         branch: str,
+        is_retry: bool = False,
     ) -> bool:
-        """Notify that issue processing has started."""
-        return self.send(
-            f"🚀 **Starting Issue** [{project_name}]\n"
-            f"[{issue_title}]({issue_url})\n\n"
-            f"Branch: `{branch}`"
-        )
+        """Notify that issue processing has started.
+        
+        Args:
+            project_name: Name of the project
+            issue_title: Title of the issue
+            issue_url: URL of the issue
+            branch: Branch name
+            is_retry: True if this is a retry after a failed MR creation
+        """
+        if is_retry:
+            return self.send(
+                f"🔄 **Retrying Issue** [{project_name}]\n"
+                f"[{issue_title}]({issue_url})\n\n"
+                f"Branch: `{branch}` (continuing after failed MR creation)"
+            )
+        else:
+            return self.send(
+                f"🚀 **Starting Issue** [{project_name}]\n"
+                f"[{issue_title}]({issue_url})\n\n"
+                f"Branch: `{branch}`"
+            )
 
     def notify_mr_created(
         self,
@@ -108,5 +124,6 @@ class DiscordWebhook:
         """Notify about an error."""
         content = f"❌ **Error** [{project_name}]\n{message}"
         if details:
-            content += f"\n\nError: {details}"
+            # Format details with code block for better readability
+            content += f"\n\n```{details}```"
         return self.send(content)

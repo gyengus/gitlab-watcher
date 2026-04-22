@@ -923,6 +923,94 @@ class TestProcessorSanitizePrompt:
         assert result == prompt
 
 
+class TestProcessorRetryMrCreation:
+    """Tests for the retry_mr_creation_only method."""
+
+    def test_retry_mr_creation_success(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test successful MR creation retry."""
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Fix authentication issue",
+            web_url="https://git.example.com/issues/1",
+            labels=[],
+        )
+        
+        mock_gitlab = MagicMock()
+        mock_mr = MergeRequest(
+            iid=2,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/2",
+            source_branch="1-fix-the-bug",
+            state="opened",
+        )
+        mock_gitlab.create_merge_request.return_value = mock_mr
+        mock_gitlab.update_issue_labels.return_value = None
+        
+        processor.gitlab = mock_gitlab
+        processor.state = MagicMock()
+        processor.state.add_tracked_mr.return_value = None
+        
+        result = processor.retry_mr_creation_only(project_config, issue, "1-fix-the-bug")
+        
+        assert result is True
+        mock_gitlab.create_merge_request.assert_called_once()
+        mock_gitlab.update_issue_labels.assert_called_once_with(
+            project_config.project_id,
+            1,
+            ["Review"],
+        )
+        processor.state.add_tracked_mr.assert_called_once()
+
+    def test_retry_mr_creation_failure(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test failed MR creation retry."""
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Fix authentication issue",
+            web_url="https://git.example.com/issues/1",
+            labels=[],
+        )
+        
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_merge_request.return_value = None
+        mock_gitlab.update_issue_labels.return_value = None
+        
+        processor.gitlab = mock_gitlab
+        processor.state = MagicMock()
+        processor.state.mark_branch_failed_mr.return_value = None
+        
+        result = processor.retry_mr_creation_only(project_config, issue, "1-fix-the-bug")
+        
+        assert result is False
+        mock_gitlab.create_merge_request.assert_called_once()
+        processor.state.mark_branch_failed_mr.assert_called_once()
+
+    def test_retry_mr_creation_exception(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test MR creation retry with exception."""
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Fix authentication issue",
+            web_url="https://git.example.com/issues/1",
+            labels=[],
+        )
+        
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_merge_request.side_effect = Exception("GitLab API error")
+        mock_gitlab.update_issue_labels.return_value = None
+        
+        processor.gitlab = mock_gitlab
+        processor.state = MagicMock()
+        processor.state.mark_branch_failed_mr.return_value = None
+        
+        result = processor.retry_mr_creation_only(project_config, issue, "1-fix-the-bug")
+        
+        assert result is False
+        mock_gitlab.create_merge_request.assert_called_once()
+        processor.state.mark_branch_failed_mr.assert_not_called()
+
+
 class TestProcessorValidateIssueTitle:
     """Tests for the _validate_issue_title method."""
 
