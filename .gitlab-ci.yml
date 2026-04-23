@@ -27,8 +27,11 @@ variables:
 .test_template:
   before_script:
     - pip install -e ".[dev]"
-script:
+  script:
     - pytest --tb=short --cov=src/gitlab_watcher --cov-report=xml --cov-report=lcov --cov-report=term-missing
+  after_script:
+    - echo "Coverage report generated successfully"
+    - ls -la coverage.*
   coverage: '/line-rate=([0-9.]+)/'
   artifacts:
     reports:
@@ -39,7 +42,6 @@ script:
       - coverage.xml
       - coverage.lcov
     expire_in: 1 week
-  coverage: '/TOTAL.* (\d+%)$/'
 
 test:
   extends: .test_template
