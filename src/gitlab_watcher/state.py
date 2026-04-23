@@ -23,6 +23,7 @@ class ProjectState:
     last_branch: Optional[str] = None
     processing: bool = False
     tracked_mrs: dict[str, dict] = field(default_factory=dict)
+    branches_with_failed_mr: set[str] = field(default_factory=set)  # Branches that failed MR creation
 
 
 class StateManager:
@@ -133,7 +134,10 @@ class StateManager:
             return
         state_file = self._state_file(project_id)
         try:
-            state_file.write_text(json.dumps(asdict(self._states[project_id]), indent=2))
+            # Convert set to list for JSON serialization
+            state_dict = asdict(self._states[project_id])
+            state_dict['branches_with_failed_mr'] = list(state_dict['branches_with_failed_mr'])
+            state_file.write_text(json.dumps(state_dict, indent=2))
         except Exception as e:
             logger.error(f"Failed to save state for project {project_id}: {e}")
 
@@ -247,6 +251,11 @@ class StateManager:
                 "created_by_watcher": created_by_watcher,
             }
             self.force_save(project_id)
+        
+        # Clear failed MR flag when MR is successfully created BY THE WATCHER
+        if created_by_watcher and branch in state.branches_with_failed_mr:
+            state.branches_with_failed_mr.remove(branch)
+            self.force_save(project_id)
 
     def remove_tracked_mr(self, project_id: int, mr_iid: int) -> None:
         """Remove an MR from the tracked list."""
@@ -267,6 +276,25 @@ class StateManager:
         """Reset state for a project."""
         self._states[project_id] = ProjectState()
         self.save(project_id)
+
+    def mark_branch_failed_mr(self, project_id: int, branch: str) -> None:
+        """Mark a branch as having failed MR creation."""
+        state = self.load(project_id)
+        if branch not in state.branches_with_failed_mr:
+            state.branches_with_failed_mr.add(branch)
+            self.force_save(project_id)
+
+    def has_branch_failed_mr(self, project_id: int, branch: str) -> bool:
+        """Check if a branch has previously failed MR creation."""
+        state = self.load(project_id)
+        return branch in state.branches_with_failed_mr
+
+    def clear_failed_mr_flag(self, project_id: int, branch: str) -> None:
+        """Clear the failed MR creation flag for a branch."""
+        state = self.load(project_id)
+        if branch in state.branches_with_failed_mr:
+            state.branches_with_failed_mr.remove(branch)
+            self.force_save(project_id)
 
 
 __all__ = ["StateManager", "ProjectState", "DEFAULT_SAVE_DELAY"]

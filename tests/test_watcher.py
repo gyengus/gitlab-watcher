@@ -448,7 +448,7 @@ class TestWatcherCheckIssues:
 
         watcher.check_issues(project)
 
-        mock_processor.process_issue.assert_called_once_with(project, sample_issue)
+        mock_processor.process_issue.assert_called_once_with(project, sample_issue, retry_count=0)
 
     def test_check_issues_skips_in_progress(
         self,
@@ -1364,3 +1364,92 @@ def test_check_mr_status_skips_system_and_self_verified(
     mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", discussion_id="disc_human")
     # Last state update should be for the branch
     mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, "feat")
+
+
+class TestWatcherMrRetryLogic:
+    """Tests for MR creation retry logic in watcher."""
+
+    def test_handle_mr_retry_success(self, config_file: Path, mock_gitlab: MagicMock, mock_discord: MagicMock, mock_processor: MagicMock, state_manager: StateManager, caplog: pytest.LogCaptureFixture) -> None:
+        """Test successful MR retry."""
+        mock_gitlab.get_current_user.return_value = {"username": "claude"}
+        
+        # Mock processor retry success
+        mock_processor.retry_mr_creation_only.return_value = True
+        
+        watcher = Watcher(disable_lock=True, 
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+        
+        # Mock issue
+        issue = MagicMock()
+        issue.iid = 1
+        issue.title = "Fix the bug"
+        issue.labels = ["In progress"]
+        
+        result = watcher._handle_mr_retry(project, issue)
+        
+        assert result is True
+        mock_processor.retry_mr_creation_only.assert_called_once()
+        mock_discord.notify_error.assert_not_called()
+
+    def test_handle_mr_retry_failure(self, config_file: Path, mock_gitlab: MagicMock, mock_discord: MagicMock, mock_processor: MagicMock, state_manager: StateManager, caplog: pytest.LogCaptureFixture) -> None:
+        """Test failed MR retry."""
+        mock_gitlab.get_current_user.return_value = {"username": "claude"}
+        
+        # Mock processor retry failure
+        mock_processor.retry_mr_creation_only.return_value = False
+        
+        watcher = Watcher(disable_lock=True, 
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+        
+        # Mock issue
+        issue = MagicMock()
+        issue.iid = 1
+        issue.title = "Fix the bug"
+        issue.labels = ["In progress"]
+        
+        result = watcher._handle_mr_retry(project, issue)
+        
+        assert result is False
+        mock_processor.retry_mr_creation_only.assert_called_once()
+        mock_discord.notify_error.assert_called_once()
+
+    def test_handle_mr_retry_max_attempts(self, config_file: Path, mock_gitlab: MagicMock, mock_discord: MagicMock, mock_processor: MagicMock, state_manager: StateManager, caplog: pytest.LogCaptureFixture) -> None:
+        """Test MR retry when max attempts are reached."""
+        mock_gitlab.get_current_user.return_value = {"username": "claude"}
+        
+        # Mock processor to always retry successfully
+        mock_processor.retry_mr_creation_only.return_value = True
+        
+        watcher = Watcher(disable_lock=True, 
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+        
+        # Mock issue
+        issue = MagicMock()
+        issue.iid = 1
+        issue.title = "Fix the bug"
+        issue.labels = ["In progress"]
+        
+        result = watcher._handle_mr_retry(project, issue)
+        
+        assert result is True
+        mock_processor.retry_mr_creation_only.assert_called_once()
+
+            

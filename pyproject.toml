@@ -26,9 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.0.0",
-    "requests>=2.28.0",
-    "chardet>=5.0.0",
-    "charset-normalizer>=3.0.0",
+    "requests>=2.32.0",  # Updated to a version that handles the dependency conflicts better
 ]
 
 [project.optional-dependencies]
@@ -39,6 +37,7 @@ dev = [
 
 [project.scripts]
 gitlab-watcher = "gitlab_watcher.cli:main"
+gitlab-watcher-sync = "gitlab_watcher.cli:sync_state"
 
 [project.urls]
 Homepage = "https://github.com/gyengus/gitlab-watcher"

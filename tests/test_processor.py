@@ -190,19 +190,116 @@ class TestProcessorRunClaude:
         mock_killpg.assert_any_call(5678, signal.SIGKILL)
 
     @patch("subprocess.Popen")
-    def test_run_ai_tool_not_found(
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_forbidden_in_output(
         self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
     ) -> None:
-        """Test Claude CLI not found."""
-        mock_popen.side_effect = FileNotFoundError()
+        """Test that 'Forbidden' in output triggers failure even if returncode is 0."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Error: Forbidden access\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
 
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is False
-        assert "not found" in output.lower()
+        assert "Forbidden" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_error_pattern_with_failure(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that error patterns are correctly identified when returncode is non-zero."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 1, 1, 1, 1]
+        mock_process.stdout.readline.side_effect = ["AI_APICallError: Rate limit exceeded\n", ""]
+        mock_process.returncode = 1
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
+
+        assert success is False
+        assert "AI_APICallError" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_success_clean_output(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test successful execution with no error patterns."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Everything is fine\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
+
+        assert success is True
+        assert "Everything is fine" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_run_ai_tool_case_insensitive_error(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that error pattern matching is case-insensitive."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["error: FORBIDDEN access\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
+
+        assert success is False
+        assert "Forbidden" in output
+        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
 
 
 class TestProcessorAIToolModes:
@@ -453,6 +550,7 @@ class TestProcessorProcessIssue:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -516,6 +614,7 @@ class TestProcessorProcessIssue:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -824,6 +923,94 @@ class TestProcessorSanitizePrompt:
         prompt = "Fix the bug in the authentication module"
         result = processor._sanitize_prompt(prompt)
         assert result == prompt
+
+
+class TestProcessorRetryMrCreation:
+    """Tests for the retry_mr_creation_only method."""
+
+    def test_retry_mr_creation_success(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test successful MR creation retry."""
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Fix authentication issue",
+            web_url="https://git.example.com/issues/1",
+            labels=[],
+        )
+        
+        mock_gitlab = MagicMock()
+        mock_mr = MergeRequest(
+            iid=2,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/2",
+            source_branch="1-fix-the-bug",
+            state="opened",
+        )
+        mock_gitlab.create_merge_request.return_value = mock_mr
+        mock_gitlab.update_issue_labels.return_value = None
+        
+        processor.gitlab = mock_gitlab
+        processor.state = MagicMock()
+        processor.state.add_tracked_mr.return_value = None
+        
+        result = processor.retry_mr_creation_only(project_config, issue, "1-fix-the-bug")
+        
+        assert result is True
+        mock_gitlab.create_merge_request.assert_called_once()
+        mock_gitlab.update_issue_labels.assert_called_once_with(
+            project_config.project_id,
+            1,
+            ["Review"],
+        )
+        processor.state.add_tracked_mr.assert_called_once()
+
+    def test_retry_mr_creation_failure(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test failed MR creation retry."""
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Fix authentication issue",
+            web_url="https://git.example.com/issues/1",
+            labels=[],
+        )
+        
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_merge_request.return_value = None
+        mock_gitlab.update_issue_labels.return_value = None
+        
+        processor.gitlab = mock_gitlab
+        processor.state = MagicMock()
+        processor.state.mark_branch_failed_mr.return_value = None
+        
+        result = processor.retry_mr_creation_only(project_config, issue, "1-fix-the-bug")
+        
+        assert result is False
+        mock_gitlab.create_merge_request.assert_called_once()
+        processor.state.mark_branch_failed_mr.assert_called_once()
+
+    def test_retry_mr_creation_exception(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test MR creation retry with exception."""
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="Fix authentication issue",
+            web_url="https://git.example.com/issues/1",
+            labels=[],
+        )
+        
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_merge_request.side_effect = Exception("GitLab API error")
+        mock_gitlab.update_issue_labels.return_value = None
+        
+        processor.gitlab = mock_gitlab
+        processor.state = MagicMock()
+        processor.state.mark_branch_failed_mr.return_value = None
+        
+        result = processor.retry_mr_creation_only(project_config, issue, "1-fix-the-bug")
+        
+        assert result is False
+        mock_gitlab.create_merge_request.assert_called_once()
+        processor.state.mark_branch_failed_mr.assert_not_called()
 
 
 class TestProcessorValidateIssueTitle:
