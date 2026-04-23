@@ -1,6 +1,6 @@
 # GitLab Watcher
 
-Monitor GitLab projects and automatically process issues and merge requests using AI tools. It features built-in support for automated branch management, AI-driven code generation, and Discord notifications.
+Monitor GitLab projects and automatically process issues and merge requests using AI tools. It features built-in support for automated branch management, AI-driven code generation, Discord notifications, and automatic failover to backup AI models when primary models encounter service issues.
 
 ## What the Watcher Does
 
@@ -10,7 +10,7 @@ When an issue is assigned to the configured user without workflow labels:
 
 1. Adds "In progress" label
 2. Creates branch `<issue-id>-<slug>` from default branch
-3. Runs AI tool with the issue description
+3. Runs AI tool with the issue description (with automatic failover to backup models if primary fails)
 4. Pushes changes and creates merge request
 5. Moves issue to "Review" label
 6. Sends optional Discord notification
@@ -122,6 +122,56 @@ Project ID: 31
 
 ### Recommended: Configure AI Coding Rules
 
+### Automatic Failover Model Support
+
+The watcher includes an automatic failover feature that switches to a backup AI model when the primary model encounters service issues (like 524 errors, rate limits, or service unavailability). This ensures continuous operation for hobby projects.
+
+#### Configuration
+
+Add the failover model to your `config.conf`:
+
+```bash
+# Primary AI tool mode
+AI_TOOL_MODE="opencode"
+
+# Optional: Failover model for service issues
+AI_TOOL_FAILOVER_MODEL="openrouter/google/gemma-3-12b-it:free"
+
+# Custom command with model placeholder support
+AI_TOOL_CUSTOM_COMMAND="opencode --model {model} run {prompt} --thinking --log-level DEBUG"
+```
+
+#### How It Works
+
+1. **Primary Attempt**: Uses the configured AI tool with the default model
+2. **Error Detection**: Automatically detects provider errors (524, rate limits, service unavailable, etc.)
+3. **Failover Trigger**: On service errors, switches to the configured failover model
+4. **Success Handling**: If failover succeeds, logs the success and continues processing
+5. **Failure Handling**: If both models fail, sends Discord notification and waits for next cycle
+
+#### Recommended Models for Hobby Projects
+
+**Free Models (for failover):**
+- `openrouter/google/gemma-3-12b-it:free` - Good coding model
+- `openrouter/google/gemma-3-27b-it:free` - More capable, still free
+- `openrouter/meta-llama/llama-3.2-3b-instruct:free` - Small but capable
+
+**Affordable Models (for primary use):**
+- `openrouter/deepseek/deepseek-chat-v3.1` - Very capable, low cost
+- `openrouter/anthropic/claude-3.5-haiku` - Fast and capable, moderate cost
+
+#### Supported Modes
+
+| Mode | Model Support | Description |
+|------|---------------|-------------|
+| `ollama` | No | Model switching via CLI not supported |
+| `direct` | No | Model switching via CLI not supported |
+| `opencode` | Yes | Uses `--model` flag when specified |
+| `opencode-custom` | Yes | Supports `{model}` placeholder substitution |
+| `custom` | Yes | Supports `{model}` placeholder substitution |
+
+**Important**: Leave `AI_TOOL_FAILOVER_MODEL` empty if you don't want failover functionality. The watcher will maintain backward compatibility with existing configurations.
+
 For optimal AI-assisted development, it's highly recommended to configure AI coding rules at both global and project levels:
 
 #### Global Rules (System-wide)
@@ -180,12 +230,26 @@ For detailed development guidelines, testing requirements, and troubleshooting t
 
 The watcher supports multiple AI tools:
 
-| Mode | Description |
-|------|-------------|
-| `ollama` | Launches Claude via Ollama (requires both `ollama` and `claude`) (default) |
-| `direct` | Direct Claude CLI execution (`claude`) |
-| `opencode` | Opencode CLI execution using `run` subcommand |
-| `custom` | Custom command for any AI tool |
+| Mode | Description | Model Support |
+|------|-------------|---------------|
+| `ollama` | Launches Claude via Ollama (requires both `ollama` and `claude`) (default) | No |
+| `direct` | Direct Claude CLI execution (`claude`) | No |
+| `opencode` | Opencode CLI execution using `run` subcommand | Yes (`--model` flag) |
+| `custom` | Custom command for any AI tool | Yes (`{model}` placeholder) |
+
+### Model Parameter Support
+
+For `opencode` and `custom` modes, you can specify models dynamically:
+
+```bash
+# Opencode mode with model parameter
+AI_TOOL_CUSTOM_COMMAND="opencode --model {model} run {prompt} --thinking --log-level DEBUG"
+
+# Custom command with model and working directory placeholders
+AI_TOOL_CUSTOM_COMMAND="my-ai-tool --model {model} --prompt \"{prompt}\" --cwd {cwd}"
+```
+
+The `{model}` placeholder will be replaced with the specified model name, `{prompt}` with the issue description, and `{cwd}` with the working directory path.
 
 Configure in `config.conf`:
 
@@ -206,6 +270,23 @@ If you are using `oh-my-opencode` or similar plugins that add rejtett (hidden) c
 
 ### Discord Log Formatting
 The watcher sanitizes output but preserves newlines for stack traces. If your Discord messages are too long, they will be automatically truncated to fit within Discord's 2000-character limit.
+
+### Failover Model Issues
+If the failover feature isn't working as expected:
+
+1. **Enable Debug Logging**: Set `LOG_LEVEL="DEBUG"` to see detailed failover attempts
+2. **Check Error Patterns**: The watcher only triggers failover on specific provider errors (524, rate limits, service unavailable, etc.)
+3. **Verify Model Format**: Ensure the failover model name is correct and accessible via your AI tool
+4. **Test Manually**: Try running the AI tool directly with the failover model to ensure it works
+
+To test failover manually:
+```bash
+# Test with opencode mode
+opencode --model openrouter/google/gemma-3-12b-it:free run "test prompt" --thinking
+
+# Test with custom command
+opencode --model openrouter/google/gemma-3-12b-it:free run {prompt} --thinking --log-level DEBUG
+```
 
 ## Development
 
