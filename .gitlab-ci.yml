@@ -29,12 +29,19 @@ variables:
     - pip install -e ".[dev]"
   script:
     - pytest --tb=short --cov=src/gitlab_watcher --cov-report=xml --cov-report=lcov --cov-report=term-missing
+  after_script:
+    - echo "Coverage report generated successfully"
+    - ls -la coverage.*
   coverage: '/TOTAL.* (\d+%)$/'
   artifacts:
     reports:
       coverage_report:
         coverage_format: cobertura
         path: coverage.xml
+    paths:
+      - coverage.xml
+      - coverage.lcov
+    expire_in: 1 week
   coverage: '/TOTAL.* (\d+%)$/'
 
 test:
