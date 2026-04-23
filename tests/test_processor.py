@@ -550,6 +550,7 @@ class TestProcessorProcessIssue:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -613,6 +614,7 @@ class TestProcessorProcessIssue:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(

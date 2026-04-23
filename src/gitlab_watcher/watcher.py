@@ -159,6 +159,7 @@ class Watcher:
             label_review=self.config.label_review,
             ai_tool_mode=self.config.ai_tool_mode,
             ai_tool_custom_command=self.config.ai_tool_custom_command,
+            ai_tool_failover_model=self.config.ai_tool_failover_model,
             ai_tool_timeout=self.config.ai_tool_timeout,
             default_branch=self.config.default_branch,
         )
@@ -352,7 +353,6 @@ class Watcher:
                     project.project_id,
                     f"Found backlog issue #{issue.iid}: {sanitize_for_log(issue.title)}",
                 )
-                self.state.set_processing(project.project_id, True)
                 
                 # Check if immediate retry is needed (failed MR creation)
                 is_retry = self.state.has_branch_failed_mr(project.project_id, f"{issue.iid}-")
@@ -373,8 +373,12 @@ class Watcher:
                         return  # Exit this cycle to prevent infinite loops
                 
                 elif result is False:
-                    # Full process failed - this shouldn't happen with our current logic
-                    self.logger.error(f"[{project.name}] Full process failed for issue #{issue.iid}")
+                    # Full process failed - check processor logs for details
+                    self.logger.error(
+                        f"[{project.name}] Full process failed for issue #{issue.iid}. "
+                        f"Check previous logs for error details (git preparation, branch creation, AI tool, push, etc.). "
+                        f"Issue may need manual intervention or will be retried on next cycle."
+                    )
                 
                 break
 
@@ -392,8 +396,31 @@ class Watcher:
                         project.project_id,
                         f"Retrying stuck issue #{issue.iid} (In progress but no MR found)",
                     )
-                    self.state.set_processing(project.project_id, True)
-                    self.processor.process_issue(project, issue)
+                    
+                    # Process the stuck issue and capture the result
+                    result = self.processor.process_issue(project, issue)
+                    
+                    # Handle different return values from process_issue
+                    if result == "MR_RETRY_NEEDED":
+                        # Only MR creation failed - retry just the MR creation
+                        self.logger.info(f"[{project.name}] MR creation retry triggered for issue #{issue.iid}")
+                        
+                        # Handle MR retry (this will check retry limits)
+                        retry_success = self._handle_mr_retry(project, issue)
+                        
+                        # If retry failed, we return and let the next cycle handle it
+                        if not retry_success:
+                            self.logger.info(f"[{project.name}] MR creation retry failed, will retry on next cycle")
+                            return  # Exit this cycle to prevent infinite loops
+                    
+                    elif result is False:
+                        # Full process failed - check processor logs for details
+                        self.logger.error(
+                            f"[{project.name}] Full process failed for issue #{issue.iid}. "
+                            f"Check previous logs for error details (git preparation, branch creation, AI tool, push, etc.). "
+                            f"Issue may need manual intervention or will be retried on next cycle."
+                        )
+                    
                     break
 
     def check_mr_status(self, project: ProjectConfig) -> None:
