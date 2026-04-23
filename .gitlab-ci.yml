@@ -29,7 +29,7 @@ variables:
     - pip install -e ".[dev]"
 script:
     - pytest --tb=short --cov=src/gitlab_watcher --cov-report=xml --cov-report=lcov --cov-report=term-missing
-    - python3 -c "import xml.etree.ElementTree as ET; tree=ET.parse('coverage.xml'); root=tree.getroot(); total=0; covered=0; for p in root.findall('.//package'): for c in p.findall('.//class'): for l in c.find('lines').findall('line'): total+=1; covered+=int(l.get('hits',0)) if int(l.get('hits',0))>0 else 0; print(f'Coverage: {covered/total*100:.1f}% ({covered}/{total} lines)' if total>0 else 'Coverage: 0% (0/0 lines)')"
+    - python3 -c 'import xml.etree.ElementTree as ET; tree=ET.parse("coverage.xml"); root=tree.getroot(); total=0; covered=0; for p in root.findall(".//package"): for c in p.findall(".//class"): for l in c.find("lines").findall("line"): total+=1; covered+=int(l.get("hits",0)) if int(l.get("hits",0))>0 else 0; print(f"Coverage: {covered/total*100:.1f}% ({covered}/{total} lines)" if total>0 else "Coverage: 0% (0/0 lines)")'
   after_script:
     - echo "Coverage report generated successfully"
     - ls -la coverage.*
