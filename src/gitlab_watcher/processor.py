@@ -844,7 +844,10 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
             
             # Check if any changes were actually made
-            if not git.has_unpushed_work(self.default_branch):
+            has_committed_changes = git.has_unpushed_work(self.default_branch)
+            has_uncommitted_changes = git.has_uncommitted_changes()
+            
+            if not (has_committed_changes or has_uncommitted_changes):
                 self.logger.info(f"[{project.name}] AI tool completed but no changes were made for MR !{mr.iid}")
                 # We keep the 'eyes' emoji as it was placed at the start
                 self.discord.notify_no_changes_needed(
@@ -853,8 +856,31 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
                     mr.web_url,
                 )
                 return True
-
-            # Push changes
+            
+            # If there are uncommitted changes, commit them first
+            if has_uncommitted_changes and not has_committed_changes:
+                self.logger.info(f"[{project.name}] AI tool made changes but didn't commit them, committing now")
+                # Try to add all changes and commit with a generic message
+                if not git.add("."):
+                    self.logger.error(f"[{project.name}] Failed to add changes for MR !{mr.iid}")
+                    self.discord.notify_error(
+                        project.name,
+                        f"Failed to add changes for merge request !{mr.iid}",
+                        details="Git add command failed.",
+                    )
+                    return False
+                    
+                commit_message = f"Apply feedback from merge request !{mr.iid}\n\nAddressed reviewer feedback: {comment[:100]}..."
+                if not git.commit(commit_message):
+                    self.logger.error(f"[{project.name}] Failed to commit changes for MR !{mr.iid}")
+                    self.discord.notify_error(
+                        project.name,
+                        f"Failed to commit changes for merge request !{mr.iid}",
+                        details="Git commit command failed.",
+                    )
+                    return False
+            
+            # Now push changes
             if not git.push("origin", mr.source_branch):
                 self.logger.error(f"[{project.name}] Failed to push changes to MR !{mr.iid}")
                 self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")

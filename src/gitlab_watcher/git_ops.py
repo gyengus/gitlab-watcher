@@ -158,6 +158,49 @@ class GitOps:
         except subprocess.CalledProcessError:
             return None
 
+    def has_uncommitted_changes(self) -> bool:
+        """Check if there are any uncommitted changes (staged or unstaged).
+        
+        Returns:
+            True if there are uncommitted changes, False otherwise
+        """
+        try:
+            # Check for unstaged changes
+            result = self._run("status", "--porcelain", check=False)
+            return bool(result.stdout.strip())
+        except Exception:
+            return False
+
+    def add(self, path: str = ".") -> bool:
+        """Add files to the staging area.
+        
+        Args:
+            path: Path to add (default: ".")
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self._run("add", path)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+    
+    def commit(self, message: str) -> bool:
+        """Create a commit with the given message.
+        
+        Args:
+            message: Commit message
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self._run("commit", "-m", message)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
     def get_remote_url(self, remote: str = "origin") -> str | None:
         """Get the remote URL."""
         try:

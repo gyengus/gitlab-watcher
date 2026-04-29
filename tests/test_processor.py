@@ -965,8 +965,6 @@ class TestProcessorProcessComment:
     @patch("time.sleep")
     def test_process_comment_no_changes_needed(
         self,
-        mock_sleep: Mock,
-        mock_killpg: Mock,
         mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
@@ -978,7 +976,10 @@ class TestProcessorProcessComment:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.push.return_value = True
-        mock_git.has_unpushed_work.return_value = False  # No changes after AI tool
+        mock_git.has_unpushed_work.return_value = False  # No committed changes after AI tool
+        mock_git.has_uncommitted_changes.return_value = False  # No uncommitted changes either
+        mock_git.add.return_value = True  # Mock add method
+        mock_git.commit.return_value = True  # Mock commit method
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -1007,20 +1008,23 @@ class TestProcessorProcessComment:
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
+        processor_with_git.state.add_tracked_mr(project_config.project_id, sample_mr.iid, sample_mr.source_branch)
 
-        result = processor_with_git.process_comment(
-            project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
-        )
+        # Run the test
+        with patch("time.time", return_value=0):
+            result = processor_with_git.process_comment(
+                project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
+            )
 
         assert result is True
-        # Should notify "no changes needed" instead of "changes applied"
         processor_with_git.discord.notify_no_changes_needed.assert_called_once_with(
-            project_config.name,
-            sample_mr.title,
-            sample_mr.web_url,
+            project_config.name, sample_mr.title, sample_mr.web_url
         )
-        # Should NOT push since no changes
+        # Should not push when no changes
         mock_git.push.assert_not_called()
+        # Should not add or commit when no changes
+        mock_git.add.assert_not_called()
+        mock_git.commit.assert_not_called()
 
     @patch("subprocess.Popen")
     @patch("os.getpgid")
