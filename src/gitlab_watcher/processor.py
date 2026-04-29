@@ -657,10 +657,14 @@ class Processor:
 Issue description:
 {description}
 
-Please complete this task. Make the necessary changes and commit them.
-Write commit messages in English.
-Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits.{continue_instruction}"""
+Please complete this task. Make the necessary changes, commit them, and push to the remote repository.
+
+Important instructions:
+1. Write commit messages in English.
+2. Do not use conventional commit prefixes like feat:, fix:, etc.
+3. Do not add Co-Authored-By signature to commits.
+4. After committing, push the changes with: git push origin {branch}
+5. If you're continuing existing work, review the current state with git log and git diff first.{continue_instruction}"""
 
         # Run AI tool
         try:
@@ -821,10 +825,14 @@ Branch: {mr.source_branch}
 A reviewer left this feedback:
 {comment}
 
-Please address this feedback. Make the necessary changes and commit them.
-Write commit messages in English.
-Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits.{continue_instruction}"""
+Please address this feedback. Make the necessary changes, commit them, and push to the remote repository.
+
+Important instructions:
+1. Write commit messages in English.
+2. Do not use conventional commit prefixes like feat:, fix:, etc.
+3. Do not add Co-Authored-By signature to commits.
+4. After committing, push the changes with: git push origin {mr.source_branch}
+5. If you're continuing existing work, review the current state with git log and git diff first.{continue_instruction}"""
 
         # Run AI tool
         try:
