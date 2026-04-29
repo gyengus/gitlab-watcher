@@ -61,6 +61,7 @@ MAX_BRANCH_LENGTH = 100
 # Default AI tool timeout (1 hour)
 DEFAULT_AI_TOOL_TIMEOUT = 3600
 CLAUDE_CLI_TIMEOUT_SECONDS = DEFAULT_AI_TOOL_TIMEOUT
+SILENCE_TIMEOUT = 300
 
 
 class Processor:
@@ -320,6 +321,7 @@ class Processor:
             thread.start()
 
             start_time = time.time()
+            last_activity_time = time.time()
             timed_out = False
             try:
                 while True:
@@ -327,6 +329,7 @@ class Processor:
                         # Check for output every 100ms
                         line = output_queue.get(timeout=0.1)
                         all_output.append(line)
+                        last_activity_time = time.time()
 
                         # Log to watcher log in real-time
                         stripped = line.strip()
@@ -337,11 +340,18 @@ class Processor:
                             # Process finished
                             break
 
-                    # Check for timeout
+                        # Check for silence timeout
+                        if time.time() - last_activity_time > SILENCE_TIMEOUT:
+                            self.logger.warning(f"AI tool silence timeout: no output for {SILENCE_TIMEOUT}s")
+                            timed_out = True
+                            break
+
+                    # Check for overall timeout
                     if time.time() - start_time > self.ai_tool_timeout:
                         timed_out = True
                         break
             finally:
+                # ... (rest of cleanup)
                 # Always cleanup the process group (including orphans)
                 # Using saved pgid to work even if the leader process is already dead
                 try:
@@ -658,8 +668,8 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             success, output = self._run_ai_tool_with_failover(prompt, project.path)
             
             if not success:
-                self.logger.error(f"[{project.name}] AI TOOL FAILED for issue #{issue.iid}. Error details: {output}")
-                self.discord.notify_error(
+                self.logger.error(f"[{project.name}] AI tool failed for issue #{issue.iid}. Error details: {output}")
+                self.discord.notify_ai_tool_crash(
                     project.name,
                     f"AI tool failed for issue #{issue.iid}",
                     details=output,
@@ -823,16 +833,27 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             
             if not success:
                 self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
-                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
-                self.discord.notify_error(
+                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "warning")
+                self.discord.notify_ai_tool_crash(
                     project.name,
                     f"AI tool failed for merge request !{mr.iid}",
                     details=output,
                 )
                 return False
-
+            
             self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
             
+            # Check if any changes were actually made
+            if not git.has_unpushed_work(self.default_branch):
+                self.logger.info(f"[{project.name}] AI tool completed but no changes were made for MR !{mr.iid}")
+                # We keep the 'eyes' emoji as it was placed at the start
+                self.discord.notify_no_changes_needed(
+                    project.name,
+                    mr.title,
+                    mr.web_url,
+                )
+                return True
+
             # Push changes
             if not git.push("origin", mr.source_branch):
                 self.logger.error(f"[{project.name}] Failed to push changes to MR !{mr.iid}")
@@ -845,14 +866,14 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
                 )
                 return False
 
-            success = self.gitlab.create_note_award_emoji(
+            success_emoji = self.gitlab.create_note_award_emoji(
                 project.project_id, 
                 mr.iid,
                 note_id, 
                 "white_check_mark"
             )
             
-            if not success and discussion_id:
+            if not success_emoji and discussion_id:
                 self.logger.warning(f"Failed to add emoji to note {note_id}, using fallback reply to discussion {discussion_id}.")
                 self.gitlab.create_note_reply(
                     project.project_id,
@@ -866,6 +887,7 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
                 mr.web_url,
             )
             return True
+
         except Exception as e:
             self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
             self.discord.notify_error(

@@ -78,6 +78,19 @@ class DiscordWebhook:
             f"Issue #{issue_iid} completed. Waiting for review."
         )
 
+    def notify_no_changes_needed(
+        self,
+        project_name: str,
+        mr_title: str,
+        mr_url: str,
+    ) -> bool:
+        """Notify that no changes were required after reviewing feedback."""
+        return self.send(
+            f"👀 **No Changes Needed** [{project_name}]\n"
+            f"[{mr_title}]({mr_url})\n\n"
+            f"The AI reviewed the feedback but found no necessary code changes."
+        )
+
     def notify_changes_applied(
         self,
         project_name: str,
@@ -125,5 +138,17 @@ class DiscordWebhook:
         content = f"❌ **Error** [{project_name}]\n{message}"
         if details:
             # Format details with code block for better readability
+            content += f"\n\n```{details}```"
+        return self.send(content)
+
+    def notify_ai_tool_crash(
+        self,
+        project_name: str,
+        message: str,
+        details: str | None = None,
+    ) -> bool:
+        """Notify about an AI tool crash or unexpected failure."""
+        content = f"⚠️ **AI Tool Crash** [{project_name}]\n{message}"
+        if details:
             content += f"\n\n```{details}```"
         return self.send(content)
