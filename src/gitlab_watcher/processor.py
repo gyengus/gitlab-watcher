@@ -233,7 +233,7 @@ class Processor:
                     model,
                     "run",
                     safe_prompt,
-                    "--thinking",
+                    "--dangerously-skip-permissions",
                     "--log-level",
                     "DEBUG",
                 ]
@@ -243,7 +243,7 @@ class Processor:
                     "--print-logs",
                     "run",
                     safe_prompt,
-                    "--thinking",
+                    "--dangerously-skip-permissions",
                     "--log-level",
                     "DEBUG",
                 ]
@@ -279,7 +279,7 @@ class Processor:
                 "CI": "true",
                 "PYTHONUNBUFFERED": "1",
                 "DEBIAN_FRONTEND": "noninteractive",
-                "CLAUDECODE": "",
+                "CLAUDECODE": "1",  # Enable code execution for OpenCode
             })
             
             self.logger.info(
