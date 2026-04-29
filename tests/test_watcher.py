@@ -1204,9 +1204,9 @@ class TestWatcherExtractFromRemote:
 @patch("gitlab_watcher.watcher.Path.mkdir")
 @patch("builtins.open")
 def test_logging_fallback(
-    mock_open: Mock,
-    mock_mkdir: Mock,
-    mock_file_handler: Mock,
+    mock_open: MagicMock,
+    mock_mkdir: MagicMock,
+    mock_file_handler: MagicMock,
     config_file: Path,
     mock_gitlab: MagicMock,
     mock_discord: MagicMock,
