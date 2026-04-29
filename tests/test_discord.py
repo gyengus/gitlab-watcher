@@ -163,18 +163,57 @@ class TestDiscordWebhook:
         assert "Something went wrong" in message
 
     @patch("requests.post")
-    def test_notify_error_with_details(self, mock_post: Mock) -> None:
-        """Test error notification with details."""
+    def test_notify_no_changes_needed(self, mock_post: Mock) -> None:
+        """Test no changes needed notification."""
         mock_post.return_value = Mock(status_code=204)
 
         webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
-        result = webhook.notify_error(
+        result = webhook.notify_no_changes_needed(
             project_name="test-project",
-            message="Something went wrong",
-            details="Stack trace here",
+            mr_title="Fix bug",
+            mr_url="https://git.example.com/merge_requests/1",
         )
 
         assert result is True
         call_args = mock_post.call_args
         message = call_args.kwargs["json"]["content"]
-        assert "Stack trace here" in message
+        assert "No Changes Needed" in message
+        assert "test-project" in message
+        assert "Fix bug" in message
+        assert "The AI reviewed the feedback" in message
+
+    @patch("requests.post")
+    def test_notify_ai_tool_crash(self, mock_post: Mock) -> None:
+        """Test AI tool crash notification."""
+        mock_post.return_value = Mock(status_code=204)
+
+        webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
+        result = webhook.notify_ai_tool_crash(
+            project_name="test-project",
+            message="AI tool failed for merge request !1",
+        )
+
+        assert result is True
+        call_args = mock_post.call_args
+        message = call_args.kwargs["json"]["content"]
+        assert "AI Tool Crash" in message
+        assert "test-project" in message
+        assert "AI tool failed" in message
+
+    @patch("requests.post")
+    def test_notify_ai_tool_crash_with_details(self, mock_post: Mock) -> None:
+        """Test AI tool crash notification with details."""
+        mock_post.return_value = Mock(status_code=204)
+
+        webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
+        result = webhook.notify_ai_tool_crash(
+            project_name="test-project",
+            message="AI tool failed for merge request !1",
+            details="Timeout after 300 seconds",
+        )
+
+        assert result is True
+        call_args = mock_post.call_args
+        message = call_args.kwargs["json"]["content"]
+        assert "AI Tool Crash" in message
+        assert "Timeout after 300 seconds" in message
