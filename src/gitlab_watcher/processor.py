@@ -233,7 +233,6 @@ elif self.ai_tool_mode == "opencode":
                     "run",
                     safe_prompt,
                     "--thinking",
-                    "--dangerously-skip-permissions",
                     "--log-level",
                     "INFO",
                 ]
@@ -243,7 +242,6 @@ elif self.ai_tool_mode == "opencode":
                     "run",
                     safe_prompt,
                     "--thinking",
-                    "--dangerously-skip-permissions",
                     "--log-level",
                     "INFO",
                 ]
