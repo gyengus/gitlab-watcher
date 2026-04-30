@@ -245,9 +245,15 @@ class Watcher:
         if self.state.is_processing(project.project_id):
             return
 
-        # Sequential Processing: Skip if there are any tracked MRs
+        # Sequential Processing: Skip only if there are tracked MRs AND all are merged/closed
         state = self.state.load(project.project_id)
-        if state.tracked_mrs:
+        # Check if all tracked MRs are merged or closed
+        open_tracked_mrs = [
+            mr for mr in open_mrs
+            if mr.iid in state.tracked_mrs
+        ] if open_mrs else []
+        if open_tracked_mrs:
+            # There are open tracked MRs, skip issue processing
             return
 
         issues = self.gitlab.get_issues(
