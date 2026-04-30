@@ -655,6 +655,8 @@ class Processor:
 Issue description:
 {description}
 
+Please read and follow any existing project documentation files in the repository (AGENTS.md, CLAUDE.md, CONTRIBUTING.md) before starting work.
+
 Please complete this task. Make the necessary changes, commit them, and push to the remote repository.
 
 Important instructions:
@@ -822,6 +824,8 @@ Branch: {mr.source_branch}
 
 A reviewer left this feedback:
 {comment}
+
+Please read and follow any existing project documentation files in the repository (AGENTS.md, CLAUDE.md, CONTRIBUTING.md) before starting work.
 
 Please address this feedback. Make the necessary changes, commit them, and push to the remote repository.
 
