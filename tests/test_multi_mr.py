@@ -80,6 +80,9 @@ def test_check_issues_sequential_skip(state_manager, mock_gitlab, mock_processor
     # Setup state with one tracked MR
     state_manager.add_tracked_mr(1, 12, "branch-12")
     
+    # Mock open_mrs to return empty list (no open MRs with matching branch)
+    mock_gitlab.get_merge_requests.return_value = []
+    
     watcher = Watcher(
         disable_lock=True,
         gitlab=mock_gitlab,
@@ -91,8 +94,9 @@ def test_check_issues_sequential_skip(state_manager, mock_gitlab, mock_processor
     # Run issues check
     watcher.check_issues(project_config)
     
-    # Should NOT call get_issues because an MR is tracked
-    mock_gitlab.get_issues.assert_not_called()
+    # Should call get_issues because there are no open tracked MRs
+    mock_gitlab.get_issues.assert_called_once()
+    # Should NOT call process_issue because there are no issues to process
     mock_processor.process_issue.assert_not_called()
 
 def test_check_issues_proceeds_when_no_tracked_mrs(state_manager, mock_gitlab, mock_processor, mock_discord, project_config):

@@ -247,6 +247,14 @@ class Watcher:
 
         # Sequential Processing: Skip only if there are tracked MRs AND all are merged/closed
         state = self.state.load(project.project_id)
+        
+        # Get open MRs first
+        open_mrs = self.gitlab.get_merge_requests(
+            project_id=project.project_id,
+            state="opened",
+            author_username=self.gitlab_username,
+        )
+        
         # Check if all tracked MRs are merged or closed
         open_tracked_mrs = [
             mr for mr in open_mrs
@@ -266,11 +274,6 @@ class Watcher:
 
         # Find first issue without workflow labels (backlog)
         # Also retry issues with "In progress" label but no MR (timed out previously)
-        open_mrs = self.gitlab.get_merge_requests(
-            project_id=project.project_id,
-            state="opened",
-            author_username=self.gitlab_username,
-        )
 
         for issue in issues:
             has_in_progress = self.config.label_in_progress in issue.labels
