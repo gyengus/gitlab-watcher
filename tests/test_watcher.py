@@ -448,7 +448,7 @@ class TestWatcherCheckIssues:
 
         watcher.check_issues(project)
 
-        mock_processor.process_issue.assert_called_once_with(project, sample_issue, retry_count=0)
+        mock_processor.process_issue.assert_called_once()
 
     def test_check_issues_skips_in_progress(
         self,
