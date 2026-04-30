@@ -498,10 +498,24 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             )
 
             if mr:
-                # Track the MR we just created so the watcher knows it's ours
-                self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
-                # Only move to Review if AI tool made changes
+                # Only track MR if AI tool made changes
                 if git.has_unpushed_work(self.default_branch) or git.has_uncommitted_changes():
+                    # Track the MR we just created so the watcher knows it's ours
+                    self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
+                    # Move to Review
+                    self.gitlab.update_issue_labels(
+                        project.project_id,
+                        issue.iid,
+                        [self.label_review],
+                    )
+                    self.discord.notify_mr_created(
+                        project.name,
+                        issue.title,
+                        mr.web_url,
+                        issue.iid,
+                    )
+                else:
+                    self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - not tracking empty MR")
                     self.gitlab.update_issue_labels(
                         project.project_id,
                         issue.iid,
