@@ -472,21 +472,8 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
 
             self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
             
-            # Only push if AI tool made changes
-            if not (git.has_unpushed_work(self.default_branch) or git.has_uncommitted_changes()):
-                self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - skipping push")
-                # Keep issue in In progress so watcher can retry
-                return False
-
             # Push branch
-            if not git.push("origin", branch, set_upstream=True):
-                self.logger.error(f"[{project.name}] GIT PUSH FAILED for branch {branch}")
-                self.discord.notify_error(
-                    project.name,
-                    f"Could not push branch `{branch}`",
-                    details="Git push returned failure. No changes were pushed to remote.",
-                )
-                return False
+            git.push("origin", branch, set_upstream=True)
 
             # Create MR
             mr = self.gitlab.create_merge_request(
@@ -503,19 +490,6 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
                     # Track the MR we just created so the watcher knows it's ours
                     self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
                     # Move to Review
-                    self.gitlab.update_issue_labels(
-                        project.project_id,
-                        issue.iid,
-                        [self.label_review],
-                    )
-                    self.discord.notify_mr_created(
-                        project.name,
-                        issue.title,
-                        mr.web_url,
-                        issue.iid,
-                    )
-                else:
-                    self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - not tracking empty MR")
                     self.gitlab.update_issue_labels(
                         project.project_id,
                         issue.iid,
