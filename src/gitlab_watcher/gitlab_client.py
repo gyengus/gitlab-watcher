@@ -256,6 +256,16 @@ class GitLabClient:
             for item in data
         ]
 
+    def get_merge_request_commits(self, project_id: int, mr_iid: int) -> list:
+        """Get commits for a merge request."""
+        endpoint = f"/merge_requests/{mr_iid}/commits"
+        try:
+            data = self._request_all("GET", self._api_url(project_id, endpoint))
+            return data
+        except Exception as e:
+            self.logger.warning(f"Could not fetch commits for MR !{mr_iid}: {e}")
+            return []
+
     def get_merge_request(self, project_id: int, mr_iid: int) -> Optional[MergeRequest]:
         """Get a specific merge request with caching."""
         cache_key = f"mr_{project_id}_{mr_iid}"

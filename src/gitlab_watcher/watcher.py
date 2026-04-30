@@ -279,16 +279,16 @@ class Watcher:
                 self.processor.process_issue(project, issue)
                 break
 
-            # Retry: "In progress" but no MR exists (likely timed out)
+            # Retry: "In progress" but no MR exists or MR is empty (likely timed out)
             if has_in_progress and not has_review:
                 # Check if any open MR has a source branch matching this issue
                 # Branch names follow the pattern: {iid}-{slug}
-                has_matching_mr = any(
-                    mr.source_branch.startswith(f"{issue.iid}-")
-                    for mr in open_mrs
-                ) if open_mrs else False
+                matching_mrs = [
+                    mr for mr in open_mrs
+                    if mr.source_branch.startswith(f"{issue.iid}-")
+                ] if open_mrs else []
 
-                if not has_matching_mr:
+                if not matching_mrs:
                     self._log(
                         project.project_id,
                         f"Retrying stuck issue #{issue.iid} (In progress but no MR found)",
@@ -296,6 +296,27 @@ class Watcher:
                     self.state.set_processing(project.project_id, True)
                     self.processor.process_issue(project, issue)
                     break
+                elif matching_mrs:
+                    # Check if MR has commits
+                    mr = matching_mrs[0]
+                    try:
+                        mr_commits = self.gitlab.get_merge_request_commits(
+                            project_id=project.project_id,
+                            mr_iid=mr.iid
+                        )
+                        if not mr_commits:
+                            self._log(
+                                project.project_id,
+                                f"Retrying stuck issue #{issue.iid} (In progress but MR has no commits)",
+                            )
+                            self.state.set_processing(project.project_id, True)
+                            self.processor.process_issue(project, issue)
+                            break
+                    except Exception as e:
+                        self._log(
+                            project.project_id,
+                            f"Could not check MR commits for issue #{issue.iid}: {e}",
+                        )
 
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
