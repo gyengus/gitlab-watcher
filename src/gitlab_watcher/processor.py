@@ -472,8 +472,21 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
 
             self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
             
+            # Only push if AI tool made changes
+            if not (git.has_unpushed_work(self.default_branch) or git.has_uncommitted_changes()):
+                self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - skipping push")
+                # Keep issue in In progress so watcher can retry
+                return False
+
             # Push branch
-            git.push("origin", branch, set_upstream=True)
+            if not git.push("origin", branch, set_upstream=True):
+                self.logger.error(f"[{project.name}] GIT PUSH FAILED for branch {branch}")
+                self.discord.notify_error(
+                    project.name,
+                    f"Could not push branch `{branch}`",
+                    details="Git push returned failure. No changes were pushed to remote.",
+                )
+                return False
 
             # Create MR
             mr = self.gitlab.create_merge_request(
