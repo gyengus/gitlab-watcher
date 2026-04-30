@@ -233,6 +233,7 @@ elif self.ai_tool_mode == "opencode":
                     "run",
                     safe_prompt,
                     "--thinking",
+                    "--dangerously-skip-permissions",
                     "--log-level",
                     "INFO",
                 ]
@@ -242,6 +243,7 @@ elif self.ai_tool_mode == "opencode":
                     "run",
                     safe_prompt,
                     "--thinking",
+                    "--dangerously-skip-permissions",
                     "--log-level",
                     "INFO",
                 ]
@@ -295,7 +297,7 @@ elif self.ai_tool_mode == "opencode-custom":
                 "CI": "true",
                 "PYTHONUNBUFFERED": "1",
                 "DEBIAN_FRONTEND": "noninteractive",
-                "CLAUDECODE": "1",  # Enable code execution for OpenCode
+                # CLAUDECODE removed - let OpenCode handle code execution permissions
             })
             
             self.logger.info(
