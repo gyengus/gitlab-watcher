@@ -228,26 +228,22 @@ class Processor:
             if model:
                 cmd = [
                     "opencode",
-                    "--print-logs",
                     "--model",
                     model,
                     "run",
                     safe_prompt,
                     "--thinking",
-                    "--dangerously-skip-permissions",
                     "--log-level",
-                    "DEBUG",
+                    "ERROR",  # Only show errors, not INFO/DEBUG logs
                 ]
             else:
                 cmd = [
                     "opencode",
-                    "--print-logs",
                     "run",
                     safe_prompt,
                     "--thinking",
-                    "--dangerously-skip-permissions",
                     "--log-level",
-                    "DEBUG",
+                    "ERROR",  # Only show errors, not INFO/DEBUG logs
                 ]
         elif self.ai_tool_mode == "opencode-custom":
             if not self.ai_tool_custom_command:
