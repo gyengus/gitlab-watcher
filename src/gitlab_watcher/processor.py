@@ -224,7 +224,7 @@ class Processor:
             ]
         elif self.ai_tool_mode == "direct":
             cmd = ["claude", "-p", safe_prompt, "--permission-mode", "acceptEdits"]
-elif self.ai_tool_mode == "opencode":
+        elif self.ai_tool_mode == "opencode":
             if model:
                 cmd = [
                     "opencode",
@@ -245,25 +245,7 @@ elif self.ai_tool_mode == "opencode":
                     "--log-level",
                     "INFO",
                 ]
-            else:
-                cmd = [
-                    "opencode",
-                    "run",
-                    safe_prompt,
-                    "--thinking",
-                    "--log-level",
-                    "INFO",
-                ]
-            else:
-                cmd = [
-                    "opencode",
-                    "run",
-                    safe_prompt,
-                    "--thinking",
-                    "--log-level",
-                    "ERROR",  # Only show errors, not INFO/DEBUG logs
-                ]
-elif self.ai_tool_mode == "opencode-custom":
+        elif self.ai_tool_mode == "opencode-custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for opencode-custom mode"
             cmd_parts = shlex.split(self.ai_tool_custom_command)

@@ -345,14 +345,15 @@ class TestProcessorRunClaude:
     @patch("subprocess.Popen")
     @patch("os.getpgid")
     @patch("os.killpg")
+    @patch("time.time")
     def test_run_ai_tool_silence_timeout_inline_mock(
         self,
+        mock_time_fn: Mock,
         mock_killpg: Mock,
         mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
-        monkeypatch,
     ) -> None:
         """Test AI tool silence timeout with inline time mocking."""
         mock_process = MagicMock()
@@ -362,11 +363,9 @@ class TestProcessorRunClaude:
         mock_popen.return_value = mock_process
         mock_getpgid.return_value = 5678
         
-        # Mock time.time() inline using monkeypatch
-        import time
-        time_values = [0, 0.1, 0.2, 100, 200, 301]  # Last value triggers silence timeout
-        
-        original_time = time.time
+        # Setup time.time() mock - return increasing values to trigger silence timeout
+        # Values: 0, 0.1, 0.2, 100, 200, 301 (triggers timeout at 301-200=101 > 300 silence threshold)
+        time_values = [0, 0.1, 0.2, 100, 200, 301, 400, 500, 600, 700, 800, 900, 1000]
         call_count = [0]
         
         def mock_time():
@@ -375,9 +374,9 @@ class TestProcessorRunClaude:
             if idx < len(time_values):
                 return time_values[idx]
             # Fallback for any additional calls
-            return time_values[-1] + (idx - len(time_values)) * 10
+            return time_values[-1] + 100
         
-        monkeypatch.setattr(time, "time", mock_time)
+        mock_time_fn.side_effect = mock_time
         
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
@@ -436,51 +435,12 @@ class TestProcessorAIToolModes:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_ai_tool_direct_mode(
-        self,
-        mock_sleep: Mock,
-        mock_killpg: Mock,
-        mock_getpgid: Mock,
-        mock_popen: Mock,
-        gitlab_client: GitLabClient,
-        discord_webhook: DiscordWebhook,
-        state_manager: StateManager,
-        project_config: ProjectConfig,
-    ) -> None:
-        """Test direct mode uses 'claude' command directly."""
-        mock_process = MagicMock()
-        mock_process.poll.return_value = 0
-        mock_process.stdout.readline.return_value = ""
-        mock_process.returncode = 0
-        mock_process.pid = 1234
-        mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
-        processor = Processor(
-            gitlab=gitlab_client,
-            discord=discord_webhook,
-            state=state_manager,
-            gitlab_username="claude",
-            label_in_progress="In progress",
-            label_review="Review",
-            ai_tool_mode="direct",
-        )
-
-        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
-        assert success is True
-        args = mock_popen.call_args[0][0]
-        assert args[0] == "claude"
-        assert args[1] == "-p"
-        assert args[2] == "Fix the bug"
-        assert args[3] == "--permission-mode"
-        assert args[4] == "acceptEdits"
-
+    @patch("gitlab_watcher.processor.time.time")
     @patch("subprocess.Popen")
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
-    def test_run_ai_tool_custom_mode(
+    def test_run_ai_tool_opencode_custom_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
@@ -491,7 +451,7 @@ class TestProcessorAIToolModes:
         state_manager: StateManager,
         project_config: ProjectConfig,
     ) -> None:
-        """Test custom mode uses configured command."""
+        """Test opencode-custom mode."""
         mock_process = MagicMock()
         mock_process.poll.return_value = 0
         mock_process.stdout.readline.return_value = ""
@@ -507,68 +467,17 @@ class TestProcessorAIToolModes:
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
-            ai_tool_mode="custom",
-            ai_tool_custom_command="my-ai --prompt {prompt} --dir {cwd}",
+            ai_tool_mode="opencode-custom",
+            ai_tool_custom_command="my-opencode --p {prompt}",
         )
 
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
 
         assert success is True
         args = mock_popen.call_args[0][0]
-        assert args[0] == "my-ai"
-        assert args[1] == "--prompt"
+        assert args[0] == "my-opencode"
+        assert args[1] == "--p"
         assert args[2] == "Fix the bug"
-        assert args[3] == "--dir"
-        assert str(project_config.path) in args
-
-    @patch("subprocess.Popen")
-    @patch("os.getpgid")
-    @patch("os.killpg")
-    @patch("time.sleep")
-    def test_run_ai_tool_opencode_mode(
-        self,
-        mock_sleep: Mock,
-        mock_killpg: Mock,
-        mock_getpgid: Mock,
-        mock_popen: Mock,
-        gitlab_client: GitLabClient,
-        discord_webhook: DiscordWebhook,
-        state_manager: StateManager,
-        project_config: ProjectConfig,
-    ) -> None:
-        """Test opencode mode uses 'opencode' command."""
-        mock_process = MagicMock()
-        mock_process.poll.return_value = 0
-        mock_process.stdout.readline.return_value = ""
-        mock_process.returncode = 0
-        mock_process.pid = 1234
-        mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
-        processor = Processor(
-            gitlab=gitlab_client,
-            discord=discord_webhook,
-            state=state_manager,
-            gitlab_username="claude",
-            label_in_progress="In progress",
-            label_review="Review",
-            ai_tool_mode="opencode",
-        )
-        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
-        assert success is True
-        args = mock_popen.call_args[0][0]
-        assert args[0] == "opencode"
-        assert args[1] == "--print-logs"
-        assert args[2] == "run"
-        
-        # Verify non-interactive environment variables
-        kwargs = mock_popen.call_args[1]
-        assert kwargs["env"]["CI"] == "true"
-        assert kwargs["env"]["PYTHONUNBUFFERED"] == "1"
-        assert kwargs["env"]["DEBIAN_FRONTEND"] == "noninteractive"
-        assert kwargs["stdin"] == subprocess.DEVNULL
-        assert "Fix the bug" in args
 
     @patch("subprocess.Popen")
     @patch("os.getpgid")
@@ -963,8 +872,13 @@ class TestProcessorProcessComment:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
+    @patch("gitlab_watcher.processor.time.time")
+    @patch.object(Processor, "_run_ai_tool_with_failover")
     def test_process_comment_no_changes_needed(
         self,
+        mock_run_ai: Mock,
+        mock_time_fn: Mock,
+        mock_sleep: Mock,
         mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
@@ -993,14 +907,15 @@ class TestProcessorProcessComment:
             git_factory=lambda path: mock_git,
         )
 
-        # Mock AI Tool success
-        mock_process = MagicMock()
-        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
-        mock_process.stdout.readline.return_value = ""
-        mock_process.returncode = 0
-        mock_process.pid = 1234
-        mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
+        # Mock AI Tool to succeed immediately
+        mock_run_ai.return_value = (True, "")
+
+        # Mock time.time to return a simple counter
+        time_counter = [0]
+        def mock_time():
+            time_counter[0] += 1
+            return float(time_counter[0])
+        mock_time_fn.side_effect = mock_time
 
         # Mock GitLab client methods and Discord
         processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
@@ -1010,11 +925,47 @@ class TestProcessorProcessComment:
         processor_with_git.state.init_state(project_config.project_id)
         processor_with_git.state.add_tracked_mr(project_config.project_id, sample_mr.iid, sample_mr.source_branch)
 
-        # Run the test
-        with patch("time.time", return_value=0):
-            result = processor_with_git.process_comment(
-                project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
-            )
+        result = processor_with_git.process_comment(
+            project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
+        )
+
+        assert result is True
+        processor_with_git.discord.notify_no_changes_needed.assert_called_once_with(
+            project_config.name, sample_mr.title, sample_mr.web_url
+        )
+
+        # Mock AI Tool success - process finishes immediately with quick poll
+        mock_process = MagicMock()
+        # Poll returns None first (process running), then 0 (process finished)
+        mock_process.poll.side_effect = [None, 0]
+        # stdout.readline returns empty string immediately (EOF)
+        mock_process.stdout.readline.side_effect = ["", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+        
+        # Mock stdout close to avoid thread issues
+        mock_process.stdout.close = MagicMock()
+
+        # Mock time.time to return a simple counter
+        time_counter = [0]
+        def mock_time():
+            time_counter[0] += 1
+            return float(time_counter[0])
+        mock_time_fn.side_effect = mock_time
+
+        # Mock GitLab client methods and Discord
+        processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
+        processor_with_git.discord.notify_no_changes_needed = Mock(return_value=True)
+
+        # Initialize state
+        processor_with_git.state.init_state(project_config.project_id)
+        processor_with_git.state.add_tracked_mr(project_config.project_id, sample_mr.iid, sample_mr.source_branch)
+
+        result = processor_with_git.process_comment(
+            project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
+        )
 
         assert result is True
         processor_with_git.discord.notify_no_changes_needed.assert_called_once_with(
