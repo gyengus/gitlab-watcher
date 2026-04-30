@@ -666,6 +666,10 @@ Important instructions:
 4. After committing, push the changes with: git push origin {branch}
 5. If you're continuing existing work, review the current state with git log and git diff first.{continue_instruction}"""
 
+        self.logger.info(f"[{project.name}] Issue prompt for #{issue.iid}: {prompt}")
+
+        self.logger.info(f"[{project.name}] Issue prompt for #{issue.iid}: {prompt}")
+
         # Run AI tool
         try:
             self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
@@ -836,9 +840,11 @@ Important instructions:
 4. After committing, push the changes with: git push origin {mr.source_branch}
 5. If you're continuing existing work, review the current state with git log and git diff first.{continue_instruction}"""
 
-        # Run AI tool
+        self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
+        self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
+        self.logger.info(f"[{project.name}] MR prompt for !{mr.iid}: {prompt}")
+        
         try:
-            self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
             success, output = self._run_ai_tool_with_failover(prompt, project.path)
             
             if not success:
