@@ -655,7 +655,8 @@ class Processor:
 Issue description:
 {description}
 
-Please read and follow any existing project documentation files in the repository (AGENTS.md, CLAUDE.md, CONTRIBUTING.md) before starting work.
+Project documentation (read these before starting work):
+{doc_content}
 
 Please complete this task. Make the necessary changes, commit them, and push to the remote repository.
 
@@ -672,6 +673,10 @@ Important instructions:
 
         # Run AI tool
         try:
+            # Read project documentation files
+            doc_content = self._read_project_docs(project.path)
+            
+            
             self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
             success, output = self._run_ai_tool_with_failover(prompt, project.path)
             
@@ -768,6 +773,25 @@ Important instructions:
         finally:
             self.state.set_processing(project.project_id, False)
 
+    def _read_project_docs(self, repo_path: Path) -> str:
+        """Read existing project documentation files and return their content."""
+        doc_files = ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md"]
+        content_parts = []
+        
+        for filename in doc_files:
+            file_path = repo_path / filename
+            if file_path.exists():
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                    content_parts.append(f"
+
+=== {filename} ===
+{content}")
+                except Exception as e:
+                    self.logger.warning(f"Could not read {filename}: {e}")
+        
+        return "".join(content_parts)
+
     def process_comment(
         self,
         project: ProjectConfig,
@@ -787,6 +811,9 @@ Important instructions:
             True if successful, False otherwise
         """
         git = self.git_factory(project.path)
+
+        # Read project documentation files
+        doc_content = self._read_project_docs(project.path)
 
         self.discord.send(
             f"🤖 **Processing Comment** [{project.name}]\n"
@@ -829,7 +856,8 @@ Branch: {mr.source_branch}
 A reviewer left this feedback:
 {comment}
 
-Please read and follow any existing project documentation files in the repository (AGENTS.md, CLAUDE.md, CONTRIBUTING.md) before starting work.
+Project documentation (read these before starting work):
+{doc_content}
 
 Please address this feedback. Make the necessary changes, commit them, and push to the remote repository.
 
