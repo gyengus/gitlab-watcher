@@ -301,12 +301,13 @@ class GitLabClient:
         try:
             notes_data = self._request_all(
                 "GET", 
-                self._api_url(project_id, endpoint),
-                params={"include_award_emojis": "true"}
+                self._api_url(project_id, endpoint)
             )
             notes = []
             for note in notes_data:
-                self.logger.debug(f"Parsed emojis for note {note['id']}: {note.get('award_emojis', [])}")
+                note_id = note["id"]
+                award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
+                self.logger.debug(f"Parsed emojis for note {note_id}: {award_emojis}")
 
                 notes.append(
                     Note(
@@ -314,7 +315,7 @@ class GitLabClient:
                         body=note["body"],
                         author_username=note["author"]["username"],
                         system=note["system"],
-                        award_emojis=[e["name"] for e in note.get("award_emojis", [])],
+                        award_emojis=award_emojis,
                         discussion_id=note.get("discussion_id", ""),
                         noteable_type=note.get("noteable_type"),
                         noteable_iid=note.get("noteable_iid"),
