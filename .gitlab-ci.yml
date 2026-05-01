@@ -25,6 +25,7 @@ variables:
   SAST_EXCLUDED_PATHS: "spec, test, tests, tmp, target, logs, .git, .mvn, .settings, .vscode"
 
 .test_template:
+  timeout: 3600
   before_script:
     - pip install -e ".[dev]"
   script:
