@@ -20,12 +20,40 @@ from .logging_utils import SensitiveDataFilter, sanitize_for_log
 from .protocols import GitOperations
 from .state import StateManager
 
+_thread_cls = threading.Thread
+
 # Security constants for prompt sanitization
 MAX_PROMPT_LENGTH = 10000
 FORBIDDEN_PATTERNS = [
     r"ignore\s+all\s+previous",
     r"system\s+message",
 ]
+
+AI_TOOL_ERROR_PATTERNS = [
+    r"Forbidden",
+    r"AI_APICallError",
+    r"Authentication failed",
+    r"Unauthorized",
+    r"Permission denied",
+    r"Access denied",
+    r"Invalid credentials",
+    r"Token expired",
+    r"Rate limit exceeded",
+    r"Quota exceeded",
+    r"Provider returned error",
+    r"Service unavailable",
+    r"Gateway timeout",
+    r"Bad gateway",
+    r"Internal server error",
+    r"Model not found",
+    r"Model overloaded",
+    r"Too many requests",
+    r"Request timeout",
+    r"Connection error",
+]
+
+# Silence timeout: if no output for 5 minutes, kill the process
+SILENCE_TIMEOUT = 300
 
 # Input validation constants
 MAX_TITLE_LENGTH = 255
@@ -52,6 +80,7 @@ class Processor:
         ai_tool_mode: str = "ollama",
         ai_tool_custom_command: str = "",
         ai_tool_timeout: int = DEFAULT_AI_TOOL_TIMEOUT,
+        ai_tool_failover_model: str = "",
         default_branch: str = "master",
         git_factory: Callable[[Path], GitOperations] = GitOps,
     ) -> None:
@@ -67,6 +96,7 @@ class Processor:
             ai_tool_mode: AI tool mode ("ollama", "direct", "custom", "opencode", or "opencode-custom")
             ai_tool_custom_command: Custom command for AI tool (used when mode is "custom")
             ai_tool_timeout: Timeout for AI tool in seconds
+            ai_tool_failover_model: Failover model name (empty string = no failover)
             default_branch: Default branch name (default: "master")
             git_factory: Factory function to create GitOperations instances (for dependency injection)
         """
@@ -79,6 +109,7 @@ class Processor:
         self.ai_tool_mode = ai_tool_mode
         self.ai_tool_custom_command = ai_tool_custom_command
         self.ai_tool_timeout = ai_tool_timeout
+        self.ai_tool_failover_model = ai_tool_failover_model
         self.default_branch = default_branch
         self.git_factory = git_factory
         self.logger = logging.getLogger(__name__)
@@ -262,7 +293,7 @@ class Processor:
                 finally:
                     pipe.close()
 
-            thread = threading.Thread(
+            thread = _thread_cls(
                 target=reader, 
                 args=(process.stdout, output_queue),
                 name=f"AiToolReader-{process.pid}"
@@ -271,13 +302,16 @@ class Processor:
             thread.start()
 
             start_time = time.time()
+            last_activity_time = start_time
             timed_out = False
+            silence_timed_out = False
             try:
                 while True:
                     try:
                         # Check for output every 100ms
                         line = output_queue.get(timeout=0.1)
                         all_output.append(line)
+                        last_activity_time = time.time()
 
                         # Log to watcher log in real-time
                         stripped = line.strip()
@@ -288,9 +322,15 @@ class Processor:
                             # Process finished
                             break
 
-                    # Check for timeout
-                    if time.time() - start_time > self.ai_tool_timeout:
+                    # Check for overall timeout
+                    current_time = time.time()
+                    if current_time - start_time > self.ai_tool_timeout:
                         timed_out = True
+                        break
+
+                    # Check for silence timeout (no output for SILENCE_TIMEOUT seconds)
+                    if current_time - last_activity_time > SILENCE_TIMEOUT:
+                        silence_timed_out = True
                         break
             finally:
                 # Always cleanup the process group (including orphans)
@@ -340,7 +380,36 @@ class Processor:
                     f"--- Captured Output ---\n{full_output}",
                 )
 
+            if silence_timed_out:
+                tool_name = (
+                    "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
+                )
+                self.logger.error(f"AI tool silence timeout: no output for {SILENCE_TIMEOUT}s")
+                return (
+                    False,
+                    f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\n"
+                    f"Command: `{shlex.join(cmd[:3])}...` (truncated)\n\n"
+                    f"--- Captured Output ---\n{full_output}",
+                )
+
             success = process.returncode == 0
+            
+            # Additional output inspection for error patterns
+            # Some tools return exit code 0 but output error messages
+            if success and full_output:
+                for pattern in AI_TOOL_ERROR_PATTERNS:
+                    if re.search(pattern, full_output, re.IGNORECASE):
+                        self.logger.error(
+                            f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'"
+                        )
+                        success = False
+                        full_output = (
+                            f"AI tool execution failed (error pattern detected: '{pattern}')\n"
+                            f"Exit code: {process.returncode}\n"
+                            f"Output:\n{full_output}"
+                        )
+                        break
+            
             if not success:
                 self.logger.error(f"AI tool failed with return code {process.returncode}:\n{full_output}")
             
@@ -351,6 +420,69 @@ class Processor:
             msg = f"AI tool execution failed ({self.ai_tool_mode}): {str(e)}"
             self.logger.exception(msg)
             return False, msg
+
+    def _should_failover(self, error_output: str) -> bool:
+        """Check if an error output indicates a failover should be attempted.
+
+        Args:
+            error_output: The error output from AI tool
+
+        Returns:
+            True if failover should be attempted, False otherwise
+        """
+        for pattern in AI_TOOL_ERROR_PATTERNS:
+            if re.search(pattern, error_output, re.IGNORECASE):
+                self.logger.info(f"Failover triggered: error matches pattern '{pattern}'")
+                return True
+
+        if "524" in error_output and "Provider returned error" in error_output:
+            self.logger.info("Failover triggered: 524 Provider returned error detected")
+            return True
+
+        return False
+
+    def _run_ai_tool_with_failover(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
+        """Run AI tool with failover capability.
+
+        Args:
+            prompt: The prompt for AI tool
+            repo_path: Path to the repository
+
+        Returns:
+            Tuple of (success, output)
+        """
+        self.logger.info("Attempting AI tool execution with default configuration")
+        success, output = self._run_ai_tool(prompt, repo_path)
+
+        if success:
+            self.logger.info("AI tool execution successful with default configuration")
+            return True, output
+
+        if not self._should_failover(output):
+            self.logger.info("Error not eligible for failover, returning failure")
+            return False, output
+
+        if not self.ai_tool_failover_model:
+            self.logger.info("No failover model configured, returning original failure")
+            return False, output
+
+        self.logger.info(f"Attempting failover to model: {self.ai_tool_failover_model}")
+
+        success, output = self._run_ai_tool(prompt, repo_path)
+
+        if success:
+            self.logger.info(f"Failover successful using model: {self.ai_tool_failover_model}")
+            return True, output
+
+        self.logger.error(f"Failover failed with model: {self.ai_tool_failover_model}")
+
+        self.discord.notify_error(
+            "AI Tool",
+            f"Both default and failover models failed",
+            details=f"Default model failed.\nFailover model '{self.ai_tool_failover_model}' also failed.\n\nError output:\n{output}"
+        )
+
+        return False, output
 
     def process_issue(
         self,
@@ -656,6 +788,54 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
         finally:
             self.state.set_processing(project.project_id, False)
 
+
+    def retry_mr_creation_only(
+        self,
+        project: ProjectConfig,
+        issue: Issue,
+        branch: str,
+    ) -> bool:
+        """Retry creating an MR for an issue that already has a branch.
+
+        Args:
+            project: Project configuration
+            issue: The issue to create MR for
+            branch: The branch name to create MR from
+
+        Returns:
+            True if MR was created successfully, False otherwise
+        """
+        try:
+            # Create MR
+            mr = self.gitlab.create_merge_request(
+                project.project_id,
+                source_branch=branch,
+                target_branch=self.default_branch,
+                title=issue.title,
+                description=f"{issue.description}\n\nCloses #{issue.iid}",
+            )
+
+            if mr:
+                # Track the MR we just created
+                self.state.add_tracked_mr(
+                    project.project_id, mr.iid, mr.source_branch, created_by_watcher=True
+                )
+                # Move to Review
+                self.gitlab.update_issue_labels(
+                    project.project_id,
+                    issue.iid,
+                    [self.label_review],
+                )
+                self.logger.info(f"[{project.name}] Successfully created MR !{mr.iid} for branch {branch}")
+                return True
+            else:
+                self.logger.error(f"[{project.name}] Failed to create MR for branch {branch}")
+                self.state.mark_branch_failed_mr(project.project_id, branch)
+                return False
+        except Exception as e:
+            self.logger.error(f"[{project.name}] Error creating MR for branch {branch}: {str(e)}")
+            return False
+
     def cleanup_after_merge(
         self,
         project: ProjectConfig,
@@ -703,4 +883,6 @@ __all__ = [
     "MAX_SLUG_LENGTH",
     "MAX_BRANCH_LENGTH",
     "CLAUDE_CLI_TIMEOUT_SECONDS",
+    "AI_TOOL_ERROR_PATTERNS",
+    "SILENCE_TIMEOUT",
 ]

@@ -176,8 +176,9 @@ class TestGitOps:
         args = mock_run.call_args[0][0]
         assert "-u" in args
 
+    @patch("time.sleep")
     @patch("subprocess.run")
-    def test_push_failure(self, mock_run: Mock, git_ops: GitOps) -> None:
+    def test_push_failure(self, mock_run: Mock, mock_sleep: Mock, git_ops: GitOps) -> None:
         """Test failed push."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "git")
 

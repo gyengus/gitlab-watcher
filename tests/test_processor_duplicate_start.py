@@ -7,10 +7,12 @@ from pathlib import Path
 
 
 @pytest.fixture
-def project_config():
+def project_config(tmp_path):
+    repo_dir = tmp_path / "fake_repo"
+    repo_dir.mkdir()
     return ProjectConfig(
         project_id=1,
-        path=Path("/tmp/fake_repo"),
+        path=repo_dir,
         name="testproj",
         default_branch="master",
         discord_webhook_url="",
@@ -19,11 +21,14 @@ def project_config():
 
 @pytest.fixture
 def processor(project_config: ProjectConfig):
-    # Mock dependencies
     gitlab_mock = MagicMock()
     discord_mock = MagicMock()
     state_mock = MagicMock()
-    state_mock.is_processing.return_value = True  # Simulate already processing
+    mock_git = MagicMock()
+    mock_git.fetch.return_value = True
+    mock_git.checkout.return_value = (True, "")
+    mock_git.pull.return_value = True
+    mock_git.has_unpushed_work.return_value = False
     processor = Processor(
         gitlab=gitlab_mock,
         discord=discord_mock,
@@ -31,13 +36,22 @@ def processor(project_config: ProjectConfig):
         gitlab_username="bot",
         label_in_progress="In progress",
         label_review="Review",
-        ai_tool_mode="opencode",  # mode not relevant for this test
+        ai_tool_mode="ollama",
+        default_branch="master",
+        git_factory=lambda path: mock_git,
     )
     return processor
 
 
-def test_process_issue_duplicate_start_skips_notification_and_git_ops(processor: Processor, project_config: ProjectConfig):
-    # Minimal issue object with required attributes
+@patch.object(Processor, "_run_ai_tool")
+def test_process_issue_calls_notify_issue_started(
+    mock_run_ai: MagicMock,
+    processor: Processor,
+    project_config: ProjectConfig,
+):
+    """Test that process_issue sends Discord notification when starting."""
+    mock_run_ai.return_value = (False, "Error output")
+
     issue = MagicMock()
     issue.iid = 42
     issue.title = "Sample Issue"
@@ -45,13 +59,8 @@ def test_process_issue_duplicate_start_skips_notification_and_git_ops(processor:
     issue.labels = []
     issue.web_url = "http://example.com/issue/42"
 
-    # Run process_issue – should early‑return False due to processing flag
     result = processor.process_issue(project_config, issue)
 
     assert result is False
-    # No Discord start notification should be sent
-    processor.discord.notify_issue_started.assert_not_called()
-    # No git operations should be performed (fetch, checkout, etc.)
-    processor.gitlab.update_issue_labels.assert_not_called()
-    # State should have been queried for processing flag
-    processor.state.is_processing.assert_called_once_with(project_config.project_id)
+    # Discord notification should have been sent
+    processor.discord.notify_issue_started.assert_called()

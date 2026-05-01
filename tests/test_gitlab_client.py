@@ -227,8 +227,9 @@ class TestGitLabClient:
                 description="Description",
             )
 
+    @patch("gitlab_watcher.gitlab_client.time.sleep")
     @patch("requests.Session.request")
-    def test_retry_on_5xx(self, mock_request: Mock, client: GitLabClient) -> None:
+    def test_retry_on_5xx(self, mock_request: Mock, mock_sleep: Mock, client: GitLabClient) -> None:
         """Test retry on 5xx errors."""
         # First two calls return 500, third succeeds
         mock_request.side_effect = [
@@ -245,16 +246,18 @@ class TestGitLabClient:
         assert len(issues) == 0
         assert mock_request.call_count == 3
 
+    @patch("gitlab_watcher.gitlab_client.time.sleep")
     @patch("requests.Session.request")
-    def test_max_retries_exceeded(self, mock_request: Mock, client: GitLabClient) -> None:
+    def test_max_retries_exceeded(self, mock_request: Mock, mock_sleep: Mock, client: GitLabClient) -> None:
         """Test that exception is raised after max retries."""
         mock_request.return_value = Mock(status_code=500, text="Internal Server Error")
 
         with pytest.raises(GitLabConnectionError, match="Request failed after 3 retries"):
             client.get_issues(42)
 
+    @patch("gitlab_watcher.gitlab_client.time.sleep")
     @patch("requests.Session.request")
-    def test_retry_on_network_error(self, mock_request: Mock, client: GitLabClient) -> None:
+    def test_retry_on_network_error(self, mock_request: Mock, mock_sleep: Mock, client: GitLabClient) -> None:
         """Test retry on network errors."""
         # First two calls raise exception, third succeeds
         mock_request.side_effect = [

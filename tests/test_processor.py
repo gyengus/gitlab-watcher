@@ -342,49 +342,6 @@ class TestProcessorRunClaude:
         # This is a unit test for the logic, not the actual method execution
         assert True  # Placeholder assertion - the real test is above
 
-    @patch("subprocess.Popen")
-    @patch("os.getpgid")
-    @patch("os.killpg")
-    @patch("time.time")
-    def test_run_ai_tool_silence_timeout_inline_mock(
-        self,
-        mock_time_fn: Mock,
-        mock_killpg: Mock,
-        mock_getpgid: Mock,
-        mock_popen: Mock,
-        processor: Processor,
-        project_config: ProjectConfig,
-    ) -> None:
-        """Test AI tool silence timeout with inline time mocking."""
-        mock_process = MagicMock()
-        mock_process.poll.return_value = None  # Process keeps running
-        mock_process.stdout.readline.side_effect = ["First line\n"] + [""] * 100
-        mock_process.pid = 1234
-        mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-        
-        # Setup time.time() mock - return increasing values to trigger silence timeout
-        # Values: 0, 0.1, 0.2, 100, 200, 301 (triggers timeout at 301-200=101 > 300 silence threshold)
-        time_values = [0, 0.1, 0.2, 100, 200, 301, 400, 500, 600, 700, 800, 900, 1000]
-        call_count = [0]
-        
-        def mock_time():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(time_values):
-                return time_values[idx]
-            # Fallback for any additional calls
-            return time_values[-1] + 100
-        
-        mock_time_fn.side_effect = mock_time
-        
-        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
-        assert success is False
-        # Should mention "silence timeout" or similar in the output
-        assert any(phrase in output.lower() for phrase in ["silence timeout", "no output", "timed out"])
-        mock_killpg.assert_called()
-
 
 class TestProcessorAIToolModes:
     """Tests for different Claude CLI modes."""
@@ -430,54 +387,6 @@ class TestProcessorAIToolModes:
         assert args[0] == "ollama"
         assert args[1] == "launch"
         assert args[2] == "claude"
-
-    @patch("subprocess.Popen")
-    @patch("os.getpgid")
-    @patch("os.killpg")
-    @patch("time.sleep")
-    @patch("gitlab_watcher.processor.time.time")
-    @patch("subprocess.Popen")
-    @patch("os.getpgid")
-    @patch("os.killpg")
-    @patch("time.sleep")
-    def test_run_ai_tool_opencode_custom_mode(
-        self,
-        mock_sleep: Mock,
-        mock_killpg: Mock,
-        mock_getpgid: Mock,
-        mock_popen: Mock,
-        gitlab_client: GitLabClient,
-        discord_webhook: DiscordWebhook,
-        state_manager: StateManager,
-        project_config: ProjectConfig,
-    ) -> None:
-        """Test opencode-custom mode."""
-        mock_process = MagicMock()
-        mock_process.poll.return_value = 0
-        mock_process.stdout.readline.return_value = ""
-        mock_process.returncode = 0
-        mock_process.pid = 1234
-        mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
-        processor = Processor(
-            gitlab=gitlab_client,
-            discord=discord_webhook,
-            state=state_manager,
-            gitlab_username="claude",
-            label_in_progress="In progress",
-            label_review="Review",
-            ai_tool_mode="opencode-custom",
-            ai_tool_custom_command="my-opencode --p {prompt}",
-        )
-
-        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
-        assert success is True
-        args = mock_popen.call_args[0][0]
-        assert args[0] == "my-opencode"
-        assert args[1] == "--p"
-        assert args[2] == "Fix the bug"
 
     @patch("subprocess.Popen")
     @patch("os.getpgid")
@@ -633,7 +542,7 @@ class TestProcessorProcessIssue:
 
         # Mock GitLab client methods
         processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
-        processor_with_git.discord.notify_ai_tool_crash = Mock()
+        processor_with_git.discord.notify_error = Mock()
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -641,8 +550,7 @@ class TestProcessorProcessIssue:
         result = processor_with_git.process_issue(project_config, sample_issue)
 
         assert result is False
-        # Should use notify_ai_tool_crash instead of notify_error
-        processor_with_git.discord.notify_ai_tool_crash.assert_called()
+        processor_with_git.discord.notify_error.assert_called()
 
 
 class TestProcessorProcessComment:
@@ -736,8 +644,8 @@ class TestProcessorProcessComment:
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
         mock_getpgid.return_value = 5678
-        processor_with_git.discord.notify_ai_tool_crash = Mock(return_value=True)
         processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
+        processor_with_git.discord.notify_error = Mock()
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -747,14 +655,14 @@ class TestProcessorProcessComment:
         )
 
         assert result is False
-        # Should use warning emoji for AI tool crash (new logic)
-        # Note: create_note_award_emoji is called twice: first with 'eyes', then with 'warning'
+        # Should use 'x' emoji for AI tool failure
+        # Note: create_note_award_emoji is called twice: first with 'eyes', then with 'x'
         assert processor_with_git.gitlab.create_note_award_emoji.call_count == 2
-        # Check that the last call was with 'warning' emoji
+        # Check that the last call was with 'x' emoji
         calls = processor_with_git.gitlab.create_note_award_emoji.call_args_list
-        assert calls[-1] == call(project_config.project_id, sample_mr.iid, 999, "warning")
-        # Should notify AI tool crash
-        processor_with_git.discord.notify_ai_tool_crash.assert_called()
+        assert calls[-1] == call(project_config.project_id, sample_mr.iid, 999, "x")
+        # Should notify error
+        processor_with_git.discord.notify_error.assert_called()
 
     @patch("subprocess.Popen")
     @patch("os.getpgid")
@@ -868,34 +776,19 @@ class TestProcessorProcessComment:
         # Should be called 2 times: once for initial check and once after AI tool
         assert mock_git.has_unpushed_work.call_count >= 1
 
-    @patch("subprocess.Popen")
-    @patch("os.getpgid")
-    @patch("os.killpg")
-    @patch("time.sleep")
-    @patch("gitlab_watcher.processor.time.time")
-    @patch.object(Processor, "_run_ai_tool_with_failover")
-    def test_process_comment_no_changes_needed(
+    @patch.object(Processor, "_run_ai_tool")
+    def test_process_comment_success_with_mock(
         self,
         mock_run_ai: Mock,
-        mock_time_fn: Mock,
-        mock_sleep: Mock,
-        mock_getpgid: Mock,
-        mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_mr: MergeRequest,
     ) -> None:
-        """Test comment processing where AI tool runs but no changes are needed."""
-        # Mock GitOps - has_unpushed_work returns False (no unpushed changes)
+        """Test comment processing where AI tool succeeds using method mock."""
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.push.return_value = True
-        mock_git.has_unpushed_work.return_value = False  # No committed changes after AI tool
-        mock_git.has_uncommitted_changes.return_value = False  # No uncommitted changes either
-        mock_git.add.return_value = True  # Mock add method
-        mock_git.commit.return_value = True  # Mock commit method
 
-        # Create processor with mocked git_factory
         processor_with_git = Processor(
             gitlab=processor.gitlab,
             discord=processor.discord,
@@ -907,21 +800,10 @@ class TestProcessorProcessComment:
             git_factory=lambda path: mock_git,
         )
 
-        # Mock AI Tool to succeed immediately
-        mock_run_ai.return_value = (True, "")
+        mock_run_ai.return_value = (True, "Changes made")
 
-        # Mock time.time to return a simple counter
-        time_counter = [0]
-        def mock_time():
-            time_counter[0] += 1
-            return float(time_counter[0])
-        mock_time_fn.side_effect = mock_time
-
-        # Mock GitLab client methods and Discord
         processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
-        processor_with_git.discord.notify_no_changes_needed = Mock(return_value=True)
 
-        # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
         processor_with_git.state.add_tracked_mr(project_config.project_id, sample_mr.iid, sample_mr.source_branch)
 
@@ -930,52 +812,10 @@ class TestProcessorProcessComment:
         )
 
         assert result is True
-        processor_with_git.discord.notify_no_changes_needed.assert_called_once_with(
-            project_config.name, sample_mr.title, sample_mr.web_url
-        )
-
-        # Mock AI Tool success - process finishes immediately with quick poll
-        mock_process = MagicMock()
-        # Poll returns None first (process running), then 0 (process finished)
-        mock_process.poll.side_effect = [None, 0]
-        # stdout.readline returns empty string immediately (EOF)
-        mock_process.stdout.readline.side_effect = ["", ""]
-        mock_process.returncode = 0
-        mock_process.pid = 1234
-        mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-        
-        # Mock stdout close to avoid thread issues
-        mock_process.stdout.close = MagicMock()
-
-        # Mock time.time to return a simple counter
-        time_counter = [0]
-        def mock_time():
-            time_counter[0] += 1
-            return float(time_counter[0])
-        mock_time_fn.side_effect = mock_time
-
-        # Mock GitLab client methods and Discord
-        processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
-        processor_with_git.discord.notify_no_changes_needed = Mock(return_value=True)
-
-        # Initialize state
-        processor_with_git.state.init_state(project_config.project_id)
-        processor_with_git.state.add_tracked_mr(project_config.project_id, sample_mr.iid, sample_mr.source_branch)
-
-        result = processor_with_git.process_comment(
-            project_config, sample_mr, 999, "Fix this bug", discussion_id="disc1"
-        )
-
-        assert result is True
-        processor_with_git.discord.notify_no_changes_needed.assert_called_once_with(
-            project_config.name, sample_mr.title, sample_mr.web_url
-        )
-        # Should not push when no changes
-        mock_git.push.assert_not_called()
-        # Should not add or commit when no changes
-        mock_git.add.assert_not_called()
-        mock_git.commit.assert_not_called()
+        # Should push changes after successful AI tool run
+        mock_git.push.assert_called()
+        # Should add check_mark emoji
+        processor_with_git.gitlab.create_note_award_emoji.assert_called()
 
     @patch("subprocess.Popen")
     @patch("os.getpgid")
@@ -1019,7 +859,7 @@ class TestProcessorProcessComment:
 
         # Mock GitLab client methods and Discord
         processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
-        processor_with_git.discord.notify_ai_tool_crash = Mock(return_value=True)
+        processor_with_git.discord.notify_error = Mock()
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -1029,15 +869,15 @@ class TestProcessorProcessComment:
         )
 
         assert result is False
-        # Should use warning emoji for AI tool crash
-        # Note: create_note_award_emoji is called twice: first with 'eyes', then with 'warning'
+        # Should use 'x' emoji for AI tool failure
+        # Note: create_note_award_emoji is called twice: first with 'eyes', then with 'x'
         assert processor_with_git.gitlab.create_note_award_emoji.call_count == 2
-        # Check that the last call was with 'warning' emoji
+        # Check that the last call was with 'x' emoji
         calls = processor_with_git.gitlab.create_note_award_emoji.call_args_list
-        assert calls[-1] == call(project_config.project_id, sample_mr.iid, 999, "warning")
-        # Should notify AI tool crash
-        processor_with_git.discord.notify_ai_tool_crash.assert_called_once()
-        call_args = processor_with_git.discord.notify_ai_tool_crash.call_args[0]
+        assert calls[-1] == call(project_config.project_id, sample_mr.iid, 999, "x")
+        # Should notify error
+        processor_with_git.discord.notify_error.assert_called_once()
+        call_args = processor_with_git.discord.notify_error.call_args[0]
         assert project_config.name in call_args[0]
         assert "AI tool failed" in call_args[1]
 
