@@ -596,7 +596,10 @@ class TestProcessorProcessComment:
         mock_popen.return_value = mock_process
         mock_getpgid.return_value = 5678
 
-# Initialize state
+        # Mock GitLab client methods
+        processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
+
+        # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
 
         result = processor_with_git.process_comment(
