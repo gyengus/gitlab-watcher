@@ -24,7 +24,6 @@ from .state import StateManager
 _thread_cls = threading.Thread
 
 # Security constants for prompt sanitization
-MAX_PROMPT_LENGTH = 10000
 FORBIDDEN_PATTERNS = [
     r"ignore\s+all\s+previous",
     r"system\s+message",
@@ -144,9 +143,6 @@ class Processor:
         Raises:
             ValueError: If prompt contains forbidden patterns
         """
-        if len(prompt) > MAX_PROMPT_LENGTH:
-            prompt = prompt[:MAX_PROMPT_LENGTH]
-
         for pattern in FORBIDDEN_PATTERNS:
             match = re.search(pattern, prompt)
             if match:
@@ -613,11 +609,14 @@ class Processor:
 Issue description:
 {description}
 {doc_content}
-Please complete this task. Make the necessary changes, commit them, and push the branch.
-Write commit messages in English.
-Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits.
-If you need to create temporary files, use /tmp/opencode/ as the base directory instead of /tmp/ directly.{continue_instruction}"""
+
+INSTRUCTIONS:
+1. Complete the task as described.
+2. YOU MUST COMMIT your changes using git and PUSH the branch before finishing.
+3. Write commit messages in English.
+4. Do not use conventional commit prefixes (feat:, fix:, etc.).
+5. Do not add Co-Authored-By signatures.
+6. If you need temporary files, use /tmp/opencode/ instead of /tmp/ directly.{continue_instruction}"""
 
         # Run AI tool
         try:
@@ -790,11 +789,14 @@ Branch: {mr.source_branch}
 A reviewer left this feedback:
 {comment}
 {doc_content}
-Please address this feedback. Make the necessary changes, commit them, and push the branch.
-Write commit messages in English.
-Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits.
-If you need to create temporary files, use /tmp/opencode/ as the base directory instead of /tmp/ directly.{continue_instruction}"""
+
+INSTRUCTIONS:
+1. Address the feedback as described.
+2. YOU MUST COMMIT your changes using git and PUSH the branch before finishing.
+3. Write commit messages in English.
+4. Do not use conventional commit prefixes (feat:, fix:, etc.).
+5. Do not add Co-Authored-By signatures.
+6. If you need temporary files, use /tmp/opencode/ instead of /tmp/ directly.{continue_instruction}"""
 
         # Snapshot HEAD so we can detect whether the LLM made any new commits
         pre_ai_commit = git.get_current_commit()

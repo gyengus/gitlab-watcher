@@ -939,14 +939,6 @@ class TestProcessorSanitizePrompt:
         result = processor._sanitize_prompt(prompt)
         assert result == prompt
     
-    def test_sanitize_prompt_truncates_long_input(self, processor: Processor) -> None:
-        """Test sanitize_prompt truncates very long input."""
-        # MAX_PROMPT_LENGTH is 10000 in processor.py
-        long_prompt = "x" * 15000  # 15k chars, more than MAX_PROMPT_LENGTH
-        result = processor._sanitize_prompt(long_prompt)
-        # Should be truncated to MAX_PROMPT_LENGTH
-        assert len(result) == 10000  # MAX_PROMPT_LENGTH
-    
     def test_sanitize_prompt_forbidden_pattern(self, processor: Processor) -> None:
         """Test sanitize_prompt raises ValueError for forbidden patterns."""
         # Test with forbidden pattern
