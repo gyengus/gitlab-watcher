@@ -161,6 +161,13 @@ class GitOps:
     def has_uncommitted_changes(self) -> bool:
         """Check if there are any uncommitted changes (staged or unstaged).
         
+        This uses `git status --porcelain` to detect modified, added, deleted,
+        or renamed files that haven't been committed yet.
+
+        Example:
+            >>> git.has_uncommitted_changes()
+            True
+        
         Returns:
             True if there are uncommitted changes, False otherwise
         """
@@ -173,6 +180,12 @@ class GitOps:
 
     def add(self, path: str = ".") -> bool:
         """Add files to the staging area.
+        
+        Example:
+            >>> git.add("src/main.py")
+            True
+            >>> git.add(".")  # Add all changes
+            True
         
         Args:
             path: Path to add (default: ".")
@@ -188,6 +201,10 @@ class GitOps:
     
     def commit(self, message: str) -> bool:
         """Create a commit with the given message.
+        
+        Example:
+            >>> git.commit("Fix: resolve authentication bug")
+            True
         
         Args:
             message: Commit message
@@ -211,6 +228,10 @@ class GitOps:
 
     def get_current_commit(self) -> str:
         """Return the current HEAD commit hash.
+
+        Example:
+            >>> git.get_current_commit()
+            'a7b1c3d...'
 
         Returns:
             Full SHA-1 hash of HEAD, or empty string on failure.

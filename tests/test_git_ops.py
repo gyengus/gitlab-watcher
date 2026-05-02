@@ -320,3 +320,46 @@ class TestGitOps:
         # Only rev-parse called, no checkout
         assert mock_run.call_count == 1
         assert "rev-parse" in mock_run.call_args[0][0]
+
+    @patch("subprocess.run")
+    def test_has_uncommitted_changes_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_uncommitted_changes returns True when changes exist."""
+        mock_run.return_value = Mock(stdout="M  file.txt\n", returncode=0)
+        assert git_ops.has_uncommitted_changes() is True
+
+    @patch("subprocess.run")
+    def test_has_uncommitted_changes_false(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_uncommitted_changes returns False when clean."""
+        mock_run.return_value = Mock(stdout="", returncode=0)
+        assert git_ops.has_uncommitted_changes() is False
+
+    @patch("subprocess.run")
+    def test_add_success(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test successful git add."""
+        mock_run.return_value = Mock(returncode=0)
+        assert git_ops.add("path") is True
+        mock_run.assert_called_once()
+        assert "add" in mock_run.call_args[0][0]
+
+    @patch("subprocess.run")
+    def test_commit_success(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test successful git commit."""
+        mock_run.return_value = Mock(returncode=0)
+        assert git_ops.commit("message") is True
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert "commit" in args
+        assert "-m" in args
+        assert "message" in args
+
+    @patch("subprocess.run")
+    def test_get_current_commit_success(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test successful get_current_commit."""
+        mock_run.return_value = Mock(stdout="abc123def\n", returncode=0)
+        assert git_ops.get_current_commit() == "abc123def"
+
+    @patch("subprocess.run")
+    def test_get_current_commit_failure(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test failed get_current_commit."""
+        mock_run.return_value = Mock(returncode=1)
+        assert git_ops.get_current_commit() == ""

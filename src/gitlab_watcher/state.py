@@ -25,8 +25,6 @@ class ProjectState:
     tracked_mrs: dict[str, dict] = field(default_factory=dict)
     branches_with_failed_mr: set[str] = field(default_factory=set)  # Branches that failed MR creation
     last_processed_note_id: Optional[int] = None
-    last_processed_note_id: Optional[int] = None
-    last_processed_note_id: Optional[int] = None
 
 
 class StateManager:
@@ -242,11 +240,6 @@ class StateManager:
             "branch": branch,
         })
         
-        self.force_save(project_id)
-
-    def update_last_processed_note(self, project_id: int, note_id: int) -> None:
-        """Update the last processed note ID and force an immediate save."""
-        self.set(project_id, "last_processed_note_id", note_id)
         self.force_save(project_id)
 
     def update_last_processed_note(self, project_id: int, note_id: int) -> None:
