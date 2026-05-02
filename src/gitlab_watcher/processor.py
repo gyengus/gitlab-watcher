@@ -756,6 +756,7 @@ INSTRUCTIONS:
             git.pull("origin", mr.source_branch)
         except Exception as e:
             self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
+            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
             self.discord.notify_error(
                 project.name,
                 f"Git preparation failed on branch `{mr.source_branch}` (fetch/checkout/pull)",

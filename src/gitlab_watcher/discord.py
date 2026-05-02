@@ -23,6 +23,13 @@ class DiscordWebhook:
         if not self.webhook_url:
             return True  # No webhook configured, skip silently
 
+        # Discord has a 2000 character limit for message content.
+        # Truncate if necessary, leaving room for the truncation message.
+        max_length = 2000
+        if len(content) > max_length:
+            trunc_msg = "\n\n...(truncated due to length limit)"
+            content = content[: max_length - len(trunc_msg)] + trunc_msg
+
         try:
             response = requests.post(
                 self.webhook_url,

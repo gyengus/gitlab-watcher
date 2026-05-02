@@ -217,3 +217,18 @@ class TestDiscordWebhook:
         message = call_args.kwargs["json"]["content"]
         assert "AI Tool Crash" in message
         assert "Timeout after 300 seconds" in message
+    @patch("requests.post")
+    def test_send_truncation(self, mock_post: Mock) -> None:
+        """Test that long messages are truncated to Discord's 2000 char limit."""
+        mock_post.return_value = Mock(status_code=204)
+        webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
+        
+        # Create a message longer than 2000 chars
+        long_message = "x" * 2500
+        result = webhook.send(long_message)
+        
+        assert result is True
+        mock_post.assert_called_once()
+        sent_content = mock_post.call_args.kwargs["json"]["content"]
+        assert len(sent_content) <= 2000
+        assert "...(truncated" in sent_content
