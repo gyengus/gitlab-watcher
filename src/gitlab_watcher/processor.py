@@ -500,6 +500,9 @@ class Processor:
         """
         git = self.git_factory(project.path)
 
+        # Read project documentation files
+        doc_content = self._read_project_docs(project.path)
+
         # Validate issue title
         try:
             validated_title = self._validate_issue_title(issue.title)
@@ -565,12 +568,21 @@ class Processor:
 
         # Check for previous work on this branch (e.g. from a timed-out run)
         continue_instruction = ""
-        if git.has_unpushed_work(self.default_branch):
+        has_unpushed = git.has_unpushed_work(self.default_branch)
+        has_uncommitted = git.has_uncommitted_changes()
+        if has_uncommitted:
             continue_instruction = (
-
-                "\n\nNote: This branch already has previous work (commits exist). "
-                "Please review the current state of the code with git log and git diff, "
-                "then continue from where the previous work left off. Do not start over."
+                "\n\nNote: This branch has uncommitted changes from a previous run. "
+                "Please review them with git diff and git status, commit all changes, "
+                "then push the branch and continue from where the previous work left off. "
+                "Do not start over."
+            )
+        elif has_unpushed:
+            continue_instruction = (
+                "\n\nNote: This branch already has previous work (commits exist but not pushed). "
+                "Please review the current state with git log and git diff, "
+                "push the existing commits, then continue from where the previous work left off. "
+                "Do not start over."
             )
 
         # Build prompt for Claude (truncate description if too long)
@@ -582,8 +594,8 @@ class Processor:
 
 Issue description:
 {description}
-
-Please complete this task. Make the necessary changes and commit them.
+{doc_content}
+Please complete this task. Make the necessary changes, commit them, and push the branch.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits.{continue_instruction}"""
@@ -718,12 +730,21 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
 
         # Build prompt for Claude
         continue_instruction = ""
-        if git.has_unpushed_work(self.default_branch):
+        has_unpushed = git.has_unpushed_work(self.default_branch)
+        has_uncommitted = git.has_uncommitted_changes()
+        if has_uncommitted:
             continue_instruction = (
-
-                "\n\nNote: This branch already has previous work (commits exist). "
-                "Please review the current state of the code with git log and git diff, "
-                "then continue from where the previous work left off. Do not start over."
+                "\n\nNote: This branch has uncommitted changes from a previous run. "
+                "Please review them with git diff and git status, commit all changes, "
+                "then push the branch and continue from where the previous work left off. "
+                "Do not start over."
+            )
+        elif has_unpushed:
+            continue_instruction = (
+                "\n\nNote: This branch already has previous work (commits exist but not pushed). "
+                "Please review the current state with git log and git diff, "
+                "push the existing commits, then continue from where the previous work left off. "
+                "Do not start over."
             )
 
         prompt = f"""You are working on a merge request titled: {mr.title}
@@ -731,8 +752,8 @@ Branch: {mr.source_branch}
 
 A reviewer left this feedback:
 {comment}
-
-Please address this feedback. Make the necessary changes and commit them.
+{doc_content}
+Please address this feedback. Make the necessary changes, commit them, and push the branch.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits.{continue_instruction}"""

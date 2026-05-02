@@ -1056,3 +1056,321 @@ class TestProcessorValidateIssueTitle:
         """Test empty title is rejected."""
         with pytest.raises(ValueError, match="cannot be empty"):
             processor._validate_issue_title("")
+
+
+class TestProcessorPromptContent:
+    """Tests that the prompts sent to the AI tool contain the required instructions.
+
+    These tests use @patch.object on _run_ai_tool so we can inspect the exact
+    prompt string without running a real subprocess.
+    """
+
+    def _make_processor(self, processor: Processor, mock_git: MagicMock) -> Processor:
+        return Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+    # ------------------------------------------------------------------
+    # process_issue prompt checks
+    # ------------------------------------------------------------------
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_issue_prompt_contains_push_instruction(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_issue: Issue,
+    ) -> None:
+        """Prompt must explicitly tell the LLM to push the branch, not just commit."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.update_issue_labels = Mock(return_value=True)
+        p.gitlab.create_merge_request = Mock(
+            return_value=MergeRequest(
+                iid=1,
+                title="Fix the bug",
+                web_url="https://git.example.com/merge_requests/1",
+                source_branch="1-fix-the-bug",
+                state="opened",
+            )
+        )
+        p.state.init_state(project_config.project_id)
+
+        p.process_issue(project_config, sample_issue)
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "push" in prompt.lower(), (
+            "Prompt must instruct the LLM to push the branch, found: " + prompt[:300]
+        )
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_issue_prompt_no_continue_when_clean(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_issue: Issue,
+    ) -> None:
+        """No continue instruction should appear when the branch is clean."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.update_issue_labels = Mock(return_value=True)
+        p.gitlab.create_merge_request = Mock(
+            return_value=MergeRequest(
+                iid=1,
+                title="Fix the bug",
+                web_url="https://git.example.com/merge_requests/1",
+                source_branch="1-fix-the-bug",
+                state="opened",
+            )
+        )
+        p.state.init_state(project_config.project_id)
+
+        p.process_issue(project_config, sample_issue)
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "previous run" not in prompt, (
+            "No continue instruction expected on a clean branch"
+        )
+        assert "previous work" not in prompt
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_issue_prompt_continue_instruction_on_uncommitted_changes(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_issue: Issue,
+    ) -> None:
+        """When uncommitted changes exist, the prompt must tell the LLM to commit them first."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = True
+        mock_git.has_unpushed_work.return_value = False  # uncommitted takes priority
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.update_issue_labels = Mock(return_value=True)
+        p.gitlab.create_merge_request = Mock(
+            return_value=MergeRequest(
+                iid=1,
+                title="Fix the bug",
+                web_url="https://git.example.com/merge_requests/1",
+                source_branch="1-fix-the-bug",
+                state="opened",
+            )
+        )
+        p.state.init_state(project_config.project_id)
+
+        p.process_issue(project_config, sample_issue)
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "uncommitted changes" in prompt.lower(), (
+            "Prompt must mention uncommitted changes when they exist"
+        )
+        assert "commit all changes" in prompt.lower(), (
+            "Prompt must instruct LLM to commit the uncommitted changes"
+        )
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_issue_prompt_continue_instruction_on_unpushed_commits(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_issue: Issue,
+    ) -> None:
+        """When commits exist but were never pushed, the prompt should instruct to push them."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_work.return_value = True
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.update_issue_labels = Mock(return_value=True)
+        p.gitlab.create_merge_request = Mock(
+            return_value=MergeRequest(
+                iid=1,
+                title="Fix the bug",
+                web_url="https://git.example.com/merge_requests/1",
+                source_branch="1-fix-the-bug",
+                state="opened",
+            )
+        )
+        p.state.init_state(project_config.project_id)
+
+        p.process_issue(project_config, sample_issue)
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "not pushed" in prompt.lower() or "unpushed" in prompt.lower() or "push the existing" in prompt.lower(), (
+            "Prompt must mention unpushed commits when they exist"
+        )
+        # Must NOT show the uncommitted-changes variant
+        assert "uncommitted changes" not in prompt.lower()
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_issue_prompt_includes_doc_content(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_issue: Issue,
+    ) -> None:
+        """CONTRIBUTING.md (and other project docs) must be injected into the issue prompt."""
+        # Create a CONTRIBUTING.md in the fake project directory
+        contributing = project_config.path / "CONTRIBUTING.md"
+        contributing.write_text("## Project rules\nAlways write tests.\n")
+
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.update_issue_labels = Mock(return_value=True)
+        p.gitlab.create_merge_request = Mock(
+            return_value=MergeRequest(
+                iid=1,
+                title="Fix the bug",
+                web_url="https://git.example.com/merge_requests/1",
+                source_branch="1-fix-the-bug",
+                state="opened",
+            )
+        )
+        p.state.init_state(project_config.project_id)
+
+        p.process_issue(project_config, sample_issue)
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "Always write tests." in prompt, (
+            "CONTRIBUTING.md content must be injected into the issue prompt"
+        )
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_issue_prompt_no_doc_content_when_files_absent(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_issue: Issue,
+    ) -> None:
+        """When no doc files exist, no spurious doc section should appear in the prompt."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.update_issue_labels = Mock(return_value=True)
+        p.gitlab.create_merge_request = Mock(
+            return_value=MergeRequest(
+                iid=1,
+                title="Fix the bug",
+                web_url="https://git.example.com/merge_requests/1",
+                source_branch="1-fix-the-bug",
+                state="opened",
+            )
+        )
+        p.state.init_state(project_config.project_id)
+
+        p.process_issue(project_config, sample_issue)
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "=== CONTRIBUTING.md ===" not in prompt
+        assert "=== CLAUDE.md ===" not in prompt
+
+    # ------------------------------------------------------------------
+    # process_comment prompt checks
+    # ------------------------------------------------------------------
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_comment_prompt_contains_push_instruction(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Comment prompt must tell the LLM to push, not just commit."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        p.state.init_state(project_config.project_id)
+
+        p.process_comment(project_config, sample_mr, 999, "Please fix the typo")
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "push" in prompt.lower(), (
+            "Comment prompt must instruct the LLM to push the branch"
+        )
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_comment_prompt_continue_instruction_on_uncommitted_changes(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """Comment prompt must mention uncommitted changes when they exist."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = True
+        mock_git.has_unpushed_work.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        p.state.init_state(project_config.project_id)
+
+        p.process_comment(project_config, sample_mr, 999, "Please fix the typo")
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "uncommitted changes" in prompt.lower()
+        assert "commit all changes" in prompt.lower()
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_process_comment_prompt_includes_doc_content(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """CONTRIBUTING.md content must be injected into the comment prompt."""
+        contributing = project_config.path / "CONTRIBUTING.md"
+        contributing.write_text("## Project rules\nNo magic numbers.\n")
+
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        p.state.init_state(project_config.project_id)
+
+        p.process_comment(project_config, sample_mr, 999, "Please fix the typo")
+
+        prompt = mock_run_ai.call_args[0][0]
+        assert "No magic numbers." in prompt, (
+            "CONTRIBUTING.md content must be injected into the comment prompt"
+        )
