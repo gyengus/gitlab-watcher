@@ -103,5 +103,13 @@ class GitOperations(Protocol):
         """
         ...
 
+    def get_current_commit(self) -> str:
+        """Return the current HEAD commit hash.
+
+        Returns:
+            Full SHA-1 hash of HEAD, or empty string on failure.
+        """
+        ...
+
 
 __all__ = ["GitOperations"]

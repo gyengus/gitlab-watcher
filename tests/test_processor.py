@@ -1374,3 +1374,158 @@ class TestProcessorPromptContent:
         assert "No magic numbers." in prompt, (
             "CONTRIBUTING.md content must be injected into the comment prompt"
         )
+
+
+class TestProcessorCommentNoChanges:
+    """Tests that process_comment correctly distinguishes between 'LLM made changes'
+    and 'LLM ran but did nothing', preventing false-positive ✅ marks.
+    """
+
+    def _make_processor(self, processor: Processor, mock_git: MagicMock) -> Processor:
+        return Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_no_new_commits_marks_eyes_not_checkmark(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """When the LLM exits 0 but makes no commits, the note must get 👀 (eyes),
+        NOT ✅ (white_check_mark), and Discord must receive 'No Changes Needed'."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        # get_current_commit returns the same value before and after → no new commits
+        mock_git.get_current_commit.return_value = "abc123"
+        mock_git.has_uncommitted_changes.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        p.discord.notify_changes_applied = Mock()
+        p.discord.notify_no_changes_needed = Mock()
+        p.state.init_state(project_config.project_id)
+
+        result = p.process_comment(project_config, sample_mr, 999, "Fix typo")
+
+        assert result is True
+        # white_check_mark must NOT appear when no changes were made.
+        # (The 'eyes' from start-of-processing is already there and is expected.)
+        emoji_calls = [c[0] for c in p.gitlab.create_note_award_emoji.call_args_list]
+        emojis_used = [c[3] for c in emoji_calls]
+        assert "white_check_mark" not in emojis_used, f"Checkmark must NOT appear when no changes: {emojis_used}"
+        # Discord must NOT send 'Changes Applied'
+        p.discord.notify_changes_applied.assert_not_called()
+        p.discord.notify_no_changes_needed.assert_called_once()
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_new_commit_marks_checkmark(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """When the LLM creates a new commit, the note must get ✅ and Discord
+        must receive 'Changes Applied'."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        # Return different hashes before vs after AI → new commit detected
+        mock_git.get_current_commit.side_effect = ["abc123", "def456"]
+        mock_git.has_uncommitted_changes.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        p.discord.notify_changes_applied = Mock()
+        p.discord.notify_no_changes_needed = Mock()
+        p.state.init_state(project_config.project_id)
+
+        result = p.process_comment(project_config, sample_mr, 999, "Fix typo")
+
+        assert result is True
+        emoji_calls = [c[0] for c in p.gitlab.create_note_award_emoji.call_args_list]
+        emojis_used = [c[3] for c in emoji_calls]
+        assert "white_check_mark" in emojis_used, f"Expected checkmark emoji, got: {emojis_used}"
+        # 'eyes' is always added at start-of-processing, that's fine
+        p.discord.notify_changes_applied.assert_called_once()
+        p.discord.notify_no_changes_needed.assert_not_called()
+
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    def test_uncommitted_changes_marks_checkmark(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """When the LLM left uncommitted changes (same HEAD but dirty tree), the
+        note must still get ✅ so the watcher pushes those changes."""
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        # Same HEAD → no new commits, but working tree is dirty
+        mock_git.get_current_commit.return_value = "abc123"
+        mock_git.has_uncommitted_changes.return_value = True
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        p.discord.notify_changes_applied = Mock()
+        p.discord.notify_no_changes_needed = Mock()
+        p.state.init_state(project_config.project_id)
+
+        result = p.process_comment(project_config, sample_mr, 999, "Fix typo")
+
+        assert result is True
+        emoji_calls = [c[0] for c in p.gitlab.create_note_award_emoji.call_args_list]
+        emojis_used = [c[3] for c in emoji_calls]
+        assert "white_check_mark" in emojis_used
+        p.discord.notify_changes_applied.assert_called_once()
+        p.discord.notify_no_changes_needed.assert_not_called()
+
+    @patch.object(Processor, "_run_ai_tool")
+    def test_no_changes_with_error_hint_marks_x_and_notifies_error(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_mr: MergeRequest,
+    ) -> None:
+        """When the LLM exits 0 but made no changes AND the output contains an
+        error-like phrase (e.g. 'could not'), the note must get ❌, Discord must
+        receive an error notification, and the method must return False."""
+        # Return success=True but with suspicious output containing 'could not'
+        mock_run_ai.return_value = (True, "I could not complete the task because the file was locked.")
+
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        # Same HEAD before and after → no new commits
+        mock_git.get_current_commit.return_value = "abc123"
+        mock_git.has_uncommitted_changes.return_value = False
+
+        p = self._make_processor(processor, mock_git)
+        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        p.discord.notify_changes_applied = Mock()
+        p.discord.notify_no_changes_needed = Mock()
+        p.discord.notify_error = Mock()
+        p.state.init_state(project_config.project_id)
+
+        result = p.process_comment(project_config, sample_mr, 999, "Fix typo")
+
+        assert result is False
+        emoji_calls = [c[0] for c in p.gitlab.create_note_award_emoji.call_args_list]
+        emojis_used = [c[3] for c in emoji_calls]
+        assert "x" in emojis_used, f"Expected 'x' emoji for silent failure, got: {emojis_used}"
+        assert "white_check_mark" not in emojis_used
+        p.discord.notify_error.assert_called_once()
+        p.discord.notify_no_changes_needed.assert_not_called()
+        p.discord.notify_changes_applied.assert_not_called()
+
+

@@ -209,6 +209,18 @@ class GitOps:
         except subprocess.CalledProcessError:
             return None
 
+    def get_current_commit(self) -> str:
+        """Return the current HEAD commit hash.
+
+        Returns:
+            Full SHA-1 hash of HEAD, or empty string on failure.
+        """
+        try:
+            result = self._run("rev-parse", "HEAD", check=False)
+            return result.stdout.strip() if result.returncode == 0 else ""
+        except Exception:
+            return ""
+
     @staticmethod
     def generate_slug(title: str, max_length: int = 30) -> str:
         """Generate a URL-safe slug from a title.

@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 
 from .config import ProjectConfig
 from .discord import DiscordWebhook
+from .exceptions import GitLabAPIError
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient, Issue, MergeRequest, Note
 from .logging_utils import SensitiveDataFilter, sanitize_for_log
@@ -50,6 +51,23 @@ AI_TOOL_ERROR_PATTERNS = [
     r"Too many requests",
     r"Request timeout",
     r"Connection error",
+]
+
+# Broad failure indicators used when the AI tool exits with code 0 but made no
+# git changes.  These patterns suggest the LLM encountered a problem mid-task
+# rather than intentionally deciding no changes were needed.  They are
+# deliberately more conservative than AI_TOOL_ERROR_PATTERNS (no generic
+# "error" to avoid false positives from code-review output).
+NO_CHANGES_ERROR_HINTS = [
+    r"\bfailed\b",          # "command failed", "task failed"
+    r"\bexception\b",       # programming exceptions
+    r"\btraceback\b",       # Python tracebacks
+    r"\bunable to\b",       # "unable to access / read / write"
+    r"\bcould not\b",       # "could not open / find / complete"
+    r"\bI cannot\b",        # LLM self-report
+    r"\bI can'?t\b",        # LLM self-report
+    r"\bnot (?:able|possible) to\b",  # "not able to complete"
+    r"\bcrash(?:ed)?\b",    # tool/process crash
 ]
 
 # Silence timeout: if no output for 5 minutes, kill the process
@@ -598,7 +616,8 @@ Issue description:
 Please complete this task. Make the necessary changes, commit them, and push the branch.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits.{continue_instruction}"""
+Do not add Co-Authored-By signature to commits.
+If you need to create temporary files, use /tmp/opencode/ as the base directory instead of /tmp/ directly.{continue_instruction}"""
 
         # Run AI tool
         try:
@@ -619,14 +638,32 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
             # Push branch
             git.push("origin", branch, set_upstream=True)
 
-            # Create MR
-            mr = self.gitlab.create_merge_request(
-                project.project_id,
-                source_branch=branch,
-                target_branch=self.default_branch,
-                title=issue.title,
-                description=f"{issue.description}\n\nCloses #{issue.iid}",
-            )
+            # Create MR, or reuse existing one if already open for this branch
+            try:
+                mr = self.gitlab.create_merge_request(
+                    project.project_id,
+                    source_branch=branch,
+                    target_branch=self.default_branch,
+                    title=issue.title,
+                    description=f"{issue.description}\n\nCloses #{issue.iid}",
+                )
+            except GitLabAPIError as api_err:
+                if api_err.status_code != 409:
+                    raise
+                # GitLab 409: an open MR already exists for this branch.
+                # This is not an error — find and reuse the existing MR.
+                self.logger.info(
+                    f"[{project.name}] MR already exists for branch `{branch}` (HTTP 409) "
+                    "— reusing the existing open MR"
+                )
+                open_mrs = self.gitlab.get_merge_requests(
+                    project.project_id,
+                    state="opened",
+                )
+                mr = next((m for m in open_mrs if m.source_branch == branch), None)
+                if mr is None:
+                    # Defensive: 409 but we can't locate the MR — re-raise
+                    raise
 
             if mr:
                 # Only track MR if AI tool made changes
@@ -756,7 +793,11 @@ A reviewer left this feedback:
 Please address this feedback. Make the necessary changes, commit them, and push the branch.
 Write commit messages in English.
 Do not use conventional commit prefixes like feat:, fix:, etc.
-Do not add Co-Authored-By signature to commits.{continue_instruction}"""
+Do not add Co-Authored-By signature to commits.
+If you need to create temporary files, use /tmp/opencode/ as the base directory instead of /tmp/ directly.{continue_instruction}"""
+
+        # Snapshot HEAD so we can detect whether the LLM made any new commits
+        pre_ai_commit = git.get_current_commit()
 
         # Run AI tool
         try:
@@ -774,7 +815,60 @@ Do not add Co-Authored-By signature to commits.{continue_instruction}"""
                 return False
 
             self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
-            
+
+            # Determine whether the LLM actually produced any work
+            post_ai_commit = git.get_current_commit()
+            has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
+            has_uncommitted = git.has_uncommitted_changes()
+            llm_made_changes = has_new_commits or has_uncommitted
+
+            if not llm_made_changes:
+                # Distinguish: intentional no-op vs silent failure
+                suspected_error_pattern = None
+                for hint in NO_CHANGES_ERROR_HINTS:
+                    if re.search(hint, output, re.IGNORECASE):
+                        suspected_error_pattern = hint
+                        break
+
+                if suspected_error_pattern:
+                    self.logger.error(
+                        f"[{project.name}] AI tool made no changes for MR !{mr.iid} and output "
+                        f"contains a suspected error indicator ('{suspected_error_pattern}'). "
+                        "Treating as failure."
+                    )
+                    self.gitlab.create_note_award_emoji(
+                        project.project_id, mr.iid, note_id, "x"
+                    )
+                    # Include a short excerpt so the team can see what went wrong
+                    output_excerpt = output[-1000:] if len(output) > 1000 else output
+                    self.discord.notify_error(
+                        project.name,
+                        f"AI tool made no changes for MR !{mr.iid} — possible silent failure",
+                        details=output_excerpt,
+                    )
+                    return False
+
+                # Clean output, no error hints → LLM reviewed and found nothing to do
+                self.logger.info(
+                    f"[{project.name}] AI tool made no changes for MR !{mr.iid} "
+                    "and output contains no error indicators — treating as no-op review."
+                )
+                # The 'eyes' emoji added at the start of processing remains as the marker.
+                # If the comment is part of a discussion thread, reply to explain.
+                if discussion_id:
+                    self.gitlab.create_note_reply(
+                        project.project_id,
+                        mr.iid,
+                        discussion_id,
+                        "\u2705 Reviewed. No code changes were necessary to address this feedback.",
+                    )
+                self.discord.notify_no_changes_needed(
+                    project.name,
+                    mr.title,
+                    mr.web_url,
+                )
+                return True
+
             # Push changes
             git.push("origin", mr.source_branch)
             success = self.gitlab.create_note_award_emoji(
