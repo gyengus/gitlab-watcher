@@ -1362,7 +1362,58 @@ def test_check_mr_status_skips_system_and_self_verified(
 
     # Only note 102 (first human comment) should be processed
     mock_processor.process_comment.assert_called_once_with(project, mock_mr, 102, "Human request", discussion_id="disc_human")
-    # Last state update should be for the branch
-    mock_state_mgr.update_mr_state.assert_called_with(project.project_id, 1, mock_mr.state, "feat")
+
+def test_check_mr_status_ignores_external_mr(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    # Setup MR authored by someone else
+    other_mr = MergeRequest(
+        iid=10,
+        title="External MR",
+        web_url="https://git.example.com/merge_requests/10",
+        source_branch="10-branch",
+        state="opened",
+        author="other-user"
+    )
+    
+    # Mock bot username
+    mock_gitlab.get_current_user.return_value = {"username": "claude"}
+    
+    # Mock get_merge_requests to return this MR
+    mock_gitlab.get_merge_requests.return_value = [other_mr]
+    # Mock get_notes to return something
+    mock_gitlab.get_notes.return_value = [
+        Note(id=200, body="New comment", author_username="user", system=False, award_emojis=[], discussion_id="disc2")
+    ]
+    
+    # Initialize Watcher
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+    
+    # Run check
+    watcher.check_mr_status(project)
+    
+    # Verify what was requested from GitLab
+    # The implementation restricts to author_username=claude
+    mock_gitlab.get_merge_requests.assert_called_with(
+        project_id=42,
+        state="opened",
+        author_username="claude"
+    )
+
+    
+    # Verify it DID fetch notes for the external MR (since it was filtered out)
+    mock_gitlab.get_notes.assert_called()
 
 

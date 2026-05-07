@@ -162,6 +162,23 @@ class Processor:
 
         return branch or "auto-branch"
 
+    def _get_instructions(self, continue_instruction: str, is_mr_comment: bool = False) -> str:
+        """Generate mandatory instructions for the AI tool."""
+        instructions = [
+            "YOU ARE AN EXPERT SOFTWARE ENGINEER. FOLLOW THESE MANDATORY RULES:",
+            "1. ADHERE STRICTLY TO THE PROJECT DOCUMENTATION (AGENTS.md, CLAUDE.md, CONTRIBUTING.md).",
+            "2. BEFORE ANY COMMIT, YOU MUST RUN TESTS AND VERIFY THE BUILD (e.g., pytest, linting).",
+            "3. IF TESTS FAIL, DO NOT COMMIT. FIX THE ISSUES FIRST.",
+            "4. YOU MUST COMMIT YOUR CHANGES AND PUSH THE BRANCH BEFORE FINISHING.",
+            "5. WRITE COMMIT MESSAGES IN ENGLISH, NO CONVENTIONAL PREFIXES (feat/fix/etc).",
+            "6. DO NOT ADD CO-AUTHORED-BY SIGNATURES.",
+            "7. IF YOU NEED TEMPORARY FILES, USE /tmp/opencode/."
+        ]
+        if is_mr_comment:
+            instructions.append("8. IF YOU HAVE SUCCESSFULLY COMPLETED THE TASK, INCLUDE `/done` AT THE VERY END OF YOUR RESPONSE.")
+        instructions.append(continue_instruction)
+        return "\n".join(instructions)
+
     def _run_ai_tool(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
         """Run AI tool CLI with a prompt based on configured mode.
 
@@ -366,21 +383,51 @@ class Processor:
             # Additional output inspection for error patterns
             # Some tools return exit code 0 but output error messages
             if success and full_output:
+                # Filter out tool-specific log lines to avoid false positives
+                sanitized_output = "\n".join(
+                    [line for line in full_output.splitlines()
+                     if not re.match(r"^(INFO|DEBUG|WARN|ERROR)\s+\d{4}-\d{2}-\d{2}T", line.strip())]
+                )
                 for pattern in AI_TOOL_ERROR_PATTERNS:
-                    if re.search(pattern, full_output, re.IGNORECASE):
+                    if re.search(pattern, sanitized_output, re.IGNORECASE):
+                        # Extract the line(s) containing the error pattern
+                        error_lines = []
+                        for line in sanitized_output.splitlines():
+                            if re.search(pattern, line, re.IGNORECASE):
+                                error_lines.append(line.strip())
+                        
+                        # Use the first matching line for a concise error summary
+                        error_summary = error_lines[0] if error_lines else pattern
+                        
+                        # Write the full output to a file for easier debugging
+                        error_log_path = self.state.work_dir / f"ai_error_{time.time()}.log"
+                        error_log_path.write_text(full_output, encoding="utf-8")
+                        
                         self.logger.error(
-                            f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'"
+                            f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'. "
+                            f"Summary: {error_summary}. Full log: {error_log_path}"
                         )
                         success = False
                         full_output = (
                             f"AI tool execution failed (error pattern detected: '{pattern}')\n"
+                            f"Error summary: {error_summary}\n"
+                            f"Full log: {error_log_path}\n"
                             f"Exit code: {process.returncode}\n"
-                            f"Output:\n{full_output}"
+                            f"Output (last 2000 chars):\n{full_output[-2000:]}"
                         )
                         break
             
             if not success:
-                self.logger.error(f"AI tool failed with return code {process.returncode}:\n{full_output}")
+                # Write failure log
+                error_log_path = self.state.work_dir / f"ai_failure_{time.time()}.log"
+                error_log_path.write_text(full_output, encoding="utf-8")
+                
+                self.logger.error(f"AI tool failed (rc {process.returncode}). Full log: {error_log_path}")
+                full_output = (
+                    f"AI tool execution failed (Exit code: {process.returncode})\n"
+                    f"Full log: {error_log_path}\n"
+                    f"Output (last 2000 chars):\n{full_output[-2000:]}"
+                )
             
             return success, full_output
         except FileNotFoundError:
@@ -559,19 +606,16 @@ class Processor:
         if len(description) > MAX_DESCRIPTION_LENGTH:
             description = description[:MAX_DESCRIPTION_LENGTH]
 
-        prompt = f"""You are working on issue #{issue.iid}: {validated_title}
+        prompt = f"""{self._get_instructions(continue_instruction)}
 
-Issue description:
-{description}
-{doc_content}
+        === PROJECT DOCUMENTATION ===
+        {doc_content}
 
-INSTRUCTIONS:
-1. Complete the task as described.
-2. YOU MUST COMMIT your changes using git and PUSH the branch before finishing.
-3. Write commit messages in English.
-4. Do not use conventional commit prefixes (feat:, fix:, etc.).
-5. Do not add Co-Authored-By signatures.
-6. If you need temporary files, use /tmp/opencode/ instead of /tmp/ directly.{continue_instruction}"""
+        === TASK ===
+        You are working on issue #{issue.iid}: {validated_title}
+
+        Issue description:
+        {description}"""
 
         # Run AI tool
         try:
@@ -701,7 +745,7 @@ INSTRUCTIONS:
         )
 
         # Add eyes emoji to indicate processing has started
-        self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "eyes")
+        self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "eyes", discussion_id=discussion_id)
 
         # Switch to MR branch
         try:
@@ -711,7 +755,7 @@ INSTRUCTIONS:
             git.pull("origin", mr.source_branch)
         except Exception as e:
             self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
-            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
+            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
             self.discord.notify_error(
                 project.name,
                 f"Git preparation failed on branch `{mr.source_branch}` (fetch/checkout/pull)",
@@ -739,20 +783,17 @@ INSTRUCTIONS:
                 "Do not start over."
             )
 
-        prompt = f"""You are working on a merge request titled: {mr.title}
-Branch: {mr.source_branch}
+        prompt = f"""{self._get_instructions(continue_instruction, is_mr_comment=True)}
 
-A reviewer left this feedback:
-{comment}
-{doc_content}
+        === PROJECT DOCUMENTATION ===
+        {doc_content}
 
-INSTRUCTIONS:
-1. Address the feedback as described.
-2. YOU MUST COMMIT your changes using git and PUSH the branch before finishing.
-3. Write commit messages in English.
-4. Do not use conventional commit prefixes (feat:, fix:, etc.).
-5. Do not add Co-Authored-By signatures.
-6. If you need temporary files, use /tmp/opencode/ instead of /tmp/ directly.{continue_instruction}"""
+        === TASK ===
+        You are working on a merge request titled: {mr.title}
+        Branch: {mr.source_branch}
+
+        A reviewer left this feedback:
+        {comment}"""
 
         # Snapshot HEAD so we can detect whether the LLM made any new commits
         pre_ai_commit = git.get_current_commit()
@@ -764,7 +805,7 @@ INSTRUCTIONS:
             
             if not success:
                 self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
-                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x")
+                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
                 self.discord.notify_error(
                     project.name,
                     f"AI tool failed for merge request !{mr.iid}",
@@ -774,13 +815,17 @@ INSTRUCTIONS:
 
             self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
 
+            # Cleanup processing emoji if it was set
+            self.gitlab.delete_note_award_emoji(project.project_id, mr.iid, note_id, "eyes")
+
             # Determine whether the LLM actually produced any work
             post_ai_commit = git.get_current_commit()
             has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
             has_uncommitted = git.has_uncommitted_changes()
             llm_made_changes = has_new_commits or has_uncommitted
+            has_done_command = "/done" in output
 
-            if not llm_made_changes:
+            if not llm_made_changes and not has_done_command:
                 # Distinguish: intentional no-op vs silent failure
                 suspected_error_pattern = None
                 for hint in NO_CHANGES_ERROR_HINTS:
@@ -795,7 +840,7 @@ INSTRUCTIONS:
                         "Treating as failure."
                     )
                     self.gitlab.create_note_award_emoji(
-                        project.project_id, mr.iid, note_id, "x"
+                        project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id
                     )
                     # Include a short excerpt so the team can see what went wrong
                     output_excerpt = output[-1000:] if len(output) > 1000 else output
@@ -827,13 +872,26 @@ INSTRUCTIONS:
                 )
                 return True
 
-            # Push changes
-            git.push("origin", mr.source_branch)
+            # If the LLM already pushed, we skip git.push
+            if not git.has_unpushed_work(self.default_branch):
+                self.logger.info(f"[{project.name}] No unpushed work found for MR !{mr.iid} - assuming already pushed by AI tool.")
+            else:
+                # Push changes
+                if not git.push("origin", mr.source_branch):
+                    self.logger.error(f"[{project.name}] Failed to push changes for MR !{mr.iid}")
+                    self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
+                    self.discord.notify_error(
+                        project.name,
+                        f"Failed to push changes for MR !{mr.iid}",
+                    )
+                    return False
+
             success = self.gitlab.create_note_award_emoji(
                 project.project_id, 
                 mr.iid,
                 note_id, 
-                "white_check_mark"
+                "white_check_mark",
+                discussion_id=discussion_id
             )
             
             if not success and discussion_id:

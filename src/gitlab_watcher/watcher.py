@@ -329,7 +329,13 @@ class Watcher:
 
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
-        if self.state.is_processing(project.project_id):
+        # Check if project is currently processing
+        is_processing = self.state.is_processing(project.project_id)
+        
+        # New feature: Allow manual reset of processing flag via comment?
+        # For now, just allow logging the status.
+        if is_processing:
+            self.logger.debug(f"[{project.name}] Project is currently processing, skipping MR check.")
             return
 
         self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
@@ -392,6 +398,9 @@ class Watcher:
             # Find all discussions that are already "done" (have a bot reply)
             handled_discussions = set()
             for note in notes:
+                # IMPORTANT: We need to use self.gitlab_username as the bot's username, 
+                # but in some tests, the author field on MR might be empty or mocked differently.
+                # Let's ensure consistency.
                 if note.author_username == self.gitlab_username and note.discussion_id:
                     handled_discussions.add(note.discussion_id)
 
@@ -403,7 +412,11 @@ class Watcher:
                     continue
 
                 # 2. Skip if already handled via emoji, reply, or session cache
-                SKIP_EMOJIS = ["eyes", "white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check", "x", "no_entry"]
+                # Define success emojis that explicitly stop retry behavior
+                SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
+                has_success_emojis = any(e in note.award_emojis for e in SUCCESS_EMOJIS)
+                
+                SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
                 has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
                 is_handled_discussion = note.discussion_id in handled_discussions
                 
@@ -411,11 +424,28 @@ class Watcher:
                 if not has_emojis and not is_handled_discussion and note.id not in self._processed_notes:
                     refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
                     has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
+                    has_success_emojis = any(e in refreshed_emojis for e in SUCCESS_EMOJIS)
 
                 is_skipped = has_emojis or is_handled_discussion or note.id in self._processed_notes
-                if is_skipped:
+                
+                # Check for "retry" keyword if processing is stuck
+                is_retry_request = re.search(r"(?i)\bretry\b", note.body)
+                
+                # If success emoji is present, ignore retry request
+                if is_retry_request and has_success_emojis:
+                    is_retry_request = False
+                
+                if is_skipped and not is_retry_request:
                     continue
-
+                
+                # If it's a retry request, force reset the processing state
+                if is_retry_request and is_skipped:
+                     self.logger.info(f"[{project.name}] Retry request detected for note {note.id} on MR !{mr.iid}")
+                     self.state.set_processing(project.project_id, False)
+                     self._processed_notes.discard(note.id)
+                     # Continue to process
+                     is_skipped = False
+                
                 # 3. Skip comments that explicitly indicate no action needed
                 if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS(?:\.|\s+|$)", note.body):
                     self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} has no recommendations — skipping")
@@ -437,6 +467,7 @@ class Watcher:
                 # Update MR state immediately (branch tracking)
                 self.state.update_mr_state(project.project_id, mr.iid, mr.state, mr.source_branch)
                 return
+
 
 
 

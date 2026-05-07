@@ -434,9 +434,23 @@ class GitLabClient:
             return False
 
     def create_note_award_emoji(
-        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str, discussion_id: str = ""
     ) -> bool:
-        """Add an award emoji to a note using the documented MR-scoped API."""
+        """Add an award emoji to a note, trying discussion-scoped API if available."""
+        # Try discussion-scoped endpoint first if discussion_id is provided
+        if discussion_id:
+            endpoint = f"/merge_requests/{mr_iid}/discussions/{discussion_id}/notes/{note_id}/award_emoji"
+            try:
+                self._request(
+                    "POST", 
+                    self._api_url(project_id, endpoint), 
+                    json={"name": emoji_name}
+                )
+                return True
+            except Exception as e:
+                self.logger.debug(f"Failed discussion-scoped emoji for note {note_id}: {e}. Falling back to MR-scoped API.")
+        
+        # Fallback to MR-scoped endpoint
         endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
         try:
             self._request(
@@ -446,7 +460,37 @@ class GitLabClient:
             )
             return True
         except Exception as e:
-            self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {e.response.text})")
+            else:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            return False
+
+    def delete_note_award_emoji(
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+    ) -> bool:
+        """Remove an award emoji from a note."""
+        # Note: Award emoji deletion usually requires the award_id, not just the name.
+        # This implementation requires fetching existing emojis first to find the award_id.
+        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
+        try:
+            response = self._request("GET", self._api_url(project_id, endpoint))
+            emojis_data = response.json()
+            award_id = None
+            for e in emojis_data:
+                if isinstance(e, dict) and e.get("name") == emoji_name:
+                    award_id = e.get("id")
+                    break
+            
+            if award_id is None:
+                self.logger.debug(f"Emoji {emoji_name} not found on note {note_id}")
+                return True
+                
+            delete_endpoint = f"{endpoint}/{award_id}"
+            self._request("DELETE", self._api_url(project_id, delete_endpoint))
+            return True
+        except Exception as e:
+            self.logger.warning(f"Failed to remove emoji {emoji_name} from note {note_id}: {e}")
             return False
 
 
