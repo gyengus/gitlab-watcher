@@ -469,7 +469,12 @@ class GitLabClient:
     def delete_note_award_emoji(
         self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
     ) -> bool:
-        """Remove an award emoji from a note."""
+        """Remove an award emoji from a note.
+        
+        Note: This requires an initial GET call to find the award_id before the DELETE call,
+        as GitLab's API requires the specific award ID for deletion. This is a known
+        API limitation that may lead to N+1 query patterns if used extensively.
+        """
         # Note: Award emoji deletion usually requires the award_id, not just the name.
         # This implementation requires fetching existing emojis first to find the award_id.
         endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"

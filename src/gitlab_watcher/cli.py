@@ -2,22 +2,8 @@
 
 import warnings
 import sys
-
-# Suppress the specific urllib3 dependency warning
-# This warning is harmless and doesn't affect functionality
-import warnings
-try:
-    from requests.packages.urllib3.exceptions import DependencyWarning
-    warnings.filterwarnings("ignore", category=DependencyWarning)
-except (ImportError, AttributeError):
-    try:
-        from urllib3.exceptions import DependencyWarning
-        warnings.filterwarnings("ignore", category=DependencyWarning)
-    except (ImportError, AttributeError):
-        # Fallback if we can't find the specific class
-        warnings.filterwarnings("ignore", message=".*urllib3.*chardet.*charset-normalizer.*")
-
 import click
+
 
 from .config import DEFAULT_CONFIG_PATH, ConfigLoader
 from .git_ops import GitOps

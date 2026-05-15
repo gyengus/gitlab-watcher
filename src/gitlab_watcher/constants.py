@@ -6,6 +6,7 @@ MAX_TITLE_LENGTH = 255
 MAX_BRANCH_LENGTH = 100
 MAX_SLUG_LENGTH = 50
 SILENCE_TIMEOUT = 1800  # Kill process if no output for 30 minutes
+MAX_DOC_CONTENT_LENGTH = 10000  # Maximum combined length of project documentation files
 
 # AI Tool Error Patterns (broad indicators of tool failure)
 AI_TOOL_ERROR_PATTERNS = [

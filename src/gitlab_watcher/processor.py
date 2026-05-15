@@ -179,16 +179,17 @@ class Processor:
         instructions.append(continue_instruction)
         return "\n".join(instructions)
 
-    def _run_ai_tool(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
+    def _run_ai_tool(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> tuple[bool, str]:
         """Run AI tool CLI with a prompt based on configured mode.
-
-        Args:
-            prompt: The prompt for AI tool
-            repo_path: Path to the repository
-
-        Returns:
-            Tuple of (success, output)
-        """
+ 
+         Args:
+             prompt: The prompt for AI tool
+             repo_path: Path to the repository
+             model_override: Optional model name to override the default (used for failover)
+ 
+         Returns:
+             Tuple of (success, output)
+         """
         # Sanitize prompt to prevent command injection
         try:
             safe_prompt = self._sanitize_prompt(prompt)
@@ -197,6 +198,9 @@ class Processor:
 
         # Build command based on mode
         if self.ai_tool_mode == "ollama":
+            # For ollama, if model_override is provided, we might need a different command structure,
+            # but currently it's specialized for 'ollama launch claude'.
+            # If failover happens, we'll try to pass the model to claude via the --model flag if supported.
             cmd = [
                 "ollama",
                 "launch",
@@ -205,26 +209,36 @@ class Processor:
                 "-p",
                 "--permission-mode",
                 "acceptEdits",
-                safe_prompt,
             ]
+            if model_override:
+                cmd.extend(["--model", model_override])
+            cmd.append(safe_prompt)
         elif self.ai_tool_mode == "direct":
             cmd = ["claude", "-p", safe_prompt, "--permission-mode", "acceptEdits"]
+            if model_override:
+                cmd.extend(["--model", model_override])
         elif self.ai_tool_mode == "opencode":
             cmd = [
                 "opencode",
                 "--print-logs",
+            ]
+            if model_override:
+                cmd.extend(["--model", model_override])
+            cmd.extend([
                 "run",
                 safe_prompt,
                 "--thinking",
                 "--log-level",
                 "DEBUG",
-            ]
+            ])
         elif self.ai_tool_mode == "opencode-custom":
             if not self.ai_tool_custom_command:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for opencode-custom mode"
             cmd_parts = shlex.split(self.ai_tool_custom_command)
+            # Use model_override if provided, otherwise empty string (or placeholder if it exists in command)
+            model_val = model_override or ""
             cmd = [
-                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path))
+                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
                 for part in cmd_parts
             ]
         elif self.ai_tool_mode == "custom":
@@ -232,8 +246,9 @@ class Processor:
                 return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
             # Split first, then substitute to preserve multi-word values
             cmd_parts = shlex.split(self.ai_tool_custom_command)
+            model_val = model_override or ""
             cmd = [
-                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path))
+                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
                 for part in cmd_parts
             ]
         else:
@@ -459,16 +474,16 @@ class Processor:
 
     def _run_ai_tool_with_failover(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
         """Run AI tool with failover capability.
-
-        Args:
-            prompt: The prompt for AI tool
-            repo_path: Path to the repository
-
-        Returns:
-            Tuple of (success, output)
-        """
+ 
+         Args:
+             prompt: The prompt for AI tool
+             repo_path: Path to the repository
+ 
+         Returns:
+             Tuple of (success, output)
+         """
         self.logger.info("Attempting AI tool execution with default configuration")
-        success, output = self._run_ai_tool(prompt, repo_path)
+        success, output = self._run_ai_tool(prompt, repo_path, model_override=None)
 
         if success:
             self.logger.info("AI tool execution successful with default configuration")
@@ -484,7 +499,7 @@ class Processor:
 
         self.logger.info(f"Attempting failover to model: {self.ai_tool_failover_model}")
 
-        success, output = self._run_ai_tool(prompt, repo_path)
+        success, output = self._run_ai_tool(prompt, repo_path, model_override=self.ai_tool_failover_model)
 
         if success:
             self.logger.info(f"Failover successful using model: {self.ai_tool_failover_model}")
@@ -715,7 +730,13 @@ class Processor:
                 except Exception as e:
                     self.logger.warning(f"Could not read {filename}: {e}")
         
-        return "".join(content_parts)
+        combined_content = "".join(content_parts)
+        from .constants import MAX_DOC_CONTENT_LENGTH
+        if len(combined_content) > MAX_DOC_CONTENT_LENGTH:
+            self.logger.warning(f"Project documentation content too long ({len(combined_content)} chars), truncating to {MAX_DOC_CONTENT_LENGTH}")
+            combined_content = combined_content[:MAX_DOC_CONTENT_LENGTH] + "\n\n...(documentation truncated due to length limits)"
+            
+        return combined_content
 
     def process_comment(
         self,

@@ -350,6 +350,38 @@ class TestProcessorAIToolModes:
     @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
+    def test_run_ai_tool_with_model_override(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test AI tool execution with model_override."""
+        mock_process = MagicMock()
+        mock_process.poll.return_value = 0
+        mock_process.stdout.readline.return_value = ""
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+        mock_getpgid.return_value = 5678
+
+        processor.ai_tool_mode = "opencode"
+        success, output = processor._run_ai_tool("test", project_config.path, model_override="failover-model")
+
+        assert success is True
+        args = mock_popen.call_args[0][0]
+        # opencode logic: ["opencode", "--print-logs", "--model", "failover-model", "run", ...]
+        assert "--model" in args
+        assert "failover-model" in args
+        assert args[args.index("--model") + 1] == "failover-model"
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
     def test_run_ai_tool_ollama_mode(
         self,
         mock_sleep: Mock,
@@ -1124,6 +1156,21 @@ class TestProcessorPromptContent:
         prompt = mock_run_ai.call_args[0][0]
         assert "=== CONTRIBUTING.md ===" not in prompt
         assert "=== CLAUDE.md ===" not in prompt
+
+    def test_read_project_docs_truncation(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test that project documentation is truncated if it exceeds MAX_DOC_CONTENT_LENGTH."""
+        from gitlab_watcher.constants import MAX_DOC_CONTENT_LENGTH
+        
+        # Create a very large documentation file
+        large_content = "X" * (MAX_DOC_CONTENT_LENGTH + 1000)
+        claude_md = project_config.path / "CLAUDE.md"
+        claude_md.write_text(large_content)
+        
+        doc_content = processor._read_project_docs(project_config.path)
+        
+        # Should be truncated (approx length including headers)
+        assert len(doc_content) <= MAX_DOC_CONTENT_LENGTH + 200 # Header allowance
+        assert "...(documentation truncated" in doc_content
 
     # ------------------------------------------------------------------
     # process_comment prompt checks
