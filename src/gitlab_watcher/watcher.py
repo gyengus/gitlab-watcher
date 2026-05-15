@@ -136,7 +136,7 @@ class Watcher:
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
         
         # Auto-detect username from GitLab API
-        self.gitlab_username = "claude" # Default fallback
+        self.gitlab_username = self.config.gitlab_username
         try:
             # In tests, mock_gitlab might not return what we expect if not configured
             user_info = self.gitlab.get_current_user()
@@ -258,7 +258,7 @@ class Watcher:
         # Check if all tracked MRs are merged or closed
         open_tracked_mrs = [
             mr for mr in open_mrs
-            if mr.iid in state.tracked_mrs
+            if str(mr.iid) in state.tracked_mrs
         ] if open_mrs else []
         if open_tracked_mrs:
             # There are open tracked MRs, skip issue processing
@@ -303,7 +303,7 @@ class Watcher:
                         f"Retrying stuck issue #{issue.iid} (In progress but no MR found)",
                     )
                     self.state.set_processing(project.project_id, True)
-                    self.processor.process_issue(project, issue)
+                    self.processor.process_issue(project, issue, is_retry=True)
                     break
                 elif matching_mrs:
                     # Check if MR has commits
@@ -319,7 +319,7 @@ class Watcher:
                                 f"Retrying stuck issue #{issue.iid} (In progress but MR has no commits)",
                             )
                             self.state.set_processing(project.project_id, True)
-                            self.processor.process_issue(project, issue)
+                            self.processor.process_issue(project, issue, is_retry=True)
                             break
                     except Exception as e:
                         self._log(

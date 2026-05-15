@@ -317,19 +317,19 @@ class TestProcessorRunClaude:
         assert output == "Failed output"
 
     def test_silence_timeout_detection_logic(self, processor: Processor) -> None:
-        """Test the logic for silence timeout detection (5 minutes)."""
+        """Test the logic for silence timeout detection (30 minutes)."""
         # This test verifies the SILENCE_TIMEOUT constant and the logic without mocking subprocess
         from gitlab_watcher.processor import SILENCE_TIMEOUT
         
-        # Verify the constant is set to 300 seconds (5 minutes)
-        assert SILENCE_TIMEOUT == 300
+        # Verify the constant is set to 1800 seconds (30 minutes)
+        assert SILENCE_TIMEOUT == 1800
         
-        # Test logic: when last_activity_time was more than 300 seconds ago, it's a silence timeout
+        # Test logic: when last_activity_time was more than 1800 seconds ago, it's a silence timeout
         import time
         
-        # Mock scenario: last output was 301 seconds ago
+        # Mock scenario: last output was 1801 seconds ago
         last_activity_time = 1000
-        current_time = last_activity_time + SILENCE_TIMEOUT + 1  # 1301 > 1000 + 300
+        current_time = last_activity_time + SILENCE_TIMEOUT + 1  # 2801 > 1000 + 1800
         
         # This should trigger the silence timeout condition
         time_diff = current_time - last_activity_time
@@ -551,6 +551,58 @@ class TestProcessorProcessIssue:
 
         assert result is False
         processor_with_git.discord.notify_error.assert_called()
+
+    @patch("subprocess.Popen")
+    @patch("os.getpgid")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_process_issue_retry(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_getpgid: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+        sample_issue: Issue,
+    ) -> None:
+        """Test issue processing when is_retry is True."""
+        # Mock GitOps
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = True
+
+        # Mock GitLab client
+        mock_gitlab = MagicMock(spec=GitLabClient)
+
+        # Create processor with mocked git_factory
+        processor_with_git = Processor(
+            gitlab=mock_gitlab,
+            discord=MagicMock(spec=DiscordWebhook),
+            state=processor.state,
+            gitlab_username=processor.gitlab_username,
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        # Mock AI Tool
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.return_value = ""
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
+
+        # Initialize state
+        processor_with_git.state.init_state(project_config.project_id)
+
+        processor_with_git.process_issue(project_config, sample_issue, is_retry=True)
+
+        # Verify notify_issue_started was called with is_retry=True
+        processor_with_git.discord.notify_issue_started.assert_called_once()
+        args, kwargs = processor_with_git.discord.notify_issue_started.call_args
+        assert kwargs["is_retry"] is True
 
 
 class TestProcessorProcessComment:

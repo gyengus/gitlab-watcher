@@ -5,7 +5,7 @@ MAX_DESCRIPTION_LENGTH = 50000
 MAX_TITLE_LENGTH = 255
 MAX_BRANCH_LENGTH = 100
 MAX_SLUG_LENGTH = 50
-SILENCE_TIMEOUT = 300  # Kill process if no output for 5 minutes
+SILENCE_TIMEOUT = 1800  # Kill process if no output for 30 minutes
 
 # AI Tool Error Patterns (broad indicators of tool failure)
 AI_TOOL_ERROR_PATTERNS = [

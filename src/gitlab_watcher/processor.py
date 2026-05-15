@@ -504,6 +504,7 @@ class Processor:
         self,
         project: ProjectConfig,
         issue: Issue,
+        is_retry: bool = False,
     ) -> bool:
         """Process an issue: create branch, run Claude, push, create MR.
 
@@ -545,6 +546,7 @@ class Processor:
             validated_title,
             issue.web_url,
             branch,
+            is_retry=is_retry,
         )
 
         # Add "In progress" label

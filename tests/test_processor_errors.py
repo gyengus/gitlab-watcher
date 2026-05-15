@@ -13,6 +13,7 @@ from gitlab_watcher.discord import DiscordWebhook
 from gitlab_watcher.gitlab_client import GitLabClient, Issue, MergeRequest
 from gitlab_watcher.processor import Processor
 from gitlab_watcher.state import StateManager
+from gitlab_watcher.constants import SILENCE_TIMEOUT
 
 
 @pytest.fixture
@@ -118,9 +119,18 @@ class TestProcessorErrorPaths:
         mock_popen.return_value = mock_process
         mock_getpgid.return_value = 5678
 
-        # Start time = 0, current time = 400 (exceeds SILENCE_TIMEOUT=300)
-        # We need values for: start_time, last_activity_time, then loop checks
-        mock_time.side_effect = [0, 0, 400, 401, 402, 403, 404]
+        # Start time = 0, last activity = 0, simulate no output for SILENCE_TIMEOUT + 1 seconds
+        # Provide enough values for start, last_activity, then a loop of checks, then cleanup.
+        mock_time.side_effect = [
+            0, # start_time
+            0, # last_activity_time
+            # Simulate time passing until silence timeout is hit
+            *([SILENCE_TIMEOUT + 0.1] * 50), # current_time values that trigger silence timeout
+            # Add more values for cleanup phase to prevent StopIteration
+            *(list(range(int(SILENCE_TIMEOUT + 0.1), int(SILENCE_TIMEOUT + 0.1 + 10)))) # Cleanup times
+        ]
+        
+        processor.ai_tool_timeout = 2 * SILENCE_TIMEOUT # Make sure overall timeout is longer
 
         success, output = processor._run_ai_tool("test", project_config.path)
         assert success is False
