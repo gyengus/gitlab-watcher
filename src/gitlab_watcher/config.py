@@ -38,7 +38,7 @@ class Config:
     ai_tool_timeout: int = 3600
     log_file: str = "/var/log/gitlab-watcher.log"
     log_level: str = "INFO"
-    gitlab_username: str = "claude"
+    gitlab_username: str = "OpenCode"
     default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)

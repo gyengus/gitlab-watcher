@@ -108,8 +108,9 @@ class GitOps:
                 attempt += 1
                 if attempt > retries:
                     return False
-                # Simple back‑off before next try
-                time.sleep(retry_delay)
+                # Exponential back-off
+                backoff_delay = retry_delay * (2 ** (attempt - 1))
+                time.sleep(backoff_delay)
                 continue
 
     def delete_branch(self, branch: str, force: bool = False) -> bool:
