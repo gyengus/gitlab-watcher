@@ -11,6 +11,14 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .cache import TimedCache
+from .constants import (
+    DEFAULT_CACHE_TTL,
+    DEFAULT_GITLAB_TIMEOUT as DEFAULT_TIMEOUT,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_POOL_CONNECTIONS,
+    DEFAULT_POOL_MAXSIZE,
+    DEFAULT_RETRY_DELAY,
+)
 from .exceptions import (
     GitLabAPIError,
     GitLabAuthenticationError,
@@ -19,15 +27,6 @@ from .exceptions import (
     GitLabNotFoundError,
     GitLabRateLimitError,
 )
-
-
-# Default configuration values
-DEFAULT_TIMEOUT = 30.0
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_DELAY = 1.0
-DEFAULT_POOL_CONNECTIONS = 10
-DEFAULT_POOL_MAXSIZE = 20
-DEFAULT_CACHE_TTL = 30.0
 
 
 @dataclass
@@ -67,6 +66,8 @@ class Note:
 
 
 class GitLabClient:
+
+
     """GitLab API client with automatic retries, connection pooling, and caching."""
 
     def __init__(

@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional
 from .config import ProjectConfig
 from .constants import (
     AI_TOOL_ERROR_PATTERNS,
+    DEFAULT_AI_TOOL_TIMEOUT,
     FORBIDDEN_PATTERNS,
     MAX_BRANCH_LENGTH,
     MAX_DESCRIPTION_LENGTH,
@@ -33,8 +34,6 @@ from .state import StateManager
 
 _thread_cls = threading.Thread
 
-# Default AI tool timeout (1 hour)
-DEFAULT_AI_TOOL_TIMEOUT = 3600
 CLAUDE_CLI_TIMEOUT_SECONDS = DEFAULT_AI_TOOL_TIMEOUT
 
 
