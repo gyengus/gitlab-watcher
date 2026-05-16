@@ -490,7 +490,7 @@ class TestProcessorProcessIssue:
         # Create processor with mocked git_factory
         processor_with_git = Processor(
             gitlab=processor.gitlab,
-            discord=processor.discord,
+            discord=MagicMock(spec=DiscordWebhook),
             state=processor.state,
             gitlab_username=processor.gitlab_username,
             label_in_progress=processor.label_in_progress,
@@ -526,6 +526,7 @@ class TestProcessorProcessIssue:
         result = processor_with_git.process_issue(project_config, sample_issue)
 
         assert result is True
+        processor_with_git.discord.notify_issue_started.assert_called_once()
         processor_with_git.gitlab.update_issue_labels.assert_called()
         mock_git.checkout.assert_called()
         mock_git.push.assert_called()
@@ -554,7 +555,7 @@ class TestProcessorProcessIssue:
         # Create processor with mocked git_factory
         processor_with_git = Processor(
             gitlab=processor.gitlab,
-            discord=processor.discord,
+            discord=MagicMock(spec=DiscordWebhook),
             state=processor.state,
             gitlab_username=processor.gitlab_username,
             label_in_progress=processor.label_in_progress,
@@ -574,7 +575,6 @@ class TestProcessorProcessIssue:
 
         # Mock GitLab client methods
         processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
-        processor_with_git.discord.notify_error = Mock()
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -582,6 +582,7 @@ class TestProcessorProcessIssue:
         result = processor_with_git.process_issue(project_config, sample_issue)
 
         assert result is False
+        processor_with_git.discord.notify_issue_started.assert_called_once()
         processor_with_git.discord.notify_error.assert_called()
 
     @patch("subprocess.Popen")
