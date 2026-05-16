@@ -369,6 +369,24 @@ class Processor:
 
             full_output = "".join(all_output)
             
+            truncated_cmd = shlex.join(cmd[:5]) + "..." if len(cmd) > 5 else shlex.join(cmd)
+            
+            # Helper to extract relevant error snippet
+            def get_error_snippet(output: str, max_chars: int = 2000) -> str:
+                if len(output) <= max_chars:
+                    return output
+                
+                # Search for error patterns in the whole output
+                patterns = AI_TOOL_ERROR_PATTERNS + NO_CHANGES_ERROR_HINTS + [r"error", r"fail", r"exception", r"traceback"]
+                for pattern in patterns:
+                    match = re.search(pattern, output, re.IGNORECASE)
+                    if match:
+                        start = max(0, match.start() - 500)
+                        end = min(len(output), start + max_chars)
+                        return f"...[Relevent snippet found at index {start}]...\n" + output[start:end] + "\n..."
+                
+                return f"...(truncated, showing last {max_chars} chars)...\n" + output[-max_chars:]
+
             if timed_out:
                 tool_name = (
                     "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
@@ -377,8 +395,8 @@ class Processor:
                 return (
                     False,
                     f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n"
-                    f"Command: `{shlex.join(cmd[:3])}...` (truncated)\n\n"
-                    f"--- Captured Output ---\n{full_output}",
+                    f"Command: `{truncated_cmd}`\n\n"
+                    f"--- Captured Output ---\n{get_error_snippet(full_output)}",
                 )
 
             if silence_timed_out:
@@ -389,8 +407,8 @@ class Processor:
                 return (
                     False,
                     f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\n"
-                    f"Command: `{shlex.join(cmd[:3])}...` (truncated)\n\n"
-                    f"--- Captured Output ---\n{full_output}",
+                    f"Command: `{truncated_cmd}`\n\n"
+                    f"--- Captured Output ---\n{get_error_snippet(full_output)}",
                 )
 
             success = process.returncode == 0
@@ -428,7 +446,7 @@ class Processor:
                             f"Error summary: {error_summary}\n"
                             f"Full log: {error_log_path}\n"
                             f"Exit code: {process.returncode}\n"
-                            f"Output (last 2000 chars):\n{full_output[-2000:]}"
+                            f"Output snippet:\n{get_error_snippet(full_output)}"
                         )
                         break
             
@@ -441,7 +459,7 @@ class Processor:
                 full_output = (
                     f"AI tool execution failed (Exit code: {process.returncode})\n"
                     f"Full log: {error_log_path}\n"
-                    f"Output (last 2000 chars):\n{full_output[-2000:]}"
+                    f"Output snippet:\n{get_error_snippet(full_output)}"
                 )
             
             return success, full_output
@@ -548,7 +566,7 @@ class Processor:
             return False
 
         # Generate and validate branch name
-        slug = GitOps.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
+        slug = git.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
         branch = self._validate_branch_name(f"{issue.iid}-{slug}")
 
         self.logger.info(
@@ -637,7 +655,7 @@ class Processor:
         # Run AI tool
         try:
             self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
-            success, output = self._run_ai_tool(prompt, project.path)
+            success, output = self._run_ai_tool_with_failover(prompt, project.path)
             
             if not success:
                 self.logger.error(f"[{project.name}] AI tool failed for issue #{issue.iid}: {output}")
@@ -824,7 +842,7 @@ class Processor:
         # Run AI tool
         try:
             self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
-            success, output = self._run_ai_tool(prompt, project.path)
+            success, output = self._run_ai_tool_with_failover(prompt, project.path)
             
             if not success:
                 self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")

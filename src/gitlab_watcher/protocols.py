@@ -111,5 +111,18 @@ class GitOperations(Protocol):
         """
         ...
 
+    @staticmethod
+    def generate_slug(title: str, max_length: int = 30) -> str:
+        """Generate a URL-safe slug from a title.
+
+        Args:
+            title: The title to slugify
+            max_length: Maximum length of the slug
+
+        Returns:
+            A URL-safe slug
+        """
+        ...
+
 
 __all__ = ["GitOperations"]
