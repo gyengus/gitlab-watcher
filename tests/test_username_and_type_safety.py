@@ -45,26 +45,31 @@ PROJECT_DIRS=(
         self.assertEqual(watcher.gitlab_username, "OpenCode")
         self.assertEqual(watcher.processor.gitlab_username, "OpenCode")
 
-    def test_check_issues_type_safety(self):
-        """Verify that integer IIDs from API match string keys in state.tracked_mrs."""
-        watcher = Watcher(config_path=str(self.config_path), gitlab=self.mock_gitlab, state=self.mock_state_mgr, disable_lock=True)
+    def test_check_mr_status_type_safety(self):
+        """Verify that string keys in state.tracked_mrs are correctly converted to int for API calls."""
+        mock_processor = MagicMock()
+        watcher = Watcher(config_path=str(self.config_path), gitlab=self.mock_gitlab, state=self.mock_state_mgr, processor=mock_processor, disable_lock=True)
         
         project = watcher.config.projects[0]
         
-        # Mock an open MR with integer IID
+        # Tracked MR in state uses string keys
+        self.state_obj.tracked_mrs = {"123": {"branch": "123-fix", "created_by_watcher": True}}
+        
+        # Mock a merged MR
         mr = MagicMock()
         mr.iid = 123
-        mr.source_branch = "123-fix"
-        self.mock_gitlab.get_merge_requests.return_value = [mr]
-        
-        # Tracked MR in state uses string keys (due to JSON serialization)
-        self.state_obj.tracked_mrs = {"123": {"branch": "123-fix"}}
+        mr.state = "merged"
+        mr.title = "Fix"
+        mr.web_url = "url"
+        self.mock_gitlab.get_merge_request.return_value = mr
         
         # Run check
-        watcher.check_issues(project)
+        watcher.check_mr_status(project)
         
-        # It should recognize the open tracked MR and NOT check for new issues
-        self.mock_gitlab.get_issues.assert_not_called()
+        # It should have called get_merge_request with integer 123
+        self.mock_gitlab.get_merge_request.assert_called_with(99, 123)
+        # And it should have called cleanup_after_merge
+        mock_processor.cleanup_after_merge.assert_called()
 
 if __name__ == "__main__":
     unittest.main()
