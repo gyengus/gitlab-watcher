@@ -73,7 +73,7 @@ The `_run_claude()` method in `processor.py` supports multiple AI tools:
 - **custom**: Configurable command with `{prompt}` and `{cwd}` placeholders
 - **opencode-custom**: Configurable opencode command with `{prompt}` and `{cwd}` placeholders
 
-All modes use a 10-minute timeout and `CLAUDECODE=""` environment variable to avoid conflicts.
+All modes use a 1-hour overall timeout and a 30-minute silence timeout, and `CLAUDECODE=""` environment variable to avoid conflicts.
 
 ### Development Guidelines
 
