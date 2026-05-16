@@ -175,14 +175,18 @@ def load_config(config_path: str) -> Config:
     # Helper function to safely convert config values
     def get_str(key: str, default: str = "") -> str:
         value = raw_config.get(key, default)
-        if isinstance(value, list) and value:
-            return str(value[0])
+        if isinstance(value, list):
+            if len(value) > 1:
+                logger.warning(f"Config key '{key}' expected a single string but found a list. Using the first element.")
+            return str(value[0]) if value else ""
         return str(value)
 
     def get_int(key: str, default: int = 0) -> int:
         value = raw_config.get(key, str(default))
-        if isinstance(value, list) and value:
-            return int(str(value[0]))
+        if isinstance(value, list):
+            if len(value) > 1:
+                logger.warning(f"Config key '{key}' expected a single int but found a list. Using the first element.")
+            return int(str(value[0])) if value else default
         return int(str(value))
 
     config = Config(

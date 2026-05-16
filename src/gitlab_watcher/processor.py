@@ -318,6 +318,16 @@ class Processor:
         tool_name = "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
         truncated_cmd = shlex.join(cmd[:5]) + "..." if len(cmd) > 5 else shlex.join(cmd)
         
+        # Cleanup old log files (older than 7 days)
+        try:
+            from datetime import datetime, timedelta
+            for pattern in ["ai_error_*.log", "ai_failure_*.log"]:
+                for f in self.state.work_dir.glob(pattern):
+                    if datetime.fromtimestamp(f.stat().st_ctime) < datetime.now() - timedelta(days=7):
+                        f.unlink()
+        except Exception as e:
+            self.logger.warning(f"Failed to cleanup old AI tool log files: {e}")
+
         if timed_out:
             self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
             return (False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")

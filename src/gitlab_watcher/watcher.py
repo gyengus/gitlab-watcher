@@ -221,22 +221,15 @@ class Watcher:
         url = f"https://{host}"
         return url, None
 
-    def _log(self, project_id: int, message: str) -> None:
-        """Log a message for a project."""
-        project_name = next(
-            (p.name for p in self.config.projects if p.project_id == project_id),
-            str(project_id),
-        )
-        self.logger.info("[%s] %s", project_name, message)
-
     def _get_stuck_issue(self, project: ProjectConfig, issues: list[Issue], open_mrs: list[MergeRequest]) -> Optional[tuple[Issue, bool]]:
         """Identify issues that are either in backlog or stuck 'In progress'."""
+        project_name = project.name
         for issue in issues:
             has_in_progress = self.config.label_in_progress in issue.labels
             has_review = self.config.label_review in issue.labels
 
             if not has_in_progress and not has_review:
-                self._log(project.project_id, f"Found backlog issue #{issue.iid}: {sanitize_for_log(issue.title)}")
+                self.logger.info("[%s] Found backlog issue #%s: %s", project_name, issue.iid, sanitize_for_log(issue.title))
                 return issue, False
 
             # Retry: "In progress" but no MR exists or MR is empty (likely timed out)
@@ -244,7 +237,7 @@ class Watcher:
                 matching_mrs = [mr for mr in open_mrs if mr.source_branch.startswith(f"{issue.iid}-")] if open_mrs else []
 
                 if not matching_mrs:
-                    self._log(project.project_id, f"Retrying stuck issue #{issue.iid} (In progress but no MR found)")
+                    self.logger.info("[%s] Retrying stuck issue #%s (In progress but no MR found)", project_name, issue.iid)
                     return issue, True
                 
                 # Check if MR has commits
@@ -252,13 +245,20 @@ class Watcher:
                 try:
                     mr_commits = self.gitlab.get_merge_request_commits(project_id=project.project_id, mr_iid=mr.iid)
                     if not mr_commits:
-                        self._log(project.project_id, f"Retrying stuck issue #{issue.iid} (In progress but MR has no commits)")
+                        self.logger.info("[%s] Retrying stuck issue #%s (In progress but MR has no commits)", project_name, issue.iid)
                         return issue, True
                 except Exception as e:
-                    self._log(project.project_id, f"Could not check MR commits for issue #{issue.iid}: {e}")
+                    self.logger.error("[%s] Could not check MR commits for issue #%s: %s", project_name, issue.iid, e)
+                    self.discord.notify_error(
+                        project.name,
+                        f"Failed to check MR commits for issue #{issue.iid}",
+                        details=f"GitLab API error: {e}. Skipping issue processing for now."
+                    )
+                    return None
         return None
 
     def check_issues(self, project: ProjectConfig) -> None:
+
         """Check for new issues to process."""
         if self.state.is_processing(project.project_id):
             return
@@ -287,20 +287,21 @@ class Watcher:
     def _handle_merge_cleanup(self, project: ProjectConfig, state: Any) -> bool:
         """Check all tracked MRs and cleanup those that are merged or closed."""
         tracked_iids = list(state.tracked_mrs.keys())
+        project_name = project.name
         for iid_str in tracked_iids:
             iid = int(iid_str)
             mr = self.gitlab.get_merge_request(project.project_id, iid)
 
             if mr and mr.state in ["merged", "closed"]:
                 action = "merged" if mr.state == "merged" else "closed"
-                self._log(project.project_id, f"MR !{iid} was {action}")
+                self.logger.info("[%s] MR !%s was %s", project_name, iid, action)
 
                 mr_data = state.tracked_mrs.get(iid_str, {})
                 branch = mr_data.get("branch") or ""
                 created_by_watcher = mr_data.get("created_by_watcher", False)
 
                 if not created_by_watcher:
-                    self._log(project.project_id, f"MR !{iid} merged/closed but not created by watcher — skipping cleanup")
+                    self.logger.info("[%s] MR !%s merged/closed but not created by watcher — skipping cleanup", project_name, iid)
                     self.state.remove_tracked_mr(project.project_id, iid)
                     return True
 
@@ -320,8 +321,15 @@ class Watcher:
         notes = self.gitlab.get_notes(project.project_id, mr.iid)
         notes = sorted(notes, key=lambda n: n.id)
         
+        state = self.state.load(project.project_id)
+        last_processed_id = state.last_processed_note_id or 0
+
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:
+                continue
+
+            # Skip already handled via persistent state
+            if note.id <= last_processed_id:
                 continue
 
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
@@ -336,6 +344,9 @@ class Watcher:
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
             
             if is_skipped and not is_retry_request:
+                # If it's effectively skipped but we haven't updated the persistent state, do it now
+                if note.id > last_processed_id:
+                    self.state.update_last_processed_note(project.project_id, note.id)
                 continue
             
             if is_retry_request and is_skipped:
@@ -351,6 +362,7 @@ class Watcher:
                 self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} has no recommendations — skipping")
                 self._processed_notes.add(note.id)
                 self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
+                self.state.update_last_processed_note(project.project_id, note.id)
                 continue
 
             self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
@@ -358,6 +370,7 @@ class Watcher:
             self._processed_notes.add(note.id)
             self.processor.process_comment(project, mr, note.id, note.body, discussion_id=note.discussion_id)
             self.state.update_mr_state(project.project_id, mr.iid, mr.state, mr.source_branch)
+            self.state.update_last_processed_note(project.project_id, note.id)
             return True
         return False
 

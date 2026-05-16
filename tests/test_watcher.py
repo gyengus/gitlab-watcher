@@ -1300,7 +1300,9 @@ def test_check_mr_status_sequential_processing_verified(
     mock_state_mgr.is_processing.return_value = False
     mock_state = MagicMock()
     mock_state.last_mr_iid = None
+    mock_state.last_processed_note_id = 0
     mock_state_mgr.load.return_value = mock_state
+
 
     watcher = Watcher(disable_lock=True, 
         config_path=str(config_file),
@@ -1347,7 +1349,9 @@ def test_check_mr_status_skips_system_and_self_verified(
     mock_state_mgr.is_processing.return_value = False
     mock_state = MagicMock()
     mock_state.last_mr_iid = None
+    mock_state.last_processed_note_id = 0
     mock_state_mgr.load.return_value = mock_state
+
 
     watcher = Watcher(disable_lock=True, 
         config_path=str(config_file),
