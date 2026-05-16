@@ -284,6 +284,7 @@ class TestProcessorMrConflict:
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
         mock_git.has_unpushed_work.return_value = True  # LLM made commits
+        mock_git.generate_slug.return_value = "fix-the-bug"
 
         mock_gitlab = MagicMock()
         mock_gitlab.create_merge_request.side_effect = GitLabAPIError(
