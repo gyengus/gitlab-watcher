@@ -1031,7 +1031,6 @@ class Processor:
 
 __all__ = [
     "Processor",
-    "MAX_PROMPT_LENGTH",
     "MAX_TITLE_LENGTH",
     "MAX_DESCRIPTION_LENGTH",
     "MAX_SLUG_LENGTH",

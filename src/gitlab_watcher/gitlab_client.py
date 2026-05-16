@@ -311,12 +311,21 @@ class GitLabClient:
         try:
             notes_data = self._request_all(
                 "GET", 
-                self._api_url(project_id, endpoint)
+                self._api_url(project_id, endpoint),
+                params={"include_award_emojis": "true"}
             )
             notes = []
             for note in notes_data:
                 note_id = note["id"]
-                award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
+                # Use emojis from the main notes call if available
+                award_emojis = [e["name"] for e in note.get("award_emojis", []) if isinstance(e, dict) and "name" in e]
+                
+                # If for some reason they aren't included but we need them, we could fallback,
+                # but GitLab's include_award_emojis=true is usually reliable.
+                # Only fallback if we explicitly see no award_emojis field at all (unlikely)
+                if "award_emojis" not in note:
+                    award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
+                
                 self.logger.debug(f"Parsed emojis for note {note_id}: {award_emojis}")
 
                 notes.append(
