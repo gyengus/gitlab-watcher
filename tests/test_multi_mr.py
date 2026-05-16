@@ -32,7 +32,9 @@ def mock_processor():
 
 @pytest.fixture
 def state_manager(tmp_path):
-    return StateManager(tmp_path)
+    manager = StateManager(tmp_path)
+    yield manager
+    manager.stop()
 
 @pytest.fixture
 def project_config():

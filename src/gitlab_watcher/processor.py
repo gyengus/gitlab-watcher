@@ -564,7 +564,14 @@ class Processor:
             self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
             
             # Push branch
-            git.push("origin", branch, set_upstream=True)
+            if not git.push("origin", branch, set_upstream=True):
+                self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
+                self.discord.notify_error(
+                    project.name,
+                    f"Failed to push changes for issue #{issue.iid}",
+                    details="Git push returned failure. No changes were pushed to remote.",
+                )
+                return False
 
             # Create MR, or reuse existing one if already open for this branch
             try:
