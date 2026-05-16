@@ -12,7 +12,13 @@ from .discord import DiscordWebhook
 from .watcher import Watcher
 
 
-@click.command(name="run")
+@click.group()
+def cli():
+    """GitLab Watcher - Monitor projects and process issues/MRs."""
+    pass
+
+
+@cli.command(name="run")
 @click.option(
     "--config",
     "-c",
@@ -21,12 +27,12 @@ from .watcher import Watcher
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
 def main(config: str, verbose: bool) -> None:
-    """GitLab Watcher - Monitor projects and process issues/MRs."""
+    """Monitor projects and process issues/MRs."""
     watcher = Watcher(config_path=config, verbose=verbose)
     watcher.run()
 
 
-@click.command(name="sync-state")
+@cli.command(name="sync-state")
 @click.argument("project_name")
 def sync_state(project_name: str) -> None:
     """Synchronize local git state with remote for *PROJECT_NAME*.
@@ -66,12 +72,4 @@ def sync_state(project_name: str) -> None:
 
 
 if __name__ == "__main__":
-    # When executed directly, expose both commands via a simple CLI group.
-    # ``click`` will automatically create a ``click.Group`` when multiple commands
-    # are defined in the same module and the module is executed as a script.
-    # This keeps backward compatibility with the original ``gitlab-watcher`` entry
-    # point while providing the new ``sync-state`` sub-command.
-    cli = click.Group()
-    cli.add_command(main)
-    cli.add_command(sync_state)
     cli()

@@ -1057,7 +1057,7 @@ class TestWatcherExtractFromRemote:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test extracting URL and token from remote URL with user:token format."""
+        """Test extracting URL from remote URL. Token extraction should be disabled."""
         mock_git = Mock()
         mock_git.get_remote_url.return_value = (
             "https://user:secret-token@git.example.com/group/project.git"
@@ -1076,7 +1076,7 @@ class TestWatcherExtractFromRemote:
         url, token = watcher._extract_from_remote(project.path)
 
         assert url == "https://git.example.com"
-        assert token == "secret-token"
+        assert token is None
 
     @patch("gitlab_watcher.watcher.GitOps")
     def test_extract_from_remote_token_only(
@@ -1088,7 +1088,7 @@ class TestWatcherExtractFromRemote:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test extracting URL and token when only token is in URL."""
+        """Test extracting URL from remote URL. Token extraction should be disabled."""
         mock_git = Mock()
         mock_git.get_remote_url.return_value = (
             "https://secret-token@git.example.com/group/project.git"
@@ -1107,7 +1107,7 @@ class TestWatcherExtractFromRemote:
         url, token = watcher._extract_from_remote(project.path)
 
         assert url == "https://git.example.com"
-        assert token == "secret-token"
+        assert token is None
 
     @patch("gitlab_watcher.watcher.GitOps")
     def test_extract_from_remote_no_token(

@@ -187,22 +187,20 @@ class Watcher:
             self.logger.warning(f"Could not acquire instance lock: {e}")
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, str | None]:
-        """Extract GitLab URL and token from git remote.
+        """Extract GitLab URL from git remote.
+        Note: Token extraction is disabled for security reasons.
 
         Args:
             repo_path: Path to git repository
 
         Returns:
-            Tuple of (url, token) or (None, None) if not found
+            Tuple of (url, None) or (None, None) if not found
         """
         git = GitOps(repo_path)
         remote_url = git.get_remote_url()
 
         if not remote_url:
             return None, None
-
-        # Parse URL like: https://token@git.example.com/...
-        # or: https://user:token@git.example.com/...
 
         # Extract URL
         host = None
@@ -220,17 +218,7 @@ class Watcher:
             return None, None
 
         url = f"https://{host}"
-
-        # Extract token
-        token_match = re.match(r"https?://[^:]*:([^@]+)@", remote_url)
-        if token_match:
-            token = token_match.group(1)
-        else:
-            # Try format: https://token@host
-            token_match = re.match(r"https?://([^@]+)@", remote_url)
-            token = token_match.group(1) if token_match else None
-
-        return url, token
+        return url, None
 
     def _log(self, project_id: int, message: str) -> None:
         """Log a message for a project."""

@@ -55,7 +55,7 @@ discord.py      → Discord webhook notifications
 
 ### Configuration Discovery
 
-Projects are discovered by scanning `PROJECT_DIRS` from the config file. Each project directory must contain a `CLAUDE.md` file with a `Project ID: <number>` entry. The watcher extracts GitLab credentials from git remote URLs if not explicitly configured.
+Projects are discovered by scanning `PROJECT_DIRS` from the config file. Each project directory must contain a `CLAUDE.md` file with a `Project ID: <number>` entry. The watcher extracts the GitLab server URL from git remote URLs if not explicitly configured, but for security reasons, the `GITLAB_TOKEN` must always be provided in the configuration file.
 
 ### State Management
 
