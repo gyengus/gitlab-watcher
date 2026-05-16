@@ -165,6 +165,7 @@ class Watcher:
         
         # In-memory deduplication for recently processed notes (solves API lag)
         self._processed_notes: set[int] = set()
+        self._last_cache_clear_time = time.time()
         
         # Lock file to prevent multiple instances
         self._lock_file = None
@@ -365,6 +366,12 @@ class Watcher:
         if self.state.is_processing(project.project_id):
             self.logger.debug(f"[{project.name}] Project is currently processing, skipping MR check.")
             return
+
+        # Periodically clear processed notes cache (every 24 hours)
+        if time.time() - self._last_cache_clear_time > 86400:
+            self.logger.info("Clearing _processed_notes cache (24h period reached)")
+            self._processed_notes.clear()
+            self._last_cache_clear_time = time.time()
 
         self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
         state = self.state.load(project.project_id)

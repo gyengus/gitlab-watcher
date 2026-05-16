@@ -286,7 +286,7 @@ class Processor:
                     os.killpg(pgid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            except Exception as e:
+            except OSError as e:
                 self.logger.error(f"Error cleaning up process group {pgid}: {e}")
 
         try:
