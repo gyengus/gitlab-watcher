@@ -182,10 +182,8 @@ class Processor:
     def _build_ai_command(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> list[str]:
         """Build the command list for the AI tool."""
         if self.ai_tool_mode == "ollama":
-            cmd = ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits"]
-            if model_override:
-                cmd.extend(["--model", model_override])
-            cmd.append(prompt)
+            model_to_use = model_override if model_override else "claude"
+            cmd = ["ollama", "launch", model_to_use, "--", "-p", "--permission-mode", "acceptEdits", prompt]
         elif self.ai_tool_mode == "direct":
             cmd = ["claude", "-p", prompt, "--permission-mode", "acceptEdits"]
             if model_override:

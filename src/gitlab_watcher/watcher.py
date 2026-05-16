@@ -331,8 +331,6 @@ class Watcher:
         notes = self.gitlab.get_notes(project.project_id, mr.iid)
         notes = sorted(notes, key=lambda n: n.id)
         
-        handled_discussions = {n.discussion_id for n in notes if n.author_username == self.gitlab_username and n.discussion_id}
-
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:
                 continue
@@ -340,25 +338,24 @@ class Watcher:
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
             SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
             has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
-            is_handled_discussion = note.discussion_id in handled_discussions
             
-            if not has_emojis and not is_handled_discussion and note.id not in self._processed_notes:
+            if not has_emojis and note.id not in self._processed_notes:
                 refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
                 has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
             
-            is_skipped = has_emojis or is_handled_discussion or note.id in self._processed_notes
+            is_skipped = has_emojis or note.id in self._processed_notes
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
-            
-            if is_retry_request and any(e in note.award_emojis for e in SUCCESS_EMOJIS):
-                is_retry_request = False
             
             if is_skipped and not is_retry_request:
                 continue
             
             if is_retry_request and is_skipped:
-                 self.logger.info(f"[{project.name}] Retry request detected for note {note.id} on MR !{mr.iid}")
+                 self.logger.info(f"[{project.name}] Retry request detected for note {note.id} on MR !{mr.iid}. Clearing previous status.")
                  self.state.set_processing(project.project_id, False)
                  self._processed_notes.discard(note.id)
+                 # Explicitly remove success emojis if a retry is requested
+                 for emoji in SUCCESS_EMOJIS:
+                     self.gitlab.delete_note_award_emoji(project.project_id, mr.iid, note.id, emoji)
                  is_skipped = False
             
             if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS(?:\.|\s+|$)", note.body):
