@@ -637,7 +637,6 @@ class Processor:
                     return False
 
             if mr:
-                # Only track MR if AI tool made changes
                 if git.has_unpushed_work(self.default_branch) or git.has_uncommitted_changes():
                     # Track the MR we just created so the watcher knows it's ours
                     self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
@@ -654,7 +653,17 @@ class Processor:
                         issue.iid,
                     )
                 else:
-                    self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - keeping in progress")
+                    self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - moving to Review with AI-No-Changes label")
+                    self.gitlab.update_issue_labels(
+                        project.project_id,
+                        issue.iid,
+                        [self.label_review, "AI-No-Changes"],
+                    )
+                    self.discord.notify_no_changes_needed(
+                        project.name,
+                        issue.title,
+                        mr.web_url,
+                    )
             else:
                 self.discord.notify_error(
                     project.name,

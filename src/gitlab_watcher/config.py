@@ -1,11 +1,14 @@
 """Configuration handling with bash config compatibility."""
 
+import logging
 import os
 import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Default configuration file path
 DEFAULT_CONFIG_PATH = os.path.expanduser("~/.config/gitlab-watcher/config.conf")
