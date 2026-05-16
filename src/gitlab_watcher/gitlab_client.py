@@ -316,16 +316,19 @@ class GitLabClient:
                 params={"include_award_emojis": "true"}
             )
             notes = []
+            award_emojis_supported = True
             for note in notes_data:
                 note_id = note["id"]
                 # Use emojis from the main notes call if available
                 award_emojis = [e["name"] for e in note.get("award_emojis", []) if isinstance(e, dict) and "name" in e]
                 
-                # If for some reason they aren't included but we need them, we could fallback,
-                # but GitLab's include_award_emojis=true is usually reliable.
-                # Only fallback if we explicitly see no award_emojis field at all (unlikely)
-                if "award_emojis" not in note:
+                # Fallback if not included in response (e.g. older GitLab versions)
+                if award_emojis_supported and "award_emojis" not in note:
                     award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
+                    # If even the fallback fails or we suspect it's going to be N+1,
+                    # we could disable further attempts in this loop.
+                    # For now, if we see ONE missing key, we assume the whole response lacks it.
+                    award_emojis_supported = False 
                 
                 self.logger.debug(f"Parsed emojis for note {note_id}: {award_emojis}")
 

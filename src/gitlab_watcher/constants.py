@@ -8,6 +8,7 @@ MAX_SLUG_LENGTH = 50
 SILENCE_TIMEOUT = 1800  # Kill process if no output for 30 minutes
 MAX_DOC_CONTENT_LENGTH = 10000  # Maximum combined length of project documentation files
 DEFAULT_AI_TOOL_TIMEOUT = 3600 # 1 hour
+MAX_TOTAL_PROMPT_LENGTH = 60000 # Overall safety limit for combined AI prompts
 
 # GitLab client defaults
 DEFAULT_GITLAB_TIMEOUT = 30.0

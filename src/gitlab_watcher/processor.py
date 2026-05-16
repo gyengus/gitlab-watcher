@@ -21,6 +21,7 @@ from .constants import (
     MAX_DESCRIPTION_LENGTH,
     MAX_SLUG_LENGTH,
     MAX_TITLE_LENGTH,
+    MAX_TOTAL_PROMPT_LENGTH,
     NO_CHANGES_ERROR_HINTS,
     SILENCE_TIMEOUT,
 )
@@ -367,6 +368,12 @@ class Processor:
         """Run AI tool CLI with a prompt based on configured mode."""
         try:
             safe_prompt = self._sanitize_prompt(prompt)
+            
+            # Overall prompt length safety limit
+            if len(safe_prompt) > MAX_TOTAL_PROMPT_LENGTH:
+                self.logger.warning(f"Combined prompt too long ({len(safe_prompt)} chars), truncating to {MAX_TOTAL_PROMPT_LENGTH}")
+                safe_prompt = safe_prompt[:MAX_TOTAL_PROMPT_LENGTH - 500] + "\n\n... (prompt truncated due to length limits)"
+
             cmd = self._build_ai_command(safe_prompt, repo_path, model_override)
             returncode, full_output, timed_out, silence_timed_out = self._execute_ai_subprocess(cmd, repo_path)
             return self._analyze_ai_output(returncode, full_output, timed_out, silence_timed_out, cmd)
