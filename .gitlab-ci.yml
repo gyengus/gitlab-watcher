@@ -26,6 +26,7 @@ variables:
 
 .test_template:
   before_script:
+    - apt-get update && apt-get install -y git
     - pip install -e ".[dev]"
   script:
     - pytest --tb=short --cov=src/gitlab_watcher --cov-report=xml --cov-report=lcov --cov-report=term-missing
@@ -46,6 +47,7 @@ test:
 
 .build_template:
   before_script:
+    - apt-get update && apt-get install -y git
     - python -m pip install --upgrade pip build twine
 
 deploy_test:
