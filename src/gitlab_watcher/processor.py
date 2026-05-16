@@ -179,296 +179,191 @@ class Processor:
         instructions.append(continue_instruction)
         return "\n".join(instructions)
 
-    def _run_ai_tool(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> tuple[bool, str]:
-        """Run AI tool CLI with a prompt based on configured mode.
- 
-         Args:
-             prompt: The prompt for AI tool
-             repo_path: Path to the repository
-             model_override: Optional model name to override the default (used for failover)
- 
-         Returns:
-             Tuple of (success, output)
-         """
-        # Sanitize prompt to prevent command injection
-        try:
-            safe_prompt = self._sanitize_prompt(prompt)
-        except ValueError as e:
-            return False, f"Prompt validation failed: {e}"
-
-        # Build command based on mode
+    def _build_ai_command(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> list[str]:
+        """Build the command list for the AI tool."""
         if self.ai_tool_mode == "ollama":
-            # For ollama, if model_override is provided, we might need a different command structure,
-            # but currently it's specialized for 'ollama launch claude'.
-            # If failover happens, we'll try to pass the model to claude via the --model flag if supported.
-            cmd = [
-                "ollama",
-                "launch",
-                "claude",
-                "--",
-                "-p",
-                "--permission-mode",
-                "acceptEdits",
-            ]
+            cmd = ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits"]
             if model_override:
                 cmd.extend(["--model", model_override])
-            cmd.append(safe_prompt)
+            cmd.append(prompt)
         elif self.ai_tool_mode == "direct":
-            cmd = ["claude", "-p", safe_prompt, "--permission-mode", "acceptEdits"]
+            cmd = ["claude", "-p", prompt, "--permission-mode", "acceptEdits"]
             if model_override:
                 cmd.extend(["--model", model_override])
         elif self.ai_tool_mode == "opencode":
-            cmd = [
-                "opencode",
-                "--print-logs",
-            ]
+            cmd = ["opencode", "--print-logs"]
             if model_override:
                 cmd.extend(["--model", model_override])
-            cmd.extend([
-                "run",
-                safe_prompt,
-                "--thinking",
-                "--log-level",
-                "DEBUG",
-            ])
-        elif self.ai_tool_mode == "opencode-custom":
+            cmd.extend(["run", prompt, "--thinking", "--log-level", "DEBUG"])
+        elif self.ai_tool_mode in ["opencode-custom", "custom"]:
             if not self.ai_tool_custom_command:
-                return False, "AI_TOOL_CUSTOM_COMMAND not set for opencode-custom mode"
-            cmd_parts = shlex.split(self.ai_tool_custom_command)
-            # Use model_override if provided, otherwise empty string (or placeholder if it exists in command)
-            model_val = model_override or ""
-            cmd = [
-                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
-                for part in cmd_parts
-            ]
-        elif self.ai_tool_mode == "custom":
-            if not self.ai_tool_custom_command:
-                return False, "AI_TOOL_CUSTOM_COMMAND not set for custom mode"
-            # Split first, then substitute to preserve multi-word values
+                raise ValueError(f"AI_TOOL_CUSTOM_COMMAND not set for {self.ai_tool_mode} mode")
             cmd_parts = shlex.split(self.ai_tool_custom_command)
             model_val = model_override or ""
             cmd = [
-                part.replace("{prompt}", safe_prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
+                part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
                 for part in cmd_parts
             ]
         else:
-            return False, f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}"
+            raise ValueError(f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}")
+        return cmd
+
+    def _execute_ai_subprocess(self, cmd: list[str], repo_path: Path) -> tuple[int, str, bool, bool]:
+        """Execute the AI tool subprocess and capture output."""
+        env = dict(os.environ)
+        env.update({
+            "CI": "true",
+            "PYTHONUNBUFFERED": "1",
+            "DEBIAN_FRONTEND": "noninteractive",
+            "CLAUDECODE": "",
+        })
+        
+        self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            env=env,
+            bufsize=1,
+            preexec_fn=os.setsid,
+        )
+
+        pgid = os.getpgid(process.pid)
+        all_output = []
+        output_queue: queue.Queue = queue.Queue()
+
+        def reader(pipe, q):
+            try:
+                for line in iter(pipe.readline, ""):
+                    q.put(line)
+            finally:
+                pipe.close()
+
+        thread = _thread_cls(
+            target=reader, 
+            args=(process.stdout, output_queue),
+            name=f"AiToolReader-{process.pid}"
+        )
+        thread.daemon = True
+        thread.start()
+
+        start_time = time.time()
+        last_activity_time = start_time
+        timed_out = False
+        silence_timed_out = False
 
         try:
-            # Setup environment for non-interactive execution
-            # Start with current env and override/add specific flags
-            env = dict(os.environ)
-            env.update({
-                "CI": "true",
-                "PYTHONUNBUFFERED": "1",
-                "DEBIAN_FRONTEND": "noninteractive",
-                "CLAUDECODE": "",
-            })
-            
-            self.logger.info(
-                f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s"
-            )
-
-            process = subprocess.Popen(
-                cmd,
-                cwd=repo_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,  # Prevent interactive hangs
-                text=True,
-                env=env,
-                bufsize=1,  # Line buffered
-                preexec_fn=os.setsid,  # Create new process group for cleanup
-            )
-
-            # Record PGID immediately while process is alive
-            pgid = os.getpgid(process.pid)
-
-            all_output = []
-            output_queue: queue.Queue = queue.Queue()
-
-            def reader(pipe, q):
+            while True:
                 try:
-                    for line in iter(pipe.readline, ""):
-                        q.put(line)
-                finally:
-                    pipe.close()
-
-            thread = _thread_cls(
-                target=reader, 
-                args=(process.stdout, output_queue),
-                name=f"AiToolReader-{process.pid}"
-            )
-            thread.daemon = True
-            thread.start()
-
-            start_time = time.time()
-            last_activity_time = start_time
-            timed_out = False
-            silence_timed_out = False
-            try:
-                while True:
-                    try:
-                        # Check for output every 100ms
-                        line = output_queue.get(timeout=0.1)
-                        all_output.append(line)
-                        last_activity_time = time.time()
-
-                        # Log to watcher log in real-time
-                        stripped = line.strip()
-                        if stripped:
-                            self.logger.info(f"[{self.ai_tool_mode}] {stripped}")
-                    except queue.Empty:
-                        if process.poll() is not None:
-                            # Process finished
-                            break
-
-                    # Check for overall timeout
-                    current_time = time.time()
-                    if current_time - start_time > self.ai_tool_timeout:
-                        timed_out = True
+                    line = output_queue.get(timeout=0.1)
+                    all_output.append(line)
+                    last_activity_time = time.time()
+                    stripped = line.strip()
+                    if stripped:
+                        self.logger.info(f"[{self.ai_tool_mode}] {stripped}")
+                except queue.Empty:
+                    if process.poll() is not None:
                         break
 
-                    # Check for silence timeout (no output for SILENCE_TIMEOUT seconds)
-                    if current_time - last_activity_time > SILENCE_TIMEOUT:
-                        silence_timed_out = True
-                        break
-            finally:
-                # Always cleanup the process group (including orphans)
-                # Using saved pgid to work even if the leader process is already dead
-                try:
-                    # Use SIGTERM first
-                    os.killpg(pgid, signal.SIGTERM)
-                    
-                    # Give it a moment (up to 2s) to exit gracefully
-                    wait_start = time.time()
-                    while time.time() - wait_start < 2:
-                        if process.poll() is not None:
-                            break
-                        time.sleep(0.1)
-                    
-                    # If still running, use SIGKILL
-                    if process.poll() is None:
-                        os.killpg(pgid, signal.SIGKILL)
-                except ProcessLookupError:
-                    # Process group already gone
-                    pass
-                except Exception as e:
-                    self.logger.error(f"Error cleaning up process group {pgid}: {e}")
-
-            # Ensure pipe is closed to unblock reader if process is gone
+                current_time = time.time()
+                if current_time - start_time > self.ai_tool_timeout:
+                    timed_out = True
+                    break
+                if current_time - last_activity_time > SILENCE_TIMEOUT:
+                    silence_timed_out = True
+                    break
+        finally:
             try:
-                process.stdout.close()
-            except Exception:
+                os.killpg(pgid, signal.SIGTERM)
+                wait_start = time.time()
+                while time.time() - wait_start < 2:
+                    if process.poll() is not None:
+                        break
+                    time.sleep(0.1)
+                if process.poll() is None:
+                    os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
                 pass
+            except Exception as e:
+                self.logger.error(f"Error cleaning up process group {pgid}: {e}")
 
-            # Wait for thread to finish reading remaining output
-            thread.join(timeout=2)
-            if thread.is_alive():
-                self.logger.warning(f"Reader thread for process {process.pid} still alive after join timeout")
+        try:
+            process.stdout.close()
+        except Exception:
+            pass
 
-            full_output = "".join(all_output)
-            
-            truncated_cmd = shlex.join(cmd[:5]) + "..." if len(cmd) > 5 else shlex.join(cmd)
-            
-            # Helper to extract relevant error snippet
-            def get_error_snippet(output: str, max_chars: int = 2000) -> str:
-                if len(output) <= max_chars:
-                    return output
-                
-                # Search for error patterns in the whole output
-                patterns = AI_TOOL_ERROR_PATTERNS + NO_CHANGES_ERROR_HINTS + [r"error", r"fail", r"exception", r"traceback"]
-                for pattern in patterns:
-                    match = re.search(pattern, output, re.IGNORECASE)
-                    if match:
-                        start = max(0, match.start() - 500)
-                        end = min(len(output), start + max_chars)
-                        return f"...[Relevent snippet found at index {start}]...\n" + output[start:end] + "\n..."
-                
-                return f"...(truncated, showing last {max_chars} chars)...\n" + output[-max_chars:]
+        thread.join(timeout=2)
+        full_output = "".join(all_output)
+        return process.returncode, full_output, timed_out, silence_timed_out
 
-            if timed_out:
-                tool_name = (
-                    "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
-                )
-                self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
-                return (
-                    False,
-                    f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\n"
-                    f"Command: `{truncated_cmd}`\n\n"
-                    f"--- Captured Output ---\n{get_error_snippet(full_output)}",
-                )
+    def _get_error_snippet(self, output: str, max_chars: int = 2000) -> str:
+        """Extract relevant error snippet from AI tool output."""
+        if len(output) <= max_chars:
+            return output
+        
+        patterns = AI_TOOL_ERROR_PATTERNS + NO_CHANGES_ERROR_HINTS + [r"error", r"fail", r"exception", r"traceback"]
+        for pattern in patterns:
+            match = re.search(pattern, output, re.IGNORECASE)
+            if match:
+                start = max(0, match.start() - 500)
+                end = min(len(output), start + max_chars)
+                return f"...[Relevant snippet found at index {start}]...\n" + output[start:end] + "\n..."
+        
+        return f"...(truncated, showing last {max_chars} chars)...\n" + output[-max_chars:]
 
-            if silence_timed_out:
-                tool_name = (
-                    "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
-                )
-                self.logger.error(f"AI tool silence timeout: no output for {SILENCE_TIMEOUT}s")
-                return (
-                    False,
-                    f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\n"
-                    f"Command: `{truncated_cmd}`\n\n"
-                    f"--- Captured Output ---\n{get_error_snippet(full_output)}",
-                )
+    def _analyze_ai_output(self, returncode: int, full_output: str, timed_out: bool, silence_timed_out: bool, cmd: list[str]) -> tuple[bool, str]:
+        """Analyze AI tool output for success and error patterns."""
+        tool_name = "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
+        truncated_cmd = shlex.join(cmd[:5]) + "..." if len(cmd) > 5 else shlex.join(cmd)
+        
+        if timed_out:
+            self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
+            return (False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
 
-            success = process.returncode == 0
-            
-            # Additional output inspection for error patterns
-            # Some tools return exit code 0 but output error messages
-            if success and full_output:
-                # Filter out tool-specific log lines to avoid false positives
-                sanitized_output = "\n".join(
-                    [line for line in full_output.splitlines()
-                     if not re.match(r"^(INFO|DEBUG|WARN|ERROR)\s+\d{4}-\d{2}-\d{2}T", line.strip())]
-                )
-                for pattern in AI_TOOL_ERROR_PATTERNS:
-                    if re.search(pattern, sanitized_output, re.IGNORECASE):
-                        # Extract the line(s) containing the error pattern
-                        error_lines = []
-                        for line in sanitized_output.splitlines():
-                            if re.search(pattern, line, re.IGNORECASE):
-                                error_lines.append(line.strip())
-                        
-                        # Use the first matching line for a concise error summary
-                        error_summary = error_lines[0] if error_lines else pattern
-                        
-                        # Write the full output to a file for easier debugging
-                        error_log_path = self.state.work_dir / f"ai_error_{time.time()}.log"
-                        error_log_path.write_text(full_output, encoding="utf-8")
-                        
-                        self.logger.error(
-                            f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'. "
-                            f"Summary: {error_summary}. Full log: {error_log_path}"
-                        )
-                        success = False
-                        full_output = (
-                            f"AI tool execution failed (error pattern detected: '{pattern}')\n"
-                            f"Error summary: {error_summary}\n"
-                            f"Full log: {error_log_path}\n"
-                            f"Exit code: {process.returncode}\n"
-                            f"Output snippet:\n{get_error_snippet(full_output)}"
-                        )
-                        break
-            
-            if not success:
-                # Write failure log
-                error_log_path = self.state.work_dir / f"ai_failure_{time.time()}.log"
-                error_log_path.write_text(full_output, encoding="utf-8")
-                
-                self.logger.error(f"AI tool failed (rc {process.returncode}). Full log: {error_log_path}")
-                full_output = (
-                    f"AI tool execution failed (Exit code: {process.returncode})\n"
-                    f"Full log: {error_log_path}\n"
-                    f"Output snippet:\n{get_error_snippet(full_output)}"
-                )
-            
-            return success, full_output
+        if silence_timed_out:
+            self.logger.error(f"AI tool silence timeout: no output for {SILENCE_TIMEOUT}s")
+            return (False, f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
+
+        success = returncode == 0
+        if success and full_output:
+            sanitized_output = "\n".join([line for line in full_output.splitlines() if not re.match(r"^(INFO|DEBUG|WARN|ERROR)\s+\d{4}-\d{2}-\d{2}T", line.strip())])
+            for pattern in AI_TOOL_ERROR_PATTERNS:
+                if re.search(pattern, sanitized_output, re.IGNORECASE):
+                    error_lines = [line.strip() for line in sanitized_output.splitlines() if re.search(pattern, line, re.IGNORECASE)]
+                    error_summary = error_lines[0] if error_lines else pattern
+                    error_log_path = self.state.work_dir / f"ai_error_{time.time()}.log"
+                    error_log_path.write_text(full_output, encoding="utf-8")
+                    self.logger.error(f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'. Summary: {error_summary}. Full log: {error_log_path}")
+                    return (False, f"AI tool execution failed (error pattern detected: '{pattern}')\nError summary: {error_summary}\nFull log: {error_log_path}\nExit code: {returncode}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
+        
+        if not success:
+            error_log_path = self.state.work_dir / f"ai_failure_{time.time()}.log"
+            error_log_path.write_text(full_output, encoding="utf-8")
+            self.logger.error(f"AI tool failed (rc {returncode}). Full log: {error_log_path}")
+            return (False, f"AI tool execution failed (Exit code: {returncode})\nFull log: {error_log_path}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
+        
+        return True, full_output
+
+    def _run_ai_tool(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> tuple[bool, str]:
+        """Run AI tool CLI with a prompt based on configured mode."""
+        try:
+            safe_prompt = self._sanitize_prompt(prompt)
+            cmd = self._build_ai_command(safe_prompt, repo_path, model_override)
+            returncode, full_output, timed_out, silence_timed_out = self._execute_ai_subprocess(cmd, repo_path)
+            return self._analyze_ai_output(returncode, full_output, timed_out, silence_timed_out, cmd)
+        except ValueError as e:
+            return False, f"Prompt validation failed: {e}"
         except FileNotFoundError:
-            return False, f"AI tool CLI ({cmd[0]}) not found"
+            return False, f"AI tool CLI not found"
         except Exception as e:
             msg = f"AI tool execution failed ({self.ai_tool_mode}): {str(e)}"
             self.logger.exception(msg)
             return False, msg
+
 
     def _should_failover(self, error_output: str) -> bool:
         """Check if an error output indicates a failover should be attempted.

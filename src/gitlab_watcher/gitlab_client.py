@@ -483,6 +483,7 @@ class GitLabClient:
         Note: This requires an initial GET call to find the award_id before the DELETE call,
         as GitLab's API requires the specific award ID for deletion. This is a known
         API limitation that may lead to N+1 query patterns if used extensively.
+        Consider batching if multiple emojis need to be removed from the same note.
         """
         # Note: Award emoji deletion usually requires the award_id, not just the name.
         # This implementation requires fetching existing emojis first to find the award_id.

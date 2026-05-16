@@ -13,7 +13,7 @@ from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
 from .discord import DiscordWebhook
 from .exceptions import GitLabError
 from .git_ops import GitOps
-from .gitlab_client import GitLabClient
+from .gitlab_client import GitLabClient, Issue, MergeRequest
 from .logging_utils import SensitiveDataFilter, sanitize_for_log
 from .processor import Processor
 from .state import StateManager
@@ -240,28 +240,38 @@ class Watcher:
         )
         self.logger.info("[%s] %s", project_name, message)
 
+    def _get_stuck_issue(self, project: ProjectConfig, issues: list[Issue], open_mrs: list[MergeRequest]) -> Optional[tuple[Issue, bool]]:
+        """Identify issues that are either in backlog or stuck 'In progress'."""
+        for issue in issues:
+            has_in_progress = self.config.label_in_progress in issue.labels
+            has_review = self.config.label_review in issue.labels
+
+            if not has_in_progress and not has_review:
+                self._log(project.project_id, f"Found backlog issue #{issue.iid}: {sanitize_for_log(issue.title)}")
+                return issue, False
+
+            # Retry: "In progress" but no MR exists or MR is empty (likely timed out)
+            if has_in_progress and not has_review:
+                matching_mrs = [mr for mr in open_mrs if mr.source_branch.startswith(f"{issue.iid}-")] if open_mrs else []
+
+                if not matching_mrs:
+                    self._log(project.project_id, f"Retrying stuck issue #{issue.iid} (In progress but no MR found)")
+                    return issue, True
+                
+                # Check if MR has commits
+                mr = matching_mrs[0]
+                try:
+                    mr_commits = self.gitlab.get_merge_request_commits(project_id=project.project_id, mr_iid=mr.iid)
+                    if not mr_commits:
+                        self._log(project.project_id, f"Retrying stuck issue #{issue.iid} (In progress but MR has no commits)")
+                        return issue, True
+                except Exception as e:
+                    self._log(project.project_id, f"Could not check MR commits for issue #{issue.iid}: {e}")
+        return None
+
     def check_issues(self, project: ProjectConfig) -> None:
         """Check for new issues to process."""
         if self.state.is_processing(project.project_id):
-            return
-
-        # Sequential Processing: Skip only if there are tracked MRs AND all are merged/closed
-        state = self.state.load(project.project_id)
-        
-        # Get open MRs first
-        open_mrs = self.gitlab.get_merge_requests(
-            project_id=project.project_id,
-            state="opened",
-            author_username=self.gitlab_username,
-        )
-        
-        # Check if all tracked MRs are merged or closed
-        open_tracked_mrs = [
-            mr for mr in open_mrs
-            if str(mr.iid) in state.tracked_mrs
-        ] if open_mrs else []
-        if open_tracked_mrs:
-            # There are open tracked MRs, skip issue processing
             return
 
         issues = self.gitlab.get_issues(
@@ -272,71 +282,127 @@ class Watcher:
         if not issues:
             return
 
-        # Find first issue without workflow labels (backlog)
-        # Also retry issues with "In progress" label but no MR (timed out previously)
+        # Fetch open MRs to check for stuck issues
+        open_mrs = self.gitlab.get_merge_requests(
+            project_id=project.project_id,
+            state="opened",
+            author_username=self.gitlab_username,
+        )
 
-        for issue in issues:
-            has_in_progress = self.config.label_in_progress in issue.labels
-            has_review = self.config.label_review in issue.labels
+        stuck_data = self._get_stuck_issue(project, issues, open_mrs)
+        if stuck_data:
+            issue, is_retry = stuck_data
+            self.state.set_processing(project.project_id, True)
+            self.processor.process_issue(project, issue, is_retry=is_retry)
 
-            if not has_in_progress and not has_review:
-                self._log(
-                    project.project_id,
-                    f"Found backlog issue #{issue.iid}: {sanitize_for_log(issue.title)}",
+    def _handle_merge_cleanup(self, project: ProjectConfig, state: Any) -> bool:
+        """Check all tracked MRs and cleanup those that are merged or closed."""
+        tracked_iids = list(state.tracked_mrs.keys())
+        for iid_str in tracked_iids:
+            iid = int(iid_str)
+            mr = self.gitlab.get_merge_request(project.project_id, iid)
+
+            if mr and mr.state in ["merged", "closed"]:
+                action = "merged" if mr.state == "merged" else "closed"
+                self._log(project.project_id, f"MR !{iid} was {action}")
+
+                mr_data = state.tracked_mrs.get(iid_str, {})
+                branch = mr_data.get("branch") or ""
+                created_by_watcher = mr_data.get("created_by_watcher", False)
+
+                if not created_by_watcher:
+                    self._log(project.project_id, f"MR !{iid} merged/closed but not created by watcher — skipping cleanup")
+                    self.state.remove_tracked_mr(project.project_id, iid)
+                    return True
+
+                self.processor.cleanup_after_merge(
+                    project=project,
+                    branch=branch,
+                    mr_title=mr.title,
+                    mr_url=mr.web_url,
+                    mr_iid=iid,
                 )
-                self.state.set_processing(project.project_id, True)
-                self.processor.process_issue(project, issue)
-                break
+                self.state.remove_tracked_mr(project.project_id, iid)
+                return True
+        return False
 
-            # Retry: "In progress" but no MR exists or MR is empty (likely timed out)
-            if has_in_progress and not has_review:
-                # Check if any open MR has a source branch matching this issue
-                # Branch names follow the pattern: {iid}-{slug}
-                matching_mrs = [
-                    mr for mr in open_mrs
-                    if mr.source_branch.startswith(f"{issue.iid}-")
-                ] if open_mrs else []
+    def _find_and_process_comment(self, project: ProjectConfig, mr: MergeRequest) -> bool:
+        """Find the first valid human comment on an MR and process it."""
+        notes = self.gitlab.get_notes(project.project_id, mr.iid)
+        notes = sorted(notes, key=lambda n: n.id)
+        
+        handled_discussions = {n.discussion_id for n in notes if n.author_username == self.gitlab_username and n.discussion_id}
 
-                if not matching_mrs:
-                    self._log(
-                        project.project_id,
-                        f"Retrying stuck issue #{issue.iid} (In progress but no MR found)",
-                    )
-                    self.state.set_processing(project.project_id, True)
-                    self.processor.process_issue(project, issue, is_retry=True)
-                    break
-                elif matching_mrs:
-                    # Check if MR has commits
-                    mr = matching_mrs[0]
-                    try:
-                        mr_commits = self.gitlab.get_merge_request_commits(
-                            project_id=project.project_id,
-                            mr_iid=mr.iid
-                        )
-                        if not mr_commits:
-                            self._log(
-                                project.project_id,
-                                f"Retrying stuck issue #{issue.iid} (In progress but MR has no commits)",
-                            )
-                            self.state.set_processing(project.project_id, True)
-                            self.processor.process_issue(project, issue, is_retry=True)
-                            break
-                    except Exception as e:
-                        self._log(
-                            project.project_id,
-                            f"Could not check MR commits for issue #{issue.iid}: {e}",
-                        )
+        for note in notes:
+            if note.system or note.author_username == self.gitlab_username:
+                continue
+
+            SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
+            SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
+            has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
+            is_handled_discussion = note.discussion_id in handled_discussions
+            
+            if not has_emojis and not is_handled_discussion and note.id not in self._processed_notes:
+                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
+                has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
+            
+            is_skipped = has_emojis or is_handled_discussion or note.id in self._processed_notes
+            is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
+            
+            if is_retry_request and any(e in note.award_emojis for e in SUCCESS_EMOJIS):
+                is_retry_request = False
+            
+            if is_skipped and not is_retry_request:
+                continue
+            
+            if is_retry_request and is_skipped:
+                 self.logger.info(f"[{project.name}] Retry request detected for note {note.id} on MR !{mr.iid}")
+                 self.state.set_processing(project.project_id, False)
+                 self._processed_notes.discard(note.id)
+                 is_skipped = False
+            
+            if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS(?:\.|\s+|$)", note.body):
+                self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} has no recommendations — skipping")
+                self._processed_notes.add(note.id)
+                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
+                continue
+
+            self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
+            self.state.set_processing(project.project_id, True)
+            self._processed_notes.add(note.id)
+            self.processor.process_comment(project, mr, note.id, note.body, discussion_id=note.discussion_id)
+            self.state.update_mr_state(project.project_id, mr.iid, mr.state, mr.source_branch)
+            return True
+        return False
 
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
-        # Check if project is currently processing
-        is_processing = self.state.is_processing(project.project_id)
-        
-        # New feature: Allow manual reset of processing flag via comment?
-        # For now, just allow logging the status.
-        if is_processing:
+        if self.state.is_processing(project.project_id):
             self.logger.debug(f"[{project.name}] Project is currently processing, skipping MR check.")
             return
+
+        self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
+        state = self.state.load(project.project_id)
+
+        if self._handle_merge_cleanup(project, state):
+            return
+
+        mrs = self.gitlab.get_merge_requests(
+            project_id=project.project_id,
+            state="opened",
+            author_username=self.gitlab_username,
+        )
+
+        if not mrs:
+            return
+
+        for mr in mrs:
+            self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch)
+
+        for mr in mrs:
+            if self._find_and_process_comment(project, mr):
+                return
+
 
         self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
         state = self.state.load(project.project_id)
