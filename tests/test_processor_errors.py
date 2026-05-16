@@ -386,7 +386,7 @@ class TestProcessorMrConflict:
 
         assert result is False
         p.discord.notify_error.assert_called()
-        # Error message must contain something about unexpected error (not 409-specific)
-        assert "Unexpected error" in p.discord.notify_error.call_args[0][1]
+        # Error message must contain something about GitLab API Error (not 409-specific)
+        assert "GitLab API Error" in p.discord.notify_error.call_args[0][1]
 
 

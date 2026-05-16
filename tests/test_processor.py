@@ -750,8 +750,8 @@ class TestProcessorProcessComment:
         calls = processor_with_git.gitlab.create_note_award_emoji.call_args_list
         # Adjust for discussion_id
         assert calls[-1] == call(project_config.project_id, sample_mr.iid, 999, "x", discussion_id="disc1")
-        # Should notify error
-        processor_with_git.discord.notify_error.assert_called_once()
+        # Should notify error (twice: once in failover logic, once in process_comment)
+        assert processor_with_git.discord.notify_error.called
         call_args = processor_with_git.discord.notify_error.call_args[0]
         assert project_config.name in call_args[0]
         assert "AI tool failed" in call_args[1]

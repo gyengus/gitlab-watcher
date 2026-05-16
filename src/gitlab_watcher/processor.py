@@ -317,21 +317,29 @@ class Processor:
         tool_name = "Claude" if self.ai_tool_mode == "direct" else self.ai_tool_mode
         truncated_cmd = shlex.join(cmd[:5]) + "..." if len(cmd) > 5 else shlex.join(cmd)
         
+        # Dedicated subdirectory for AI logs
+        ai_log_dir = self.state.work_dir / "ai_logs"
+        ai_log_dir.mkdir(exist_ok=True)
+
         # Cleanup old log files (older than 7 days)
         try:
             from datetime import datetime, timedelta
             for pattern in ["ai_error_*.log", "ai_failure_*.log"]:
-                for f in self.state.work_dir.glob(pattern):
+                for f in ai_log_dir.glob(pattern):
                     if datetime.fromtimestamp(f.stat().st_ctime) < datetime.now() - timedelta(days=7):
                         f.unlink()
         except Exception as e:
             self.logger.warning(f"Failed to cleanup old AI tool log files: {e}")
 
         if timed_out:
+            error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
+            error_log_path.write_text(full_output, encoding="utf-8")
             self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
             return (False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
 
         if silence_timed_out:
+            error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
+            error_log_path.write_text(full_output, encoding="utf-8")
             self.logger.error(f"AI tool silence timeout: no output for {SILENCE_TIMEOUT}s")
             return (False, f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
 
@@ -342,13 +350,13 @@ class Processor:
                 if re.search(pattern, sanitized_output, re.IGNORECASE):
                     error_lines = [line.strip() for line in sanitized_output.splitlines() if re.search(pattern, line, re.IGNORECASE)]
                     error_summary = error_lines[0] if error_lines else pattern
-                    error_log_path = self.state.work_dir / f"ai_error_{time.time()}.log"
+                    error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
                     error_log_path.write_text(full_output, encoding="utf-8")
                     self.logger.error(f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'. Summary: {error_summary}. Full log: {error_log_path}")
                     return (False, f"AI tool execution failed (error pattern detected: '{pattern}')\nError summary: {error_summary}\nFull log: {error_log_path}\nExit code: {returncode}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
         
         if not success:
-            error_log_path = self.state.work_dir / f"ai_failure_{time.time()}.log"
+            error_log_path = ai_log_dir / f"ai_failure_{time.time()}.log"
             error_log_path.write_text(full_output, encoding="utf-8")
             self.logger.error(f"AI tool failed (rc {returncode}). Full log: {error_log_path}")
             return (False, f"AI tool execution failed (Exit code: {returncode})\nFull log: {error_log_path}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
@@ -411,6 +419,11 @@ class Processor:
 
         if not self._should_failover(output):
             self.logger.info("Error not eligible for failover, returning failure")
+            self.discord.notify_error(
+                "AI Tool",
+                f"AI tool failed with default configuration and no failover attempted.",
+                details=output
+            )
             return False, output
 
         if not self.ai_tool_failover_model:
@@ -493,10 +506,13 @@ class Processor:
 
         # Create branch
         try:
-            self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull)")
-            git.fetch()
-            git.checkout(self.default_branch)
-            git.pull()
+            if not is_retry:
+                self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull)")
+                git.fetch()
+                git.checkout(self.default_branch)
+                git.pull()
+            else:
+                self.logger.info(f"[{project.name}] Retrying issue: skipping default branch preparation")
         except Exception as e:
             self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
             self.discord.notify_error(
@@ -581,6 +597,7 @@ class Processor:
                 return False
 
             # Create MR, or reuse existing one if already open for this branch
+            mr = None
             try:
                 mr = self.gitlab.create_merge_request(
                     project.project_id,
@@ -590,22 +607,27 @@ class Processor:
                     description=f"{issue.description}\n\nCloses #{issue.iid}",
                 )
             except GitLabAPIError as api_err:
-                if api_err.status_code != 409:
-                    raise
-                # GitLab 409: an open MR already exists for this branch.
-                # This is not an error — find and reuse the existing MR.
-                self.logger.info(
-                    f"[{project.name}] MR already exists for branch `{branch}` (HTTP 409) "
-                    "— reusing the existing open MR"
-                )
-                open_mrs = self.gitlab.get_merge_requests(
-                    project.project_id,
-                    state="opened",
-                )
-                mr = next((m for m in open_mrs if m.source_branch == branch), None)
+                if api_err.status_code == 409:
+                    # GitLab 409: an open MR already exists for this branch.
+                    # This is not an error — find and reuse the existing MR.
+                    self.logger.info(
+                        f"[{project.name}] MR already exists for branch `{branch}` (HTTP 409) "
+                        "— reusing the existing open MR"
+                    )
+                    open_mrs = self.gitlab.get_merge_requests(
+                        project.project_id,
+                        state="opened",
+                    )
+                    mr = next((m for m in open_mrs if m.source_branch == branch), None)
+                
                 if mr is None:
-                    # Defensive: 409 but we can't locate the MR — re-raise
-                    raise
+                    self.logger.error(f"[{project.name}] GitLab API Error during MR creation/lookup: {api_err}")
+                    self.discord.notify_error(
+                        project.name,
+                        f"GitLab API Error during MR creation/lookup (issue #{issue.iid})",
+                        details=f"Status Code: {api_err.status_code}\nMessage: {api_err.message}",
+                    )
+                    return False
 
             if mr:
                 # Only track MR if AI tool made changes
@@ -629,7 +651,7 @@ class Processor:
             else:
                 self.discord.notify_error(
                     project.name,
-                    "Changes done but MR creation failed",
+                    f"MR creation failed for issue #{issue.iid}",
                 )
             return True
         except Exception as e:
@@ -642,6 +664,7 @@ class Processor:
             return False
         finally:
             self.state.set_processing(project.project_id, False)
+
 
     def _read_project_docs(self, repo_path: Path) -> str:
         """Read existing project documentation files and return their content."""
@@ -858,6 +881,15 @@ class Processor:
                 mr.web_url,
             )
             return True
+        except GitLabAPIError as api_err:
+            self.logger.error(f"[{project.name}] GitLab API Error during comment processing: {api_err}")
+            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
+            self.discord.notify_error(
+                project.name,
+                f"GitLab API Error during comment processing (MR !{mr.iid})",
+                details=f"Status Code: {api_err.status_code}\nMessage: {api_err.message}",
+            )
+            return False
         except Exception as e:
             self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
             self.discord.notify_error(

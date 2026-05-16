@@ -224,6 +224,16 @@ class Watcher:
     def _get_stuck_issue(self, project: ProjectConfig, issues: list[Issue], open_mrs: list[MergeRequest]) -> Optional[tuple[Issue, bool]]:
         """Identify issues that are either in backlog or stuck 'In progress'."""
         project_name = project.name
+
+        # Pre-fetch commits for all open MRs to avoid N+1 queries
+        mr_commits_cache = {}
+        for mr in open_mrs:
+            try:
+                mr_commits_cache[mr.iid] = self.gitlab.get_merge_request_commits(project.project_id, mr.iid)
+            except Exception as e:
+                self.logger.warning("[%s] Could not pre-fetch commits for MR !%s: %s", project_name, mr.iid, e)
+                mr_commits_cache[mr.iid] = []
+
         for issue in issues:
             has_in_progress = self.config.label_in_progress in issue.labels
             has_review = self.config.label_review in issue.labels
@@ -240,21 +250,12 @@ class Watcher:
                     self.logger.info("[%s] Retrying stuck issue #%s (In progress but no MR found)", project_name, issue.iid)
                     return issue, True
                 
-                # Check if MR has commits
+                # Check if MR has commits from cache
                 mr = matching_mrs[0]
-                try:
-                    mr_commits = self.gitlab.get_merge_request_commits(project_id=project.project_id, mr_iid=mr.iid)
-                    if not mr_commits:
-                        self.logger.info("[%s] Retrying stuck issue #%s (In progress but MR has no commits)", project_name, issue.iid)
-                        return issue, True
-                except Exception as e:
-                    self.logger.error("[%s] Could not check MR commits for issue #%s: %s", project_name, issue.iid, e)
-                    self.discord.notify_error(
-                        project.name,
-                        f"Failed to check MR commits for issue #{issue.iid}",
-                        details=f"GitLab API error: {e}. Skipping issue processing for now."
-                    )
-                    return None
+                mr_commits = mr_commits_cache.get(mr.iid, [])
+                if not mr_commits:
+                    self.logger.info("[%s] Retrying stuck issue #%s (In progress but MR has no commits)", project_name, issue.iid)
+                    return issue, True
         return None
 
     def check_issues(self, project: ProjectConfig) -> None:
