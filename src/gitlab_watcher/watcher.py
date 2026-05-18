@@ -163,6 +163,7 @@ class Watcher:
             ai_tool_mode=self.config.ai_tool_mode,
             ai_tool_custom_command=self.config.ai_tool_custom_command,
             ai_tool_timeout=self.config.ai_tool_timeout,
+            ai_tool_failover_model=self.config.ai_tool_failover_model,
             default_branch=self.config.default_branch,
         )
         

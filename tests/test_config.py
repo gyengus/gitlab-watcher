@@ -317,4 +317,4 @@ PROJECT_DIRS=(
 )
 """)
     config = load_config(str(config_file))
-    assert config.gitlab_username == "claude"
+    assert config.gitlab_username == "OpenCode"

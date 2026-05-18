@@ -5,13 +5,19 @@ import logging
 import threading
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
 
 # Default delay for debounced saves
 DEFAULT_SAVE_DELAY = 1.0
+
+
+class TrackedMRInfo(TypedDict):
+    """Information about a tracked merge request."""
+    branch: str
+    created_by_watcher: bool
 
 
 @dataclass
@@ -22,7 +28,7 @@ class ProjectState:
     last_mr_state: Optional[str] = None
     last_branch: Optional[str] = None
     processing: bool = False
-    tracked_mrs: dict[str, dict] = field(default_factory=dict)
+    tracked_mrs: dict[str, TrackedMRInfo] = field(default_factory=dict)
     branches_with_failed_mr: set[str] = field(default_factory=set)  # Branches that failed MR creation
     last_processed_note_id: Optional[int] = None
 
