@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .config import DEFAULT_CONFIG_PATH, Config, ProjectConfig, load_config
+from .constants import (
+    POSITIVE_REVIEW_PATTERNS,
+)
 from .discord import DiscordWebhook
 from .exceptions import GitLabError
 from .git_ops import GitOps
@@ -359,12 +362,14 @@ class Watcher:
                      self.gitlab.delete_note_award_emoji(project.project_id, mr.iid, note.id, emoji)
                  is_skipped = False
             
-            if re.search(r"(?i)(^|\n)\s*NO\s+RECOMMENDATIONS(?:\.|\s+|$)", note.body):
-                self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} has no recommendations — skipping")
+            is_positive_review = any(re.search(pattern, note.body, re.IGNORECASE) for pattern in POSITIVE_REVIEW_PATTERNS)
+            if is_positive_review:
+                self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} indicates positive review — skipping")
                 self._processed_notes.add(note.id)
                 self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
                 self.state.update_last_processed_note(project.project_id, note.id)
                 continue
+
 
             self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
             self.state.set_processing(project.project_id, True)

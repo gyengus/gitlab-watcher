@@ -63,6 +63,15 @@ FORBIDDEN_PATTERNS = [
     r"system\s+message",
 ]
 
+# Patterns for skipping comments that indicate a positive review/no action needed
+POSITIVE_REVIEW_PATTERNS = [
+    r"Found 0 issues",
+    r"No structural issues",
+    r"NO RECOMMENDATIONS",
+    r"LGTM",
+    r"Looks good to me",
+]
+
 __all__ = [
     "MAX_DESCRIPTION_LENGTH",
     "MAX_TITLE_LENGTH",
@@ -80,4 +89,5 @@ __all__ = [
     "DEFAULT_POOL_CONNECTIONS",
     "DEFAULT_POOL_MAXSIZE",
     "DEFAULT_CACHE_TTL",
+    "POSITIVE_REVIEW_PATTERNS",
 ]
