@@ -75,4 +75,5 @@ dmypy.json
 # Project specific
 .claude_session
 .worktrees/
+src/gitlab_watcher/_version.py
 
