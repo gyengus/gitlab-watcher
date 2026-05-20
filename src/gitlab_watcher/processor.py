@@ -200,8 +200,15 @@ class Processor:
                 raise ValueError(f"AI_TOOL_CUSTOM_COMMAND not set for {self.ai_tool_mode} mode")
             cmd_parts = shlex.split(self.ai_tool_custom_command)
             model_val = model_override or ""
+            
+            # Use shlex.quote for substituted values to prevent command injection
+            # if the tool interprets any of its arguments as a shell command.
+            q_prompt = shlex.quote(prompt)
+            q_cwd = shlex.quote(str(repo_path))
+            q_model = shlex.quote(model_val)
+            
             cmd = [
-                part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
+                part.replace("{prompt}", q_prompt).replace("{cwd}", q_cwd).replace("{model}", q_model)
                 for part in cmd_parts
             ]
         else:
@@ -396,7 +403,9 @@ class Processor:
             # Overall prompt length safety limit
             if len(safe_prompt) > MAX_TOTAL_PROMPT_LENGTH:
                 self.logger.warning(f"Combined prompt too long ({len(safe_prompt)} chars), truncating to {MAX_TOTAL_PROMPT_LENGTH}")
-                safe_prompt = safe_prompt[:MAX_TOTAL_PROMPT_LENGTH - 500] + "\n\n... (prompt truncated due to length limits)"
+                truncation_message = "\n\n... (prompt truncated due to length limits)"
+                # Ensure the final length including the message does not exceed the max
+                safe_prompt = safe_prompt[:MAX_TOTAL_PROMPT_LENGTH - len(truncation_message)] + truncation_message
 
             cmd = self._build_ai_command(safe_prompt, repo_path, model_override)
             returncode, full_output, timed_out, silence_timed_out = self._execute_ai_subprocess(cmd, repo_path)
@@ -568,7 +577,7 @@ class Processor:
 
         # Check for previous work on this branch (e.g. from a timed-out run)
         continue_instruction = ""
-        has_unpushed = git.has_unpushed_work(self.default_branch)
+        has_unpushed = git.has_unpushed_to_remote()
         has_uncommitted = git.has_uncommitted_changes()
         if has_uncommitted:
             continue_instruction = (
@@ -661,7 +670,7 @@ class Processor:
                     return False
 
             if mr:
-                if git.has_unpushed_work(self.default_branch) or git.has_uncommitted_changes():
+                if git.has_unpushed_to_remote() or git.has_uncommitted_changes():
                     # Track the MR we just created so the watcher knows it's ours
                     self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
                     # Move to Review
@@ -778,7 +787,7 @@ class Processor:
 
         # Build prompt for Claude
         continue_instruction = ""
-        has_unpushed = git.has_unpushed_work(self.default_branch)
+        has_unpushed = git.has_unpushed_to_remote()
         has_uncommitted = git.has_uncommitted_changes()
         if has_uncommitted:
             continue_instruction = (
@@ -885,7 +894,7 @@ class Processor:
                 return True
 
             # If the LLM already pushed, we skip git.push
-            if not git.has_unpushed_work(self.default_branch):
+            if not git.has_unpushed_to_remote():
                 self.logger.info(f"[{project.name}] No unpushed work found for MR !{mr.iid} - assuming already pushed by AI tool.")
             else:
                 # Push changes

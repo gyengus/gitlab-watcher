@@ -21,7 +21,6 @@ class ProjectConfig:
     project_id: int
     path: Path
     name: str
-    default_branch: str = "master"
     discord_webhook_url: str = ""
 
 
@@ -45,6 +44,13 @@ class Config:
     default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
+
+    def get_project_by_name(self, name: str) -> Optional[ProjectConfig]:
+        """Find a project by its name."""
+        for project in self.projects:
+            if project.name == name:
+                return project
+        return None
 
 
 def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
@@ -153,18 +159,6 @@ def extract_project_id(project_file_path: Path) -> Optional[int]:
 
     return None
 
-
-class ConfigLoader:
-    """Utility class to load configuration and provide lookup helpers."""
-
-    @staticmethod
-    def load(config_path: str = DEFAULT_CONFIG_PATH) -> Config:
-        """Load configuration from the default or provided path.
-
-        Returns:
-            Config: The loaded configuration object.
-        """
-        return load_config(config_path)
 
 def load_config(config_path: str) -> Config:
     """Load configuration from file and discover projects."""

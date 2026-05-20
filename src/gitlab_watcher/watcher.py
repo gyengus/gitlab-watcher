@@ -125,7 +125,9 @@ class Watcher:
         # Try to extract from git remote if not in config
         if not gitlab_url or not gitlab_token:
             first_project = self.config.projects[0]
-            gitlab_url, gitlab_token = self._extract_from_remote(first_project.path)
+            extracted_url, _ = self._extract_from_remote(first_project.path)
+            if not gitlab_url:
+                gitlab_url = extracted_url
 
         if not gitlab_url:
             raise ValueError("GitLab URL must be set in config or extractable from git remote")
@@ -177,6 +179,30 @@ class Watcher:
         if not disable_lock:
             self._acquire_lock()
 
+    def _log_project_info(self, project_id: int, level: int, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log a message with project context."""
+        project_name = next(
+            (p.name for p in self.config.projects if p.project_id == project_id),
+            str(project_id),
+        )
+        self.logger.log(level, f"[{project_name}] {message}", *args, **kwargs)
+
+    def _log_info(self, project_id: int, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log an INFO message with project context."""
+        self._log_project_info(project_id, logging.INFO, message, *args, **kwargs)
+
+    def _log_debug(self, project_id: int, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log a DEBUG message with project context."""
+        self._log_project_info(project_id, logging.DEBUG, message, *args, **kwargs)
+
+    def _log_warning(self, project_id: int, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log a WARNING message with project context."""
+        self._log_project_info(project_id, logging.WARNING, message, *args, **kwargs)
+
+    def _log_error(self, project_id: int, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log an ERROR message with project context."""
+        self._log_project_info(project_id, logging.ERROR, message, *args, **kwargs)
+
     def _acquire_lock(self) -> None:
         """Acquire a file lock to prevent multiple instances from running."""
         lock_path = self.work_dir / "gitlab-watcher.lock"
@@ -223,8 +249,7 @@ class Watcher:
         if not host:
             return None, None
 
-        url = f"https://{host}"
-        return url, None
+        return f"https://{host}", None
 
     def _get_stuck_issue(self, project: ProjectConfig, issues: list[Issue], open_mrs: list[MergeRequest]) -> Optional[tuple[Issue, bool]]:
         """Identify issues that are either in backlog or stuck 'In progress'."""
@@ -244,7 +269,7 @@ class Watcher:
             try:
                 mr_commits_cache[mr.iid] = self.gitlab.get_merge_request_commits(project.project_id, mr.iid)
             except Exception as e:
-                self.logger.warning("[%s] Could not pre-fetch commits for MR !%s: %s", project_name, mr.iid, e)
+                self._log_warning(project.project_id, "Could not pre-fetch commits for MR !%s: %s", mr.iid, e)
                 mr_commits_cache[mr.iid] = []
 
         for issue in issues:
@@ -252,7 +277,7 @@ class Watcher:
             has_review = self.config.label_review in issue.labels
 
             if not has_in_progress and not has_review:
-                self.logger.info("[%s] Found backlog issue #%s: %s", project_name, issue.iid, sanitize_for_log(issue.title))
+                self._log_info(project.project_id, "Found backlog issue #%s: %s", issue.iid, sanitize_for_log(issue.title))
                 return issue, False
 
             # Retry: "In progress" but no MR exists or MR is empty (likely timed out)
@@ -260,14 +285,14 @@ class Watcher:
                 matching_mrs = [mr for mr in open_mrs if mr.source_branch.startswith(f"{issue.iid}-")] if open_mrs else []
 
                 if not matching_mrs:
-                    self.logger.info("[%s] Retrying stuck issue #%s (In progress but no MR found)", project_name, issue.iid)
+                    self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but no MR found)", issue.iid)
                     return issue, True
                 
                 # Check if MR has commits from cache
                 mr = matching_mrs[0]
                 mr_commits = mr_commits_cache.get(mr.iid, [])
                 if not mr_commits:
-                    self.logger.info("[%s] Retrying stuck issue #%s (In progress but MR has no commits)", project_name, issue.iid)
+                    self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but MR has no commits)", issue.iid)
                     return issue, True
         return None
 
@@ -308,14 +333,14 @@ class Watcher:
 
             if mr and mr.state in ["merged", "closed"]:
                 action = "merged" if mr.state == "merged" else "closed"
-                self.logger.info("[%s] MR !%s was %s", project_name, iid, action)
+                self._log_info(project.project_id, "MR !%s was %s", iid, action)
 
                 mr_data = state.tracked_mrs.get(iid_str, {})
                 branch = mr_data.get("branch") or ""
                 created_by_watcher = mr_data.get("created_by_watcher", False)
 
                 if not created_by_watcher:
-                    self.logger.info("[%s] MR !%s merged/closed but not created by watcher — skipping cleanup", project_name, iid)
+                    self._log_info(project.project_id, "MR !%s merged/closed but not created by watcher — skipping cleanup", iid)
                     self.state.remove_tracked_mr(project.project_id, iid)
                     return True
 
@@ -364,7 +389,7 @@ class Watcher:
                 continue
             
             if is_retry_request and is_skipped:
-                 self.logger.info(f"[{project.name}] Retry request detected for note {note.id} on MR !{mr.iid}. Clearing previous status.")
+                 self._log_info(project.project_id, "Retry request detected for note %s on MR !%s. Clearing previous status.", note.id, mr.iid)
                  self.state.set_processing(project.project_id, False)
                  self._processed_notes.discard(note.id)
                  # Explicitly remove success emojis if a retry is requested
@@ -373,14 +398,14 @@ class Watcher:
             
             is_positive_review = any(re.search(pattern, note.body, re.IGNORECASE) for pattern in POSITIVE_REVIEW_PATTERNS)
             if is_positive_review:
-                self.logger.info(f"[{project.name}] Comment on MR !{mr.iid} indicates positive review — skipping")
+                self._log_info(project.project_id, "Comment on MR !%s indicates positive review — skipping", mr.iid)
                 self._processed_notes.add(note.id)
                 self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
                 self.state.update_last_processed_note(project.project_id, note.id)
                 continue
 
 
-            self.logger.info(f"[{project.name}] New comment on MR !{mr.iid}: {note.body[:100]}")
+            self._log_info(project.project_id, "New comment on MR !%s: %s", mr.iid, note.body[:100])
             self.state.set_processing(project.project_id, True)
             self._processed_notes.add(note.id)
             self.processor.process_comment(project, mr, note.id, note.body, discussion_id=note.discussion_id)
@@ -392,7 +417,7 @@ class Watcher:
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
         if self.state.is_processing(project.project_id):
-            self.logger.debug(f"[{project.name}] Project is currently processing, skipping MR check.")
+            self._log_debug(project.project_id, "Project is currently processing, skipping MR check.")
             return
 
         # Periodically clear processed notes cache (every 24 hours)
@@ -401,7 +426,7 @@ class Watcher:
             self._processed_notes.clear()
             self._last_cache_clear_time = time.time()
 
-        self.logger.debug(f"[{project.name}] Checking for open MRs and comments...")
+        self._log_debug(project.project_id, "Checking for open MRs and comments...")
         state = self.state.load(project.project_id)
 
         if self._handle_merge_cleanup(project, state):

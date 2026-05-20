@@ -316,19 +316,16 @@ class GitLabClient:
                 params={"include_award_emojis": "true"}
             )
             notes = []
-            award_emojis_supported = True
+            # Initialize based on the first note's structure, if available
+            award_emojis_supported_in_response = bool(notes_data and "award_emojis" in notes_data[0])
+            
             for note in notes_data:
                 note_id = note["id"]
-                # Use emojis from the main notes call if available
                 award_emojis = [e["name"] for e in note.get("award_emojis", []) if isinstance(e, dict) and "name" in e]
                 
-                # Fallback if not included in response (e.g. older GitLab versions)
-                if award_emojis_supported and "award_emojis" not in note:
+                # If not supported in main response, always use N+1 fallback
+                if not award_emojis_supported_in_response:
                     award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
-                    # If even the fallback fails or we suspect it's going to be N+1,
-                    # we could disable further attempts in this loop.
-                    # For now, if we see ONE missing key, we assume the whole response lacks it.
-                    award_emojis_supported = False 
                 
                 self.logger.debug(f"Parsed emojis for note {note_id}: {award_emojis}")
 
@@ -447,10 +444,10 @@ class GitLabClient:
             return False
 
     def create_note_award_emoji(
-        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str, discussion_id: str = ""
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str, discussion_id: Optional[str] = None
     ) -> bool:
         """Add an award emoji to a note, trying discussion-scoped API if available."""
-        # Try discussion-scoped endpoint first if discussion_id is provided
+        # Try discussion-scoped endpoint first if discussion_id is provided and not empty
         if discussion_id:
             endpoint = f"/merge_requests/{mr_iid}/discussions/{discussion_id}/notes/{note_id}/award_emoji"
             try:

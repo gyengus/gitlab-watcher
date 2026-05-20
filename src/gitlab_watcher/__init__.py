@@ -2,18 +2,13 @@
 
 import warnings
 
-# Suppress the specific urllib3 dependency warning
-# This warning is harmless and doesn't affect functionality
 try:
-    from requests.packages.urllib3.exceptions import DependencyWarning
-    warnings.filterwarnings("ignore", category=DependencyWarning)
-except (ImportError, AttributeError):
-    try:
-        from urllib3.exceptions import DependencyWarning
-        warnings.filterwarnings("ignore", category=DependencyWarning)
-    except (ImportError, AttributeError):
-        # Fallback if we can't find the specific class or requests.packages is missing
-        warnings.filterwarnings("ignore", message=".*urllib3.*chardet.*charset-normalizer.*")
+    # Suppress the specific urllib3 dependency warning
+    # This warning is harmless and doesn't affect functionality
+    warnings.filterwarnings("ignore", message=".*urllib3.*chardet.*charset-normalizer.*")
+except Exception:
+    # Fallback if the specific warning message changes or is not found
+    pass
 
 try:
     from ._version import __version__

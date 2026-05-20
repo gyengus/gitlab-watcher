@@ -2,6 +2,7 @@
 
 import subprocess
 import time
+import logging
 from pathlib import Path
 
 
@@ -15,6 +16,7 @@ class GitOps:
             repo_path: Path to the git repository
         """
         self.repo_path = repo_path
+        self.logger = logging.getLogger(__name__)
 
     def _run(self, *args: str, check: bool = True, timeout: int = 60) -> subprocess.CompletedProcess[str]:
         """Run a git command in the repository with a timeout."""
@@ -32,7 +34,8 @@ class GitOps:
         try:
             self._run("fetch", remote)
             return True
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Git fetch failed: {e.stderr.strip() if e.stderr else str(e)}")
             return False
 
     def checkout(self, branch: str, create: bool = False) -> tuple[bool, str]:
@@ -69,7 +72,8 @@ class GitOps:
             else:
                 self._run("pull")
             return True
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Git pull failed: {e.stderr.strip() if e.stderr else str(e)}")
             return False
 
     def push(
@@ -80,14 +84,14 @@ class GitOps:
         retries: int = 3,
         retry_delay: int = 10,
     ) -> bool:
-        """Push to remote with optional retry on failure.
+        """Push to remote with exponential back-off on failure.
 
         Args:
             remote: Remote name (default "origin").
             branch: Branch to push; if ``None`` pushes the current branch.
             set_upstream: Whether to add ``-u`` flag (sets upstream).
             retries: Number of retry attempts on failure (default 3).
-            retry_delay: Seconds to wait between retries (default 10).
+            retry_delay: Initial delay in seconds for back-off (default 10).
         """
         args = ["push"]
         if set_upstream and branch:
@@ -103,15 +107,17 @@ class GitOps:
                 self._run(*args)
                 return True
             except subprocess.CalledProcessError as e:
-                # Network‑related failures often surface as non‑zero exit codes.
-                # Log and retry for a limited number of attempts.
                 attempt += 1
                 if attempt > retries:
+                    self.logger.error(f"Git push failed after {retries} retries: {e.stderr.strip() if e.stderr else str(e)}")
                     return False
-                # Exponential back-off
+                
+                # Exponential back-off: 10s, 20s, 40s...
                 backoff_delay = retry_delay * (2 ** (attempt - 1))
+                self.logger.warning(f"Git push failed (attempt {attempt}/{retries}). Retrying in {backoff_delay}s... Error: {e.stderr.strip() if e.stderr else str(e)}")
                 time.sleep(backoff_delay)
                 continue
+        return False
 
     def delete_branch(self, branch: str, force: bool = False) -> bool:
         """Delete a local branch."""
@@ -125,7 +131,8 @@ class GitOps:
 
             self._run(*args, check=False)
             return True
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Git branch delete failed: {e.stderr.strip() if e.stderr else str(e)}")
             return False
 
     def has_unpushed_work(self, default_branch: str) -> bool:

@@ -4,7 +4,7 @@ import sys
 import click
 
 
-from .config import DEFAULT_CONFIG_PATH, ConfigLoader
+from .config import DEFAULT_CONFIG_PATH, load_config
 from .git_ops import GitOps
 from .state import StateManager
 from .discord import DiscordWebhook
@@ -41,7 +41,7 @@ def sync_state(project_name: str) -> None:
     in ``StateManager`` so that the watcher can continue normal operation.
     """
     # Load configuration
-    cfg = ConfigLoader.load()
+    cfg = load_config(DEFAULT_CONFIG_PATH)
     project = cfg.get_project_by_name(project_name)
     if not project:
         click.echo(f"Project '{project_name}' not found in config.", err=True)
