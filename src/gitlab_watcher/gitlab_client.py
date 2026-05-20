@@ -316,7 +316,10 @@ class GitLabClient:
                 params={"include_award_emojis": "true"}
             )
             notes = []
-            # Initialize based on the first note's structure, if available
+            # Initialize based on the first note's structure, if available.
+            # The 'include_award_emojis' parameter is used, so this fallback should
+            # only trigger if the API doesn't consistently return them or if the
+            # response structure is unexpected.
             award_emojis_supported_in_response = bool(notes_data and "award_emojis" in notes_data[0])
             
             for note in notes_data:

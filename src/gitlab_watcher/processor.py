@@ -462,7 +462,7 @@ class Processor:
             self.discord.notify_error(
                 "AI Tool",
                 f"AI tool failed with default configuration and no failover attempted.",
-                details=output
+                details=self._get_error_snippet(output)
             )
             return False, output
 
@@ -483,7 +483,7 @@ class Processor:
         self.discord.notify_error(
             "AI Tool",
             f"Both default and failover models failed",
-            details=f"Default model failed.\nFailover model '{self.ai_tool_failover_model}' also failed.\n\nError output:\n{output}"
+            details=f"Default model failed.\nFailover model '{self.ai_tool_failover_model}' also failed.\n\nError output:\n{self._get_error_snippet(output)}"
         )
 
         return False, output

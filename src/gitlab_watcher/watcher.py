@@ -367,8 +367,10 @@ class Watcher:
             if note.system or note.author_username == self.gitlab_username:
                 continue
 
-            # Skip already handled via persistent state
-            if note.id <= last_processed_id:
+            is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
+
+            # Skip already handled via persistent state, unless it's an explicit retry request
+            if note.id <= last_processed_id and not is_retry_request:
                 continue
 
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
@@ -380,7 +382,6 @@ class Watcher:
                 has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
             
             is_skipped = has_emojis or note.id in self._processed_notes
-            is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
             
             if is_skipped and not is_retry_request:
                 # If it's effectively skipped but we haven't updated the persistent state, do it now
