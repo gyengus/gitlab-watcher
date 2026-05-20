@@ -22,7 +22,7 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: 'true'
-  SAST_EXCLUDED_PATHS: "spec, test, tmp, target, logs, .git, .mvn, .settings, .vscode"
+  SAST_EXCLUDED_PATHS: "spec, tmp, target, logs, .git, .mvn, .settings, .vscode"
 
 .test_template:
   before_script:

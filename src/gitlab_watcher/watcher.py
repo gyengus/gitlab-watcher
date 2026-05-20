@@ -218,7 +218,7 @@ class Watcher:
         except Exception as e:
             self.logger.warning(f"Could not acquire instance lock: {e}")
 
-    def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, str | None]:
+    def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, None]:
         """Extract GitLab URL from git remote.
         Note: Token extraction is disabled for security reasons.
 
