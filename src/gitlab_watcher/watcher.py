@@ -229,9 +229,17 @@ class Watcher:
         """Identify issues that are either in backlog or stuck 'In progress'."""
         project_name = project.name
 
-        # Pre-fetch commits for all open MRs to avoid N+1 queries
+        # Identify which MRs are actually relevant to the issues we're looking at
+        # (branch name matches "{issue_iid}-*")
+        issue_iids = {issue.iid for issue in issues}
+        relevant_mrs = [
+            mr for mr in open_mrs 
+            if any(mr.source_branch.startswith(f"{iid}-") for iid in issue_iids)
+        ]
+
+        # Pre-fetch commits for only relevant open MRs to avoid N+1 queries
         mr_commits_cache = {}
-        for mr in open_mrs:
+        for mr in relevant_mrs:
             try:
                 mr_commits_cache[mr.iid] = self.gitlab.get_merge_request_commits(project.project_id, mr.iid)
             except Exception as e:
@@ -359,8 +367,7 @@ class Watcher:
                  self.state.set_processing(project.project_id, False)
                  self._processed_notes.discard(note.id)
                  # Explicitly remove success emojis if a retry is requested
-                 for emoji in SUCCESS_EMOJIS:
-                     self.gitlab.delete_note_award_emoji(project.project_id, mr.iid, note.id, emoji)
+                 self.gitlab.delete_note_award_emojis(project.project_id, mr.iid, note.id, SUCCESS_EMOJIS)
                  is_skipped = False
             
             is_positive_review = any(re.search(pattern, note.body, re.IGNORECASE) for pattern in POSITIVE_REVIEW_PATTERNS)

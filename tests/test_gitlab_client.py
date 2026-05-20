@@ -400,3 +400,35 @@ class TestGitLabClientConfiguration:
         assert "timeout" in call_kwargs
         assert call_kwargs["timeout"] == 45.0
 
+    @patch("requests.Session.request")
+    def test_delete_note_award_emojis(self, mock_request: Mock, client: GitLabClient) -> None:
+        """Test deleting multiple award emojis."""
+        # 1st call: GET existing emojis
+        # 2nd call: DELETE first emoji
+        # 3rd call: DELETE second emoji
+        mock_request.side_effect = [
+            Mock(
+                status_code=200,
+                json=lambda: [
+                    {"id": 101, "name": "white_check_mark"},
+                    {"id": 102, "name": "eyes"},
+                    {"id": 103, "name": "heavy_check_mark"},
+                ],
+            ),
+            Mock(status_code=204),
+            Mock(status_code=204),
+        ]
+
+        result = client.delete_note_award_emojis(
+            42, 1, 123, ["white_check_mark", "heavy_check_mark", "not_present"]
+        )
+
+        assert result is True
+        # Should have made 3 calls: 1 GET and 2 DELETEs
+        assert mock_request.call_count == 3
+        assert mock_request.call_args_list[0][0][0] == "GET"
+        assert mock_request.call_args_list[1][0][0] == "DELETE"
+        assert "/101" in mock_request.call_args_list[1][0][1]
+        assert mock_request.call_args_list[2][0][0] == "DELETE"
+        assert "/103" in mock_request.call_args_list[2][0][1]
+

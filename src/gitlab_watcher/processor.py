@@ -18,6 +18,7 @@ from .constants import (
     DEFAULT_AI_TOOL_TIMEOUT,
     FORBIDDEN_PATTERNS,
     MAX_BRANCH_LENGTH,
+    MAX_AI_LOG_SIZE,
     MAX_DESCRIPTION_LENGTH,
     MAX_SLUG_LENGTH,
     MAX_TITLE_LENGTH,
@@ -334,13 +335,13 @@ class Processor:
 
         if timed_out:
             error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
-            error_log_path.write_text(full_output, encoding="utf-8")
+            self._write_ai_log(error_log_path, full_output)
             self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
             return (False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
 
         if silence_timed_out:
             error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
-            error_log_path.write_text(full_output, encoding="utf-8")
+            self._write_ai_log(error_log_path, full_output)
             self.logger.error(f"AI tool silence timeout: no output for {SILENCE_TIMEOUT}s")
             return (False, f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
 
@@ -352,17 +353,42 @@ class Processor:
                     error_lines = [line.strip() for line in sanitized_output.splitlines() if re.search(pattern, line, re.IGNORECASE)]
                     error_summary = error_lines[0] if error_lines else pattern
                     error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
-                    error_log_path.write_text(full_output, encoding="utf-8")
+                    self._write_ai_log(error_log_path, full_output)
                     self.logger.error(f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'. Summary: {error_summary}. Full log: {error_log_path}")
                     return (False, f"AI tool execution failed (error pattern detected: '{pattern}')\nError summary: {error_summary}\nFull log: {error_log_path}\nExit code: {returncode}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
         
         if not success:
             error_log_path = ai_log_dir / f"ai_failure_{time.time()}.log"
-            error_log_path.write_text(full_output, encoding="utf-8")
+            self._write_ai_log(error_log_path, full_output)
             self.logger.error(f"AI tool failed (rc {returncode}). Full log: {error_log_path}")
             return (False, f"AI tool execution failed (Exit code: {returncode})\nFull log: {error_log_path}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
         
         return True, full_output
+
+    def _write_ai_log(self, path: Path, output: str) -> None:
+        """Write AI tool output to a log file, with size limiting.
+
+        Args:
+            path: Path to the log file
+            output: Full output string
+        """
+        try:
+            # Check size in bytes (approximate for UTF-8)
+            if len(output.encode("utf-8", errors="replace")) > MAX_AI_LOG_SIZE:
+                # Truncate: keep first half and last half of the limit
+                half_limit = MAX_AI_LOG_SIZE // 2
+                # Note: slicing characters might not be exactly half-limit in bytes if multi-byte,
+                # but it's a safe approximation for text logs.
+                truncated = (
+                    output[:half_limit] 
+                    + "\n\n... (output truncated due to size limit) ...\n\n" 
+                    + output[-half_limit:]
+                )
+                path.write_text(truncated, encoding="utf-8", errors="replace")
+            else:
+                path.write_text(output, encoding="utf-8", errors="replace")
+        except Exception as e:
+            self.logger.error(f"Failed to write AI log to {path}: {e}")
 
     def _run_ai_tool(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> tuple[bool, str]:
         """Run AI tool CLI with a prompt based on configured mode."""

@@ -482,34 +482,47 @@ class GitLabClient:
     def delete_note_award_emoji(
         self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
     ) -> bool:
-        """Remove an award emoji from a note.
+        """Remove a single award emoji from a note."""
+        return self.delete_note_award_emojis(project_id, mr_iid, note_id, [emoji_name])
+
+    def delete_note_award_emojis(
+        self, project_id: int, mr_iid: int, note_id: int, emoji_names: list[str]
+    ) -> bool:
+        """Remove multiple award emojis from a note in a more efficient way.
         
-        Note: This requires an initial GET call to find the award_id before the DELETE call,
-        as GitLab's API requires the specific award ID for deletion. This is a known
-        API limitation that may lead to N+1 query patterns if used extensively.
-        Consider batching if multiple emojis need to be removed from the same note.
+        This fetches all emojis for the note once, then performs a DELETE for each
+        matching emoji name. This reduces the number of GET requests.
         """
-        # Note: Award emoji deletion usually requires the award_id, not just the name.
-        # This implementation requires fetching existing emojis first to find the award_id.
+        if not emoji_names:
+            return True
+
         endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
         try:
+            # Fetch all emojis for this note once
             response = self._request("GET", self._api_url(project_id, endpoint))
             emojis_data = response.json()
-            award_id = None
-            for e in emojis_data:
-                if isinstance(e, dict) and e.get("name") == emoji_name:
-                    award_id = e.get("id")
-                    break
             
-            if award_id is None:
-                self.logger.debug(f"Emoji {emoji_name} not found on note {note_id}")
-                return True
-                
-            delete_endpoint = f"{endpoint}/{award_id}"
-            self._request("DELETE", self._api_url(project_id, delete_endpoint))
-            return True
+            # Create a mapping of name -> list of award_ids (one emoji name can be added multiple times by different users)
+            # However, our bot likely only cares about its own emojis or just any emoji with that name it has permission to delete.
+            # In GitLab, you can only delete emojis you created.
+            
+            success = True
+            names_to_delete = set(emoji_names)
+            
+            for e in emojis_data:
+                if isinstance(e, dict) and e.get("name") in names_to_delete:
+                    award_id = e.get("id")
+                    if award_id:
+                        try:
+                            delete_endpoint = f"{endpoint}/{award_id}"
+                            self._request("DELETE", self._api_url(project_id, delete_endpoint))
+                        except Exception as delete_err:
+                            self.logger.debug(f"Failed to delete award {award_id} ({e.get('name')}): {delete_err}")
+                            success = False
+            
+            return success
         except Exception as e:
-            self.logger.warning(f"Failed to remove emoji {emoji_name} from note {note_id}: {e}")
+            self.logger.warning(f"Failed to remove emojis {emoji_names} from note {note_id}: {e}")
             return False
 
 

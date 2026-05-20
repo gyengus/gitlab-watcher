@@ -9,6 +9,7 @@ SILENCE_TIMEOUT = 1800  # Kill process if no output for 30 minutes
 MAX_DOC_CONTENT_LENGTH = 10000  # Maximum combined length of project documentation files
 DEFAULT_AI_TOOL_TIMEOUT = 3600 # 1 hour
 MAX_TOTAL_PROMPT_LENGTH = 60000 # Overall safety limit for combined AI prompts
+MAX_AI_LOG_SIZE = 10 * 1024 * 1024 # 10 MB limit for AI tool error log files
 
 # GitLab client defaults
 DEFAULT_GITLAB_TIMEOUT = 30.0
@@ -80,6 +81,8 @@ __all__ = [
     "SILENCE_TIMEOUT",
     "MAX_DOC_CONTENT_LENGTH",
     "DEFAULT_AI_TOOL_TIMEOUT",
+    "MAX_TOTAL_PROMPT_LENGTH",
+    "MAX_AI_LOG_SIZE",
     "AI_TOOL_ERROR_PATTERNS",
     "NO_CHANGES_ERROR_HINTS",
     "FORBIDDEN_PATTERNS",

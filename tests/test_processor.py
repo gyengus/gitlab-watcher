@@ -1369,6 +1369,41 @@ class TestProcessorCommentNoChanges:
         p.discord.notify_changes_applied.assert_called_once()
         p.discord.notify_no_changes_needed.assert_not_called()
 
+    def test_write_ai_log_truncation(self, processor: Processor, tmp_path: Path) -> None:
+        """Test that AI logs are truncated when they exceed MAX_AI_LOG_SIZE."""
+        from gitlab_watcher.constants import MAX_AI_LOG_SIZE
+        
+        log_path = tmp_path / "test_truncation.log"
+        # Create content larger than MAX_AI_LOG_SIZE
+        # Use a mix of characters to ensure it's not just a single repeated char
+        half_limit = MAX_AI_LOG_SIZE // 2
+        large_content = "A" * (half_limit + 100) + "MIDDLE" + "B" * (half_limit + 100)
+        
+        processor._write_ai_log(log_path, large_content)
+        
+        # Verify file exists and is smaller than the original content
+        assert log_path.exists()
+        logged_content = log_path.read_text(encoding="utf-8")
+        assert len(logged_content) < len(large_content)
+        assert "... (output truncated due to size limit) ..." in logged_content
+        # Should contain parts from beginning and end
+        assert logged_content.startswith("A" * 100)
+        assert logged_content.endswith("B" * 100)
+        # Should NOT contain the MIDDLE part because it's in the truncated area
+        assert "MIDDLE" not in logged_content
+
+    def test_write_ai_log_no_truncation(self, processor: Processor, tmp_path: Path) -> None:
+        """Test that AI logs are not truncated when they are within the size limit."""
+        log_path = tmp_path / "test_no_truncation.log"
+        normal_content = "Short log content"
+        
+        processor._write_ai_log(log_path, normal_content)
+        
+        assert log_path.exists()
+        logged_content = log_path.read_text(encoding="utf-8")
+        assert logged_content == normal_content
+
+
     @patch.object(Processor, "_run_ai_tool")
     def test_no_changes_with_error_hint_marks_x_and_notifies_error(
         self,
