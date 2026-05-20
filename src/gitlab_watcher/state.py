@@ -129,18 +129,27 @@ class StateManager:
             self._save_timer = None
 
     def _save_sync(self, project_id: int) -> None:
-        """Synchronous save to file."""
+        """Synchronous save to file with atomic replacement."""
         with self._lock:
             if project_id not in self._states:
                 return
             state_file = self._state_file(project_id)
+            temp_file = state_file.with_suffix(".tmp")
             try:
                 # Convert set to list for JSON serialization
                 state_dict = asdict(self._states[project_id])
                 state_dict['branches_with_failed_mr'] = list(state_dict['branches_with_failed_mr'])
-                state_file.write_text(json.dumps(state_dict, indent=2))
+                
+                # Write to temp file and rename atomically
+                temp_file.write_text(json.dumps(state_dict, indent=2))
+                temp_file.replace(state_file)
             except Exception as e:
                 logger.error(f"Failed to save state for project {project_id}: {e}")
+                if temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except Exception:
+                        pass
 
     def load(self, project_id: int) -> ProjectState:
         """Load state for a project, returning cached state if available.

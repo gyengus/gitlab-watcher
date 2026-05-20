@@ -77,9 +77,16 @@ class Watcher:
         try:
             # Ensure the directory exists
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            # Check if file is writable (or can be created)
-            with open(log_path, "a"):
-                pass
+            
+            # Security: Use os.open to create file with restricted permissions (0600)
+            # if it doesn't exist, and open it for appending.
+            fd = os.open(
+                log_path, 
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND, 
+                0o600
+            )
+            os.close(fd)
+            
             handler_path = log_path
         except (PermissionError, OSError) as e:
             # Fallback to work directory in /tmp
@@ -87,8 +94,14 @@ class Watcher:
             fallback_dir.mkdir(parents=True, exist_ok=True)
             fallback_path = fallback_dir / "watcher.log"
             try:
-                with open(fallback_path, "a"):
-                    pass
+                # Same restricted permissions for fallback
+                fd = os.open(
+                    fallback_path, 
+                    os.O_WRONLY | os.O_CREAT | os.O_APPEND, 
+                    0o600
+                )
+                os.close(fd)
+                
                 handler_path = fallback_path
                 self.logger.warning(
                     f"Could not use log file {log_path} ({e}). "

@@ -156,7 +156,11 @@ def extract_project_id(project_file_path: Path) -> Optional[int]:
 
     match = re.search(r"(?i)(?:\*{1,3}|_{1,3}|`{1,2})?project[_\s]*id:?[*_`\s]*(\d+)(?:\*{1,3}|_{1,3}|`{1,2})?", content)
     if match:
-        return int(match.group(1))
+        project_id = int(match.group(1))
+        # Range check for project ID
+        if project_id <= 0:
+            return None
+        return project_id
 
     return None
 
