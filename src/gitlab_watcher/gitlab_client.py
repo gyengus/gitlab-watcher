@@ -325,6 +325,9 @@ class GitLabClient:
                 if "award_emojis" in note:
                     award_emojis = [e["name"] for e in note["award_emojis"] if isinstance(e, dict) and "name" in e]
                 else:
+                    # NOTE: This fallback can lead to N+1 queries if the GitLab API
+                    # consistently fails to include award_emojis in the main response.
+                    # Monitor performance in production if this path is frequently hit.
                     award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
                 
                 self.logger.debug(f"Parsed emojis for note {note_id}: {award_emojis}")

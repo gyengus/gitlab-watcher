@@ -349,6 +349,9 @@ class Processor:
 
         success = returncode == 0
         if success and full_output:
+            # TODO: This regex for filtering AI tool's internal log lines is brittle.
+            # Consider if the AI tool can be configured to suppress its own logs,
+            # or if a more robust/configurable filtering mechanism is needed.
             sanitized_output = "\n".join([line for line in full_output.splitlines() if not re.match(r"^(INFO|DEBUG|WARN|ERROR)\s+\d{4}-\d{2}-\d{2}T", line.strip())])
             for pattern in AI_TOOL_ERROR_PATTERNS:
                 if re.search(pattern, sanitized_output, re.IGNORECASE):
@@ -699,6 +702,7 @@ class Processor:
                     project.name,
                     f"MR creation failed for issue #{issue.iid}",
                 )
+                return False
             return True
         except Exception as e:
             self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")

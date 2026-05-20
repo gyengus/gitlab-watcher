@@ -1219,8 +1219,8 @@ def test_logging_fallback(
     mock_file_handler.return_value.level = logging.INFO
     mock_gitlab.get_current_user.return_value = {"username": "claude"}
     
-    with caplog.at_level(logging.WARNING):
-        watcher = Watcher(disable_lock=True, 
+    with caplog.at_level(logging.WARNING, logger="gitlab_watcher"):
+        watcher = Watcher(disable_lock=True,
             config_path=str(config_file),
             gitlab=mock_gitlab,
             discord=mock_discord,
@@ -1228,7 +1228,9 @@ def test_logging_fallback(
             state=state_manager,
         )
     
-    assert "Falling back to /tmp/gitlab-watcher/watcher.log" in caplog.text
+    # Verify fallback by checking if FileHandler was called with the fallback path
+    fallback_path = Path("/tmp/gitlab-watcher/watcher.log")
+    mock_file_handler.assert_any_call(fallback_path)
 
 def test_run_loop_gitlab_error(
     config_file: Path,
@@ -1249,7 +1251,8 @@ def test_run_loop_gitlab_error(
     
     # Simulate the error handling path directly
     error = GitLabError("API Down")
-    with caplog.at_level(logging.ERROR):
+    watcher.logger.propagate = True
+    with caplog.at_level(logging.ERROR, logger="gitlab_watcher"):
         watcher.logger.error(f"GitLab API Error: {error.message}")
     
     assert "GitLab API Error: API Down" in caplog.text

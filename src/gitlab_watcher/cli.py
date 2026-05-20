@@ -4,6 +4,8 @@ import sys
 import click
 
 
+from pathlib import Path
+
 from .config import DEFAULT_CONFIG_PATH, load_config
 from .git_ops import GitOps
 from .state import StateManager
@@ -54,7 +56,9 @@ def sync_state(project_name: str, config: str) -> None:
         sys.exit(1)
 
     git = GitOps(project.path)
-    state = StateManager(project.project_id)
+    state_work_dir = Path("/tmp/gitlab-watcher")
+    state_work_dir.mkdir(parents=True, exist_ok=True)
+    state = StateManager(state_work_dir)
     discord = DiscordWebhook(project.discord_webhook_url or "")
 
     # Determine current branch and push if there is unpushed work

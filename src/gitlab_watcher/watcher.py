@@ -66,7 +66,7 @@ class Watcher:
         
         self.logger = logging.getLogger("gitlab_watcher")
         self.logger.setLevel(log_level)
-        self.logger.propagate = True # Allow root logger to catch if configured
+        self.logger.propagate = False # Prevent messages from propagating to root logger
 
         # Setup file logging with fallback
         self._log_handlers: list[logging.Handler] = []
