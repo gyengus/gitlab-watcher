@@ -462,7 +462,7 @@ class TestProcessorAIToolModes:
         args = mock_popen.call_args[0][0]
         assert args[0] == "my-opencode"
         assert args[1] == "--p"
-        assert args[2] == "'Fix the bug'"
+        assert args[2] == "Fix the bug"
 
 
 class TestProcessorProcessIssue:

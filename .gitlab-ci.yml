@@ -22,6 +22,7 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: 'true'
+  # Security first: include test/tests directories in SAST scans
   SAST_EXCLUDED_PATHS: "spec, tmp, target, logs, .git, .mvn, .settings, .vscode"
 
 .test_template:

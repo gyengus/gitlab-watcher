@@ -201,14 +201,11 @@ class Processor:
             cmd_parts = shlex.split(self.ai_tool_custom_command)
             model_val = model_override or ""
             
-            # Use shlex.quote for substituted values to prevent command injection
-            # if the tool interprets any of its arguments as a shell command.
-            q_prompt = shlex.quote(prompt)
-            q_cwd = shlex.quote(str(repo_path))
-            q_model = shlex.quote(model_val)
-            
+            # Substituted values for custom command.
+            # No need to use shlex.quote here because subprocess.Popen (shell=False)
+            # passes list arguments literally to the application.
             cmd = [
-                part.replace("{prompt}", q_prompt).replace("{cwd}", q_cwd).replace("{model}", q_model)
+                part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
                 for part in cmd_parts
             ]
         else:
