@@ -78,7 +78,7 @@ class GitOps:
         """Pull from remote."""
         try:
             if branch:
-                self._run("pull", remote, branch, "--", capture_output=False)
+                self._run("pull", remote, "--", branch, capture_output=False)
             else:
                 self._run("pull", capture_output=False)
             return True

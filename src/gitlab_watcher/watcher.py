@@ -146,6 +146,10 @@ class Watcher:
                 "Please provide 'GITLAB_TOKEN' in your configuration file "
                 "or as an environment variable."
             )
+        
+        # Validate GitLab Token to prevent header injection
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", gitlab_token):
+            raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
 
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
