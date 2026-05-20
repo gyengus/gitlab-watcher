@@ -18,12 +18,22 @@ class GitOps:
         self.repo_path = repo_path
         self.logger = logging.getLogger(__name__)
 
-    def _run(self, *args: str, check: bool = True, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self, 
+        *args: str, 
+        check: bool = True, 
+        timeout: int = 60,
+        capture_output: bool = True
+    ) -> subprocess.CompletedProcess[str]:
         """Run a git command in the repository with a timeout."""
+        stdout = subprocess.PIPE if capture_output else subprocess.DEVNULL
+        stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL
+        
         return subprocess.run(
             ["git"] + list(args),
             cwd=self.repo_path,
-            capture_output=True,
+            stdout=stdout,
+            stderr=stderr,
             text=True,
             check=check,
             timeout=timeout,
@@ -32,10 +42,10 @@ class GitOps:
     def fetch(self, remote: str = "origin") -> bool:
         """Fetch from remote."""
         try:
-            self._run("fetch", remote)
+            self._run("fetch", remote, capture_output=False)
             return True
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Git fetch failed: {e.stderr.strip() if e.stderr else str(e)}")
+            self.logger.error(f"Git fetch failed: {str(e)}")
             return False
 
     def checkout(self, branch: str, create: bool = False) -> tuple[bool, str]:
@@ -52,13 +62,13 @@ class GitOps:
             if create:
                 # Try checking out normally first (if it exists)
                 try:
-                    self._run("checkout", branch)
+                    self._run("checkout", "--", branch, capture_output=False)
                     return True, ""
                 except subprocess.CalledProcessError:
                     # If normal checkout fails, try creating it
-                    self._run("checkout", "-b", branch)
+                    self._run("checkout", "-b", branch, "--", capture_output=False)
             else:
-                self._run("checkout", branch)
+                self._run("checkout", "--", branch, capture_output=False)
             return True, ""
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.strip() if e.stderr else str(e)
@@ -68,12 +78,12 @@ class GitOps:
         """Pull from remote."""
         try:
             if branch:
-                self._run("pull", remote, branch)
+                self._run("pull", remote, branch, "--", capture_output=False)
             else:
-                self._run("pull")
+                self._run("pull", capture_output=False)
             return True
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Git pull failed: {e.stderr.strip() if e.stderr else str(e)}")
+            self.logger.error(f"Git pull failed: {str(e)}")
             return False
 
     def push(
@@ -100,21 +110,23 @@ class GitOps:
             args.extend([remote, branch])
         else:
             args.append(remote)
+        
+        args.append("--")
 
         attempt = 0
         while attempt <= retries:
             try:
-                self._run(*args)
+                self._run(*args, capture_output=False)
                 return True
             except subprocess.CalledProcessError as e:
                 attempt += 1
                 if attempt > retries:
-                    self.logger.error(f"Git push failed after {retries} retries: {e.stderr.strip() if e.stderr else str(e)}")
+                    self.logger.error(f"Git push failed after {retries} retries: {str(e)}")
                     return False
                 
                 # Exponential back-off: 10s, 20s, 40s...
                 backoff_delay = retry_delay * (2 ** (attempt - 1))
-                self.logger.warning(f"Git push failed (attempt {attempt}/{retries}). Retrying in {backoff_delay}s... Error: {e.stderr.strip() if e.stderr else str(e)}")
+                self.logger.warning(f"Git push failed (attempt {attempt}/{retries}). Retrying in {backoff_delay}s... Error: {str(e)}")
                 time.sleep(backoff_delay)
                 continue
         return False
@@ -127,12 +139,12 @@ class GitOps:
                 args.append("-D")
             else:
                 args.append("-d")
-            args.append(branch)
+            args.extend(["--", branch])
 
-            self._run(*args, check=False)
+            self._run(*args, check=False, capture_output=False)
             return True
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Git branch delete failed: {e.stderr.strip() if e.stderr else str(e)}")
+            self.logger.error(f"Git branch delete failed: {str(e)}")
             return False
 
     def has_unpushed_work(self, default_branch: str) -> bool:
@@ -145,7 +157,8 @@ class GitOps:
             True if there are commits ahead of the default branch, False otherwise
         """
         try:
-            result = self._run("log", f"{default_branch}..HEAD", "--oneline", check=False)
+            # Limit log to avoid large memory buffering
+            result = self._run("log", f"{default_branch}..HEAD", "--oneline", "-n", "100", "--", check=False)
             return bool(result.stdout.strip())
         except Exception:
             return False
@@ -160,12 +173,10 @@ class GitOps:
             # Check if there's an upstream configured first
             rev_parse = self._run("rev-parse", "--abbrev-ref", "@{u}", check=False)
             if rev_parse.returncode != 0:
-                # No upstream configured, consider all commits as "unpushed" if any exist
-                # Or just return False if we can't push anyway?
-                # For sync-state, we probably want to know if there's anything to push.
                 return False
 
-            result = self._run("log", "@{u}..HEAD", "--oneline", check=False)
+            # Limit log to avoid large memory buffering
+            result = self._run("log", "@{u}..HEAD", "--oneline", "-n", "100", "--", check=False)
             return bool(result.stdout.strip())
         except Exception:
             return False
@@ -173,7 +184,7 @@ class GitOps:
     def branch_exists(self, branch: str) -> bool:
         """Check if a branch exists locally."""
         try:
-            result = self._run("rev-parse", "--verify", branch, check=False)
+            result = self._run("rev-parse", "--verify", "--", branch, check=False)
             return result.returncode == 0
         except Exception:
             return False
@@ -201,7 +212,7 @@ class GitOps:
         """
         try:
             # Check for unstaged changes
-            result = self._run("status", "--porcelain", check=False)
+            result = self._run("status", "--porcelain", "--", check=False)
             return bool(result.stdout.strip())
         except Exception:
             return False
@@ -222,7 +233,7 @@ class GitOps:
             True if successful, False otherwise
         """
         try:
-            self._run("add", path)
+            self._run("add", "--", path, capture_output=False)
             return True
         except subprocess.CalledProcessError:
             return False
@@ -241,7 +252,7 @@ class GitOps:
             True if successful, False otherwise
         """
         try:
-            self._run("commit", "-m", message)
+            self._run("commit", "-m", message, "--", capture_output=False)
             return True
         except subprocess.CalledProcessError:
             return False

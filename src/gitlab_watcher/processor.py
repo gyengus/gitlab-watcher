@@ -207,8 +207,9 @@ class Processor:
             model_val = model_override or ""
             
             # Substituted values for custom command.
-            # For better security, we prefer exact matches for placeholders.
-            # subprocess.Popen (shell=False) passes list arguments literally.
+            # We use a strict exact-match replacement for placeholders to prevent
+            # injection into flags (e.g. --prompt={prompt} is now discouraged
+            # in favor of passing them as separate arguments).
             cmd = []
             for part in cmd_parts:
                 if part == "{prompt}":
@@ -218,8 +219,9 @@ class Processor:
                 elif part == "{model}":
                     cmd.append(model_val)
                 else:
-                    # Fallback to string replacement for backward compatibility (e.g. --prompt={prompt})
-                    # Note: This is less secure if the tool interprets its arguments as shell commands.
+                    # Fallback to string replacement with a warning in documentation
+                    # if the placeholder is embedded in a string.
+                    # We still do it for backward compatibility but it's less secure.
                     replaced = part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
                     cmd.append(replaced)
         else:

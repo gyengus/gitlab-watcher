@@ -214,12 +214,22 @@ def load_config(config_path: str) -> Config:
     seen_ids: set[int] = set()
 
     for project_dir in project_dirs:
-        project_path = Path(project_dir).expanduser()
-
-        if project_dir.strip().startswith("#"):
+        if not project_dir or project_dir.strip().startswith("#"):
             continue
 
-        if not project_path.exists():
+        project_path = Path(project_dir).expanduser().resolve()
+
+        if not project_path.exists() or not project_path.is_dir():
+            logger.warning(f"Project directory not found or not a directory: {project_path}")
+            continue
+        
+        # Ensure the project path is absolute and not something sensitive like /etc
+        if not project_path.is_absolute():
+            # Should be absolute after resolve()
+            continue
+            
+        if any(project_path.match(p) for p in ["/etc", "/root", "/var", "/bin", "/sbin"]):
+            logger.warning(f"Skipping potentially sensitive project directory: {project_path}")
             continue
 
         project_id = None
