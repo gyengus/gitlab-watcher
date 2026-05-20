@@ -33,7 +33,13 @@ def main(config: str, verbose: bool) -> None:
 
 @cli.command(name="sync-state")
 @click.argument("project_name")
-def sync_state(project_name: str) -> None:
+@click.option(
+    "--config",
+    "-c",
+    default=DEFAULT_CONFIG_PATH,
+    help="Path to config file",
+)
+def sync_state(project_name: str, config: str) -> None:
     """Synchronize local git state with remote for *PROJECT_NAME*.
 
     This command checks whether the current branch of the specified project
@@ -41,7 +47,7 @@ def sync_state(project_name: str) -> None:
     in ``StateManager`` so that the watcher can continue normal operation.
     """
     # Load configuration
-    cfg = load_config(DEFAULT_CONFIG_PATH)
+    cfg = load_config(config)
     project = cfg.get_project_by_name(project_name)
     if not project:
         click.echo(f"Project '{project_name}' not found in config.", err=True)
