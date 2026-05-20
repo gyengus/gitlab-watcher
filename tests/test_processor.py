@@ -407,6 +407,7 @@ class TestProcessorAIToolModes:
         assert args[1] == "launch"
         assert args[2] == "claude"
 
+    @patch("shutil.which", return_value="/usr/bin/my-opencode")
     @patch("subprocess.Popen")
     @patch("os.killpg")
     @patch("time.sleep")
@@ -415,6 +416,7 @@ class TestProcessorAIToolModes:
         mock_sleep: Mock,
         mock_killpg: Mock,
         mock_popen: Mock,
+        mock_which: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
         state_manager: StateManager,

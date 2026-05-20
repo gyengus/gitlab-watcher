@@ -6,6 +6,7 @@ import time
 import os
 import sys
 import fcntl
+import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -131,6 +132,14 @@ class Watcher:
 
         if not gitlab_url:
             raise ValueError("GitLab URL must be set in config or extractable from git remote")
+        
+        # Validate GitLab URL
+        parsed_url = urllib.parse.urlparse(gitlab_url)
+        if parsed_url.scheme not in ("https", "http"):
+            raise ValueError(f"Invalid GitLab URL scheme: {parsed_url.scheme}. Only https and http are supported.")
+        if not parsed_url.netloc:
+            raise ValueError(f"Invalid GitLab URL: {gitlab_url}. Missing hostname.")
+            
         if not gitlab_token:
             raise ValueError(
                 "GitLab token not found. "

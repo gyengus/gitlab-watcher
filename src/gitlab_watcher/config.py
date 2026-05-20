@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shlex
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -166,6 +167,13 @@ def load_config(config_path: str) -> Config:
 
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file}")
+
+    # Security check: Ensure config file is not world-writable
+    mode = config_file.stat().st_mode
+    if mode & stat.S_IWOTH:
+        logger.warning(f"Config file {config_file} is world-writable! This is a security risk.")
+    if mode & stat.S_IWGRP:
+        logger.warning(f"Config file {config_file} is group-writable. Ensure this is intentional.")
 
     raw_config = parse_bash_config(config_file)
 

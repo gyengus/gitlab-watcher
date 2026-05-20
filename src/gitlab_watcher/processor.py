@@ -9,6 +9,7 @@ import signal
 import subprocess
 import threading
 import time
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -164,6 +165,26 @@ class Processor:
 
         return branch or "auto-branch"
 
+    def _validate_ai_binary(self, binary: str) -> str:
+        """Validate that the AI tool binary exists and is allowed."""
+        # Allow specific known binaries
+        ALLOWED_BINARIES = {"ollama", "claude", "opencode", "opencode-run"}
+        
+        # Extract just the filename if it's a path
+        binary_path = Path(binary)
+        binary_name = binary_path.name
+        
+        if binary_name in ALLOWED_BINARIES:
+            return binary
+            
+        # If not in allowed list, check if it exists in PATH
+        resolved = shutil.which(binary)
+        if not resolved:
+            raise ValueError(f"AI tool binary not found or not executable: {binary}")
+            
+        # Optional: Add more strict checks here if needed
+        return binary
+
     def _get_instructions(self, continue_instruction: str, is_mr_comment: bool = False) -> str:
         """Generate mandatory instructions for the AI tool."""
         instructions = [
@@ -204,6 +225,12 @@ class Processor:
             else:
                 cmd_parts = shlex.split(self.ai_tool_custom_command)
                 
+            if not cmd_parts:
+                raise ValueError(f"AI_TOOL_CUSTOM_COMMAND is empty")
+                
+            # Validate binary
+            cmd_parts[0] = self._validate_ai_binary(cmd_parts[0])
+            
             model_val = model_override or ""
             
             # Substituted values for custom command.
@@ -221,7 +248,8 @@ class Processor:
                 else:
                     # Fallback to string replacement with a warning in documentation
                     # if the placeholder is embedded in a string.
-                    # We still do it for backward compatibility but it's less secure.
+                    # Note: We use .replace() which is generally safe within a list-based 
+                    # subprocess call (shell=False), but exact match is preferred.
                     replaced = part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
                     cmd.append(replaced)
         else:
