@@ -227,6 +227,10 @@ def load_config(config_path: str) -> Config:
 
         project_path = Path(project_dir).expanduser().resolve()
 
+        if project_path.is_symlink():
+            logger.warning(f"Skipping symbolic link project directory: {project_path}")
+            continue
+
         if not project_path.exists() or not project_path.is_dir():
             logger.warning(f"Project directory not found or not a directory: {project_path}")
             continue

@@ -3,6 +3,7 @@
 import subprocess
 import time
 import logging
+import re
 from pathlib import Path
 
 
@@ -18,6 +19,23 @@ class GitOps:
         self.repo_path = repo_path
         self.logger = logging.getLogger(__name__)
 
+    def _validate_arg(self, arg: str, is_message: bool = False) -> str:
+        """Validate a git argument to prevent injection."""
+        if not arg:
+            return arg
+        
+        if is_message:
+            # For messages, we are more lenient but still prevent obvious injections
+            # (though with shell=False this is mostly for the target tool's sake)
+            if "\0" in arg:
+                raise ValueError("Null character in git message")
+            return arg
+            
+        # Allow alphanumeric, hyphens, underscores, dots, forward slashes, @{u}, and colons
+        if not re.match(r"^[a-zA-Z0-9\-_./@{}: ]+$", arg):
+            raise ValueError(f"Invalid characters in git argument: {arg}")
+        return arg
+
     def _run(
         self, 
         *args: str, 
@@ -26,11 +44,19 @@ class GitOps:
         capture_output: bool = True
     ) -> subprocess.CompletedProcess[str]:
         """Run a git command in the repository with a timeout."""
+        # Detect if we are in a commit command to be more lenient with the message
+        is_commit = len(args) > 0 and args[0] == "commit"
+        
+        validated_args = []
+        for i, arg in enumerate(args):
+            is_message = is_commit and i > 0 and args[i-1] == "-m"
+            validated_args.append(self._validate_arg(arg, is_message=is_message))
+        
         stdout = subprocess.PIPE if capture_output else subprocess.DEVNULL
         stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL
         
         return subprocess.run(
-            ["git"] + list(args),
+            ["git"] + validated_args,
             cwd=self.repo_path,
             stdout=stdout,
             stderr=stderr,

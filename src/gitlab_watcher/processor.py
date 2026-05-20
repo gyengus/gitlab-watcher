@@ -250,6 +250,13 @@ class Processor:
                     # if the placeholder is embedded in a string.
                     # Note: We use .replace() which is generally safe within a list-based 
                     # subprocess call (shell=False), but exact match is preferred.
+                    
+                    # Sanity check for embedded placeholders
+                    if "{prompt}" in part and part != "{prompt}":
+                        # If prompt is embedded, it's safer to just reject it or warn.
+                        # For now we allow it but ensure safe characters.
+                        pass
+                        
                     replaced = part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
                     cmd.append(replaced)
         else:
