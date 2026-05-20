@@ -49,7 +49,7 @@ class StateManager:
         self._dirty: set[int] = set()
         self._save_timer: Optional[threading.Timer] = None
         self._save_delay = save_delay
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._stopped = False
 
 
@@ -130,16 +130,17 @@ class StateManager:
 
     def _save_sync(self, project_id: int) -> None:
         """Synchronous save to file."""
-        if project_id not in self._states:
-            return
-        state_file = self._state_file(project_id)
-        try:
-            # Convert set to list for JSON serialization
-            state_dict = asdict(self._states[project_id])
-            state_dict['branches_with_failed_mr'] = list(state_dict['branches_with_failed_mr'])
-            state_file.write_text(json.dumps(state_dict, indent=2))
-        except Exception as e:
-            logger.error(f"Failed to save state for project {project_id}: {e}")
+        with self._lock:
+            if project_id not in self._states:
+                return
+            state_file = self._state_file(project_id)
+            try:
+                # Convert set to list for JSON serialization
+                state_dict = asdict(self._states[project_id])
+                state_dict['branches_with_failed_mr'] = list(state_dict['branches_with_failed_mr'])
+                state_file.write_text(json.dumps(state_dict, indent=2))
+            except Exception as e:
+                logger.error(f"Failed to save state for project {project_id}: {e}")
 
     def load(self, project_id: int) -> ProjectState:
         """Load state for a project, returning cached state if available.
@@ -161,10 +162,11 @@ class StateManager:
         processing on watcher startup. Call this once at startup for each
         project.
         """
-        state = self._load_from_file(project_id, reset_processing=True)
-        self._states[project_id] = state
-        self._save_sync(project_id)
-        return state
+        with self._lock:
+            state = self._load_from_file(project_id, reset_processing=True)
+            self._states[project_id] = state
+            self._save_sync(project_id)
+            return state
 
     def save(self, project_id: int) -> None:
         """Save state for a project (debounced)."""

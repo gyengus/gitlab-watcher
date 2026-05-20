@@ -35,7 +35,7 @@ class Config:
     label_review: str = "Review"
     poll_interval: int = 30
     ai_tool_mode: str = "ollama"
-    ai_tool_custom_command: str = ""
+    ai_tool_custom_command: str | list[str] = ""
     ai_tool_failover_model: str = ""
     ai_tool_timeout: int = 3600
     log_file: str = "/var/log/gitlab-watcher.log"
@@ -194,7 +194,7 @@ def load_config(config_path: str) -> Config:
         label_review=get_str("LABEL_REVIEW", "Review"),
         poll_interval=get_int("POLL_INTERVAL", 30),
         ai_tool_mode=get_str("AI_TOOL_MODE", "ollama"),
-        ai_tool_custom_command=get_str("AI_TOOL_CUSTOM_COMMAND"),
+        ai_tool_custom_command=raw_config.get("AI_TOOL_CUSTOM_COMMAND", ""),
         ai_tool_failover_model=get_str("AI_TOOL_FAILOVER_MODEL"),
         ai_tool_timeout=get_int("AI_TOOL_TIMEOUT", 3600),
         log_file=get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),

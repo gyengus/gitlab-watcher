@@ -102,14 +102,12 @@ class TestProcessorRunClaude:
     """Tests for the _run_ai_tool method."""
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_success(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -121,23 +119,20 @@ class TestProcessorRunClaude:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
+    
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
+    
         assert success is True
         assert "Done" in output
-        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+        mock_killpg.assert_called_once_with(1234, signal.SIGTERM)
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_failure(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -149,23 +144,20 @@ class TestProcessorRunClaude:
         mock_process.returncode = 1
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
+    
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
+    
         assert success is False
         assert "Error" in output
-        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+        mock_killpg.assert_called_once_with(1234, signal.SIGTERM)
 
     @patch("subprocess.Popen")
     @patch("time.time")
     @patch("time.sleep")
-    @patch("os.getpgid")
     @patch("os.killpg")
     def test_run_ai_tool_timeout(
         self,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_sleep: Mock,
         mock_time: Mock,
         mock_popen: Mock,
@@ -178,28 +170,25 @@ class TestProcessorRunClaude:
         mock_process.poll.return_value = None
         mock_process.stdout.readline.side_effect = ["Thinking...\n"] + [""] * 50
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
+    
         # Mock time to exceed timeout. We need enough values for logging and the wait loop.
         # Logger calls time.time() for timestamps, so we need more values
         mock_time.side_effect = [0, 0, 0.1, 0.2, 0.3, 5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007]
-
+    
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
+    
         assert success is False
         assert "timed out" in output.lower()
-        mock_killpg.assert_any_call(5678, signal.SIGTERM)
-        mock_killpg.assert_any_call(5678, signal.SIGKILL)
+        mock_killpg.assert_any_call(1234, signal.SIGTERM)
+        mock_killpg.assert_any_call(1234, signal.SIGKILL)
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_forbidden_in_output(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -211,23 +200,20 @@ class TestProcessorRunClaude:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
+    
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
+    
         assert success is False
         assert "Forbidden" in output
-        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+        mock_killpg.assert_called_once_with(1234, signal.SIGTERM)
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_error_pattern_with_failure(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -239,23 +225,20 @@ class TestProcessorRunClaude:
         mock_process.returncode = 1
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
+    
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
+    
         assert success is False
         assert "AI_APICallError" in output
-        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+        mock_killpg.assert_called_once_with(1234, signal.SIGTERM)
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_success_clean_output(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -267,13 +250,12 @@ class TestProcessorRunClaude:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
+    
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
+    
         assert success is True
         assert "Everything is fine" in output
-        mock_killpg.assert_called_once_with(5678, signal.SIGTERM)
+        mock_killpg.assert_called_once_with(1234, signal.SIGTERM)
 
     @patch("gitlab_watcher.processor.Processor._run_ai_tool")
     @patch("gitlab_watcher.processor.Processor._should_failover")
@@ -348,16 +330,16 @@ class TestProcessorAIToolModes:
     """Tests for different Claude CLI modes."""
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_with_model_override(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
-        processor: Processor,
+        gitlab_client: GitLabClient,
+        discord_webhook: DiscordWebhook,
+        state_manager: StateManager,
         project_config: ProjectConfig,
     ) -> None:
         """Test AI tool execution with model_override."""
@@ -367,9 +349,16 @@ class TestProcessorAIToolModes:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
 
-        processor.ai_tool_mode = "opencode"
+        processor = Processor(
+            gitlab=gitlab_client,
+            discord=discord_webhook,
+            state=state_manager,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            ai_tool_mode="opencode",
+        )
         success, output = processor._run_ai_tool("test", project_config.path, model_override="failover-model")
 
         assert success is True
@@ -380,14 +369,12 @@ class TestProcessorAIToolModes:
         assert args[args.index("--model") + 1] == "failover-model"
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_ollama_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
@@ -401,7 +388,6 @@ class TestProcessorAIToolModes:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
 
         processor = Processor(
             gitlab=gitlab_client,
@@ -422,14 +408,12 @@ class TestProcessorAIToolModes:
         assert args[2] == "claude"
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_run_ai_tool_opencode_custom_mode(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
@@ -443,7 +427,6 @@ class TestProcessorAIToolModes:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
 
         processor = Processor(
             gitlab=gitlab_client,
@@ -469,14 +452,12 @@ class TestProcessorProcessIssue:
     """Tests for the process_issue method."""
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_process_issue_success(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -507,7 +488,6 @@ class TestProcessorProcessIssue:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
 
         # Mock GitLab client methods
         processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
@@ -534,14 +514,12 @@ class TestProcessorProcessIssue:
         processor_with_git.gitlab.create_merge_request.assert_called()
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_process_issue_claude_fails(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -572,7 +550,6 @@ class TestProcessorProcessIssue:
         mock_process.returncode = 1
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
 
         # Mock GitLab client methods
         processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
@@ -587,14 +564,12 @@ class TestProcessorProcessIssue:
         processor_with_git.discord.notify_error.assert_called()
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_process_issue_retry(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -643,14 +618,12 @@ class TestProcessorProcessComment:
     """Tests for the process_comment method."""
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_process_comment_success(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -680,7 +653,6 @@ class TestProcessorProcessComment:
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
 
         # Mock GitLab client methods
         processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
@@ -695,14 +667,12 @@ class TestProcessorProcessComment:
         assert result is True
 
     @patch("subprocess.Popen")
-    @patch("os.getpgid")
     @patch("os.killpg")
     @patch("time.sleep")
     def test_process_comment_claude_fails(
         self,
         mock_sleep: Mock,
         mock_killpg: Mock,
-        mock_getpgid: Mock,
         mock_popen: Mock,
         processor: Processor,
         project_config: ProjectConfig,
@@ -732,7 +702,6 @@ class TestProcessorProcessComment:
         mock_process.returncode = 1
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
         processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
         processor_with_git.discord.notify_error = Mock()
 

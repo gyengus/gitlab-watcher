@@ -52,7 +52,7 @@ class Processor:
         label_in_progress: str,
         label_review: str,
         ai_tool_mode: str = "ollama",
-        ai_tool_custom_command: str = "",
+        ai_tool_custom_command: str | list[str] = "",
         ai_tool_timeout: int = DEFAULT_AI_TOOL_TIMEOUT,
         ai_tool_failover_model: str = "",
         default_branch: str = "master",
@@ -174,7 +174,7 @@ class Processor:
             "4. YOU MUST COMMIT YOUR CHANGES AND PUSH THE BRANCH BEFORE FINISHING.",
             "5. WRITE COMMIT MESSAGES IN ENGLISH, NO CONVENTIONAL PREFIXES (feat/fix/etc).",
             "6. DO NOT ADD CO-AUTHORED-BY SIGNATURES.",
-            "7. IF YOU NEED TEMPORARY FILES, USE /tmp/opencode/."
+            "7. IF YOU NEED TEMPORARY FILES, USE A SECURE, UNIQUE SUBDIRECTORY IN /tmp/."
         ]
         if is_mr_comment:
             instructions.append("8. IF YOU HAVE SUCCESSFULLY COMPLETED THE TASK, INCLUDE `/done` AT THE VERY END OF YOUR RESPONSE.")
@@ -198,16 +198,30 @@ class Processor:
         elif self.ai_tool_mode in ["opencode-custom", "custom"]:
             if not self.ai_tool_custom_command:
                 raise ValueError(f"AI_TOOL_CUSTOM_COMMAND not set for {self.ai_tool_mode} mode")
-            cmd_parts = shlex.split(self.ai_tool_custom_command)
+            
+            if isinstance(self.ai_tool_custom_command, list):
+                cmd_parts = self.ai_tool_custom_command
+            else:
+                cmd_parts = shlex.split(self.ai_tool_custom_command)
+                
             model_val = model_override or ""
             
             # Substituted values for custom command.
-            # No need to use shlex.quote here because subprocess.Popen (shell=False)
-            # passes list arguments literally to the application.
-            cmd = [
-                part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
-                for part in cmd_parts
-            ]
+            # For better security, we prefer exact matches for placeholders.
+            # subprocess.Popen (shell=False) passes list arguments literally.
+            cmd = []
+            for part in cmd_parts:
+                if part == "{prompt}":
+                    cmd.append(prompt)
+                elif part == "{cwd}":
+                    cmd.append(str(repo_path))
+                elif part == "{model}":
+                    cmd.append(model_val)
+                else:
+                    # Fallback to string replacement for backward compatibility (e.g. --prompt={prompt})
+                    # Note: This is less secure if the tool interprets its arguments as shell commands.
+                    replaced = part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
+                    cmd.append(replaced)
         else:
             raise ValueError(f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}")
         return cmd
@@ -233,10 +247,10 @@ class Processor:
             text=True,
             env=env,
             bufsize=1,
-            preexec_fn=os.setsid,
+            start_new_session=True,
         )
 
-        pgid = os.getpgid(process.pid)
+        pgid = process.pid
         all_output = []
         output_queue: queue.Queue = queue.Queue()
 

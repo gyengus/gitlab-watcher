@@ -105,10 +105,9 @@ class TestProcessorErrorPaths:
 
     @patch("subprocess.Popen")
     @patch("time.time")
-    @patch("os.getpgid")
     @patch("os.killpg")
     def test_run_ai_tool_silence_timeout(
-        self, mock_killpg: Mock, mock_getpgid: Mock, mock_time: Mock, mock_popen: Mock,
+        self, mock_killpg: Mock, mock_time: Mock, mock_popen: Mock,
         processor: Processor, project_config: ProjectConfig
     ) -> None:
         """Test silence timeout detection (lines 333, 384)."""
@@ -117,8 +116,7 @@ class TestProcessorErrorPaths:
         mock_process.poll.return_value = None # Process still running
         mock_process.stdout.readline.return_value = "" # No output
         mock_popen.return_value = mock_process
-        mock_getpgid.return_value = 5678
-
+    
         # Start time = 0, last activity = 0, simulate no output for SILENCE_TIMEOUT + 1 seconds
         # Provide enough values for start, last_activity, then a loop of checks, then cleanup.
         mock_time.side_effect = [
