@@ -316,18 +316,15 @@ class GitLabClient:
                 params={"include_award_emojis": "true"}
             )
             notes = []
-            # Initialize based on the first note's structure, if available.
-            # The 'include_award_emojis' parameter is used, so this fallback should
-            # only trigger if the API doesn't consistently return them or if the
-            # response structure is unexpected.
-            award_emojis_supported_in_response = bool(notes_data and "award_emojis" in notes_data[0])
-            
             for note in notes_data:
                 note_id = note["id"]
-                award_emojis = [e["name"] for e in note.get("award_emojis", []) if isinstance(e, dict) and "name" in e]
                 
-                # If not supported in main response, always use N+1 fallback
-                if not award_emojis_supported_in_response:
+                # Check if award_emojis are embedded in the main notes response.
+                # The 'include_award_emojis' parameter is sent, but if the API lacks
+                # support or is inconsistent, we fall back to a separate call for this note.
+                if "award_emojis" in note:
+                    award_emojis = [e["name"] for e in note["award_emojis"] if isinstance(e, dict) and "name" in e]
+                else:
                     award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
                 
                 self.logger.debug(f"Parsed emojis for note {note_id}: {award_emojis}")
