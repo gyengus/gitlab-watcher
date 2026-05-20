@@ -143,6 +143,26 @@ class GitOps:
         except Exception:
             return False
 
+    def has_unpushed_to_remote(self) -> bool:
+        """Check if the current branch has commits not yet pushed to its upstream.
+
+        Returns:
+            True if there are commits ahead of the remote-tracking branch, False otherwise
+        """
+        try:
+            # Check if there's an upstream configured first
+            rev_parse = self._run("rev-parse", "--abbrev-ref", "@{u}", check=False)
+            if rev_parse.returncode != 0:
+                # No upstream configured, consider all commits as "unpushed" if any exist
+                # Or just return False if we can't push anyway?
+                # For sync-state, we probably want to know if there's anything to push.
+                return False
+
+            result = self._run("log", "@{u}..HEAD", "--oneline", check=False)
+            return bool(result.stdout.strip())
+        except Exception:
+            return False
+
     def branch_exists(self, branch: str) -> bool:
         """Check if a branch exists locally."""
         try:

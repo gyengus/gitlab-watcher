@@ -309,6 +309,32 @@ class TestGitOps:
         assert result is False
 
     @patch("subprocess.run")
+    def test_has_unpushed_to_remote_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_to_remote returns True when commits exist ahead of upstream."""
+        # First call: rev-parse to check upstream
+        # Second call: log to check diff
+        mock_run.side_effect = [
+            Mock(stdout="origin/feature\n", returncode=0),
+            Mock(stdout="abc1234 Some commit\n", returncode=0),
+        ]
+
+        result = git_ops.has_unpushed_to_remote()
+
+        assert result is True
+        assert mock_run.call_count == 2
+        assert "@{u}" in mock_run.call_args_list[0][0][0]
+        assert "@{u}..HEAD" in mock_run.call_args_list[1][0][0]
+
+    @patch("subprocess.run")
+    def test_has_unpushed_to_remote_false_no_upstream(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_to_remote returns False when no upstream exists."""
+        mock_run.return_value = Mock(stdout="", returncode=128)
+
+        result = git_ops.has_unpushed_to_remote()
+
+        assert result is False
+
+    @patch("subprocess.run")
     def test_checkout_already_on_branch(self, mock_run: Mock, git_ops: GitOps) -> None:
         """Test checkout when already on the target branch."""
         mock_run.return_value = Mock(stdout="feature\n", returncode=0)

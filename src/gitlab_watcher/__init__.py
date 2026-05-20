@@ -15,4 +15,8 @@ except (ImportError, AttributeError):
         # Fallback if we can't find the specific class or requests.packages is missing
         warnings.filterwarnings("ignore", message=".*urllib3.*chardet.*charset-normalizer.*")
 
-__version__ = "1.0.0"
+try:
+    from ._version import __version__
+except ImportError:
+    # Fallback for local development without setuptools_scm installed
+    __version__ = "0.0.0+unknown"

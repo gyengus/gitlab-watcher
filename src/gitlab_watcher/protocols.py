@@ -103,6 +103,14 @@ class GitOperations(Protocol):
         """
         ...
 
+    def has_unpushed_to_remote(self) -> bool:
+        """Check if the current branch has commits not yet pushed to its upstream.
+
+        Returns:
+            True if there are commits ahead of the remote-tracking branch, False otherwise
+        """
+        ...
+
     def get_current_commit(self) -> str:
         """Return the current HEAD commit hash.
 
