@@ -120,13 +120,6 @@ class StateManager:
                 self._save_timer.cancel()
                 self._save_timer = None
 
-    def __del__(self) -> None:
-        """Ensure timer is cancelled on deletion."""
-        try:
-            self.stop()
-        except Exception:
-            pass
-
     def _flush_dirty(self) -> None:
         """Save all dirty states."""
         with self._lock:

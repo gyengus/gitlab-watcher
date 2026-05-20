@@ -16,6 +16,7 @@ from gitlab_watcher.discord import DiscordWebhook
 from gitlab_watcher.gitlab_client import GitLabClient, Issue, MergeRequest
 from gitlab_watcher.processor import Processor
 from gitlab_watcher.state import StateManager
+from gitlab_watcher.constants import MAX_DOC_CONTENT_LENGTH
 
 
 @pytest.fixture
@@ -1160,8 +1161,6 @@ class TestProcessorPromptContent:
 
     def test_read_project_docs_truncation(self, processor: Processor, project_config: ProjectConfig) -> None:
         """Test that project documentation is truncated if it exceeds MAX_DOC_CONTENT_LENGTH."""
-        from gitlab_watcher.constants import MAX_DOC_CONTENT_LENGTH
-        
         # Create a very large documentation file
         large_content = "X" * (MAX_DOC_CONTENT_LENGTH + 1000)
         claude_md = project_config.path / "CLAUDE.md"

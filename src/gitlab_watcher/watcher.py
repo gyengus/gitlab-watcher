@@ -120,7 +120,7 @@ class Watcher:
 
         # Get GitLab credentials
         gitlab_url = self.config.gitlab_url
-        gitlab_token = self.config.gitlab_token
+        gitlab_token = os.environ.get("GITLAB_TOKEN") or self.config.gitlab_token
 
         # Try to extract from git remote if not in config
         if not gitlab_url or not gitlab_token:
@@ -131,8 +131,9 @@ class Watcher:
             raise ValueError("GitLab URL must be set in config or extractable from git remote")
         if not gitlab_token:
             raise ValueError(
-                f"GitLab token not found for {gitlab_url}. "
-                "If using SSH remotes, please provide the 'gitlab_token' in your configuration file."
+                "GitLab token not found. "
+                "Please provide 'GITLAB_TOKEN' in your configuration file "
+                "or as an environment variable."
             )
 
         # Initialize or use injected dependencies

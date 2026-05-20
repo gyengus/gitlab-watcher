@@ -1,6 +1,6 @@
-import logging
 """GitLab API client with retry logic."""
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -11,6 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .cache import TimedCache
+from .logging_utils import sanitize_for_log
 from .constants import (
     DEFAULT_CACHE_TTL,
     DEFAULT_GITLAB_TIMEOUT as DEFAULT_TIMEOUT,
@@ -123,7 +124,6 @@ class GitLabClient:
 
     def __repr__(self) -> str:
         """Return string representation without sensitive data."""
-        from .logging_utils import sanitize_for_log
         return f"GitLabClient(url={sanitize_for_log(self.base_url)!r})"
 
     def _api_url(self, project_id: Optional[int], endpoint: str) -> str:

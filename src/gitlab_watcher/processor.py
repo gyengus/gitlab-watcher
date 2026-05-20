@@ -20,6 +20,7 @@ from .constants import (
     MAX_BRANCH_LENGTH,
     MAX_AI_LOG_SIZE,
     MAX_DESCRIPTION_LENGTH,
+    MAX_DOC_CONTENT_LENGTH,
     MAX_SLUG_LENGTH,
     MAX_TITLE_LENGTH,
     MAX_TOTAL_PROMPT_LENGTH,
@@ -301,9 +302,6 @@ class Processor:
 
     def _get_error_snippet(self, output: str, max_chars: int = 2000) -> str:
         """Extract relevant error snippet from AI tool output."""
-        if len(output) <= max_chars:
-            return output
-        
         patterns = AI_TOOL_ERROR_PATTERNS + NO_CHANGES_ERROR_HINTS + [r"error", r"fail", r"exception", r"traceback"]
         for pattern in patterns:
             match = re.search(pattern, output, re.IGNORECASE)
@@ -709,22 +707,21 @@ class Processor:
 
 
     def _read_project_docs(self, repo_path: Path) -> str:
-        """Read existing project documentation files and return their content."""
-        doc_files = ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md"]
-        content_parts = []
+        """Read relevant project documentation files (CLAUDE.md, ARCHITECTURE.md, etc)."""
+        combined_content = ""
+        doc_files = ["CLAUDE.md", "CONTRIBUTING.md", "ARCHITECTURE.md", "README.md"]
         
-        for filename in doc_files:
-            file_path = repo_path / filename
-            if file_path.exists():
+        for doc_file in doc_files:
+            p = repo_path / doc_file
+            if p.exists():
                 try:
-                    content = file_path.read_text(encoding="utf-8")
-                    content_parts.append(f"\n\n=== {filename} ===\n{content}")
+                    content = p.read_text(encoding="utf-8")
+                    combined_content += f"--- {doc_file} ---\n{content}\n\n"
                 except Exception as e:
-                    self.logger.warning(f"Could not read {filename}: {e}")
+                    self.logger.warning(f"Failed to read {doc_file}: {e}")
         
-        combined_content = "".join(content_parts)
-        from .constants import MAX_DOC_CONTENT_LENGTH
         if len(combined_content) > MAX_DOC_CONTENT_LENGTH:
+
             self.logger.warning(f"Project documentation content too long ({len(combined_content)} chars), truncating to {MAX_DOC_CONTENT_LENGTH}")
             combined_content = combined_content[:MAX_DOC_CONTENT_LENGTH] + "\n\n...(documentation truncated due to length limits)"
             
