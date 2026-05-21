@@ -11,7 +11,7 @@ def mock_load_config():
     with patch("gitlab_watcher.watcher.load_config") as mock:
         mock.return_value = Config(
             gitlab_url="https://git.example.com",
-            gitlab_token="token",
+            gitlab_token="valid-test-token-123",
             projects=[ProjectConfig(name="test-project", project_id=1, path=Path("/tmp/test"))]
         )
         yield mock

@@ -280,28 +280,22 @@ class Processor:
             model_val = model_override or ""
             
             # Substituted values for custom command.
-            # We use a strict exact-match replacement for placeholders to prevent
-            # injection into flags (e.g. --prompt={prompt} is now discouraged
-            # in favor of passing them as separate arguments).
+            # MANDATORY: Placeholders must be separate arguments in the list.
+            # String replacement in parts is forbidden to prevent argument injection.
             cmd = []
-            allowed_placeholders = {"{prompt}", "{cwd}", "{model}"}
+            placeholders = {"{prompt}", "{cwd}", "{model}"}
             for part in cmd_parts:
-                if part in allowed_placeholders:
-                    if part == "{prompt}":
-                        cmd.append(prompt)
-                    elif part == "{cwd}":
-                        cmd.append(str(repo_path))
-                    elif part == "{model}":
-                        cmd.append(model_val)
+                if part == "{prompt}":
+                    cmd.append(prompt)
+                elif part == "{cwd}":
+                    cmd.append(str(repo_path))
+                elif part == "{model}":
+                    cmd.append(model_val)
+                elif any(p in part for p in placeholders):
+                    # Placeholder found but not as the entire argument
+                    raise ValueError(f"AI tool command part contains an embedded placeholder: {part}. Placeholders must be separate arguments.")
                 else:
-                    # Fallback to string replacement with shlex.quote for substituted variables
-                    # to ensure safety even if the string is later interpreted by a sub-shell.
-                    safe_prompt = shlex.quote(prompt)
-                    safe_cwd = shlex.quote(str(repo_path))
-                    safe_model = shlex.quote(model_val)
-                    
-                    replaced = part.replace("{prompt}", safe_prompt).replace("{cwd}", safe_cwd).replace("{model}", safe_model)
-                    cmd.append(replaced)
+                    cmd.append(part)
         else:
             raise ValueError(f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}")
         return cmd

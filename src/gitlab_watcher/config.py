@@ -262,21 +262,25 @@ def load_config(config_path: str) -> Config:
         # Hardened path validation: Ensure project is within a safe workspace
         # Resolve all safe bases to real paths for robust comparison
         safe_bases = [
-            os.path.realpath(str(Path.home())),
-            os.path.realpath(os.getcwd()),
-            os.path.realpath("/tmp"),
-            os.path.realpath("/var/tmp"),
+            Path.home().resolve(),
+            Path.cwd().resolve(),
+            Path("/tmp").resolve(),
+            Path("/var/tmp").resolve(),
         ]
         
         is_safe = False
         for base in safe_bases:
             try:
-                # Use os.path.commonpath for more reliable prefix checking on real paths
-                if os.path.commonpath([real_project_path, base]) == base:
+                # Use is_relative_to for strict prefix checking on canonical paths
+                if project_path.resolve().is_relative_to(base):
                     is_safe = True
                     break
-            except ValueError:
+            except (ValueError, AttributeError):
                 continue
+        
+        if not is_safe:
+             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
+             continue
         
         if not is_safe:
              logger.warning(f"Skipping project directory outside safe bases: {project_path}")
