@@ -305,6 +305,7 @@ class Processor:
         # Clean environment: only pass necessary variables to the AI tool
         # Avoid leaking sensitive info like GITLAB_TOKEN
         # Use a hardcoded, minimal PATH to prevent environment manipulation
+        # HOME and USER are now omitted for better isolation unless needed.
         env = {
             "CI": "true",
             "PYTHONUNBUFFERED": "1",

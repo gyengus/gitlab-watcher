@@ -293,6 +293,10 @@ def load_config(config_path: str) -> Config:
         if not is_safe:
              logger.warning(f"Skipping project directory outside safe bases: {project_path}")
              continue
+        
+        if not is_safe:
+             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
+             continue
 
         project_id = None
         for filename in ["PROJECT.md", "AGENTS.md", "CLAUDE.md"]:

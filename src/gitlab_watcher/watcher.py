@@ -227,12 +227,6 @@ class Watcher:
                 "or as an environment variable."
             )
         
-        # Validate GitLab Token to prevent header injection
-        if not re.match(r"^[a-zA-Z0-9_\-]+$", gitlab_token):
-            raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
-        if len(gitlab_token) < 8:
-            raise ValueError("GITLAB_TOKEN is too short. Minimum 8 characters required.")
-
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
         
