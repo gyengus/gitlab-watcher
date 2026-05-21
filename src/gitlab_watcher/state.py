@@ -149,8 +149,21 @@ class StateManager:
                 state_dict['branches_with_failed_mr'] = list(state_dict['branches_with_failed_mr'])
                 
                 # Write to temp file with restricted permissions (0600)
+                # Security: Use O_NOFOLLOW to prevent symlink attacks.
                 import os
-                fd = os.open(str(temp_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                
+                # Double-check that if the file exists, it's not a symlink
+                if temp_file.is_symlink():
+                    try:
+                        temp_file.unlink()
+                    except OSError:
+                        raise RuntimeError(f"Security risk: {temp_file} is a symbolic link and cannot be removed.")
+
+                fd = os.open(
+                    str(temp_file), 
+                    os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 
+                    0o600
+                )
                 try:
                     with os.fdopen(fd, 'w', encoding='utf-8') as f:
                         json.dump(state_dict, f, indent=2)

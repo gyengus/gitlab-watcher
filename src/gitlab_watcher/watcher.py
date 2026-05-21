@@ -93,6 +93,10 @@ class Watcher:
                 pass
 
             # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
+            # Explicitly check for symlink to handle cases where the directory is not fully trusted.
+            if log_path.exists() and log_path.is_symlink():
+                 raise PermissionError(f"Security risk: {log_path} is a symbolic link and will not be opened.")
+
             # Create file with restricted permissions (0600) if it doesn't exist.
             fd = os.open(
                 str(log_path), 
@@ -123,6 +127,9 @@ class Watcher:
             fallback_path = fallback_dir / "watcher.log"
             try:
                 # Same restricted permissions for fallback with O_NOFOLLOW
+                if fallback_path.exists() and fallback_path.is_symlink():
+                     raise PermissionError(f"Security risk: {fallback_path} is a symbolic link and will not be opened.")
+
                 fd = os.open(
                     str(fallback_path), 
                     os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 

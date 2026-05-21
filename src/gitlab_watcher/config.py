@@ -229,19 +229,17 @@ def load_config(config_path: str) -> Config:
         if not project_dir or project_dir.strip().startswith("#"):
             continue
 
-        # Use os.path.realpath to fully resolve symlinks and canonicalize the path
-        # then convert to Path object for further processing.
-        real_project_path = os.path.realpath(os.path.expanduser(project_dir))
-        project_path = Path(real_project_path)
+        # Canonicalize path immediately after expansion to prevent traversal bypasses
+        try:
+            project_path = Path(project_dir).expanduser().resolve()
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"Could not resolve project directory {project_dir}: {e}")
+            continue
 
         if not project_path.exists() or not project_path.is_dir():
             logger.warning(f"Project directory not found or not a directory: {project_path}")
             continue
         
-        # Ensure the project path is absolute
-        if not project_path.is_absolute():
-            continue
-            
         # Hardened path traversal protection: reject system-level paths
         sensitive_bases = [
             "/etc", "/root", "/var", "/bin", "/sbin", "/usr/bin", "/usr/sbin", 
@@ -272,27 +270,11 @@ def load_config(config_path: str) -> Config:
         for base in safe_bases:
             try:
                 # Use is_relative_to for strict prefix checking on canonical paths
-                if project_path.resolve().is_relative_to(base):
+                if project_path.is_relative_to(base):
                     is_safe = True
                     break
             except (ValueError, AttributeError):
                 continue
-        
-        if not is_safe:
-             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
-             continue
-        
-        if not is_safe:
-             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
-             continue
-        
-        if not is_safe:
-             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
-             continue
-        
-        if not is_safe:
-             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
-             continue
         
         if not is_safe:
              logger.warning(f"Skipping project directory outside safe bases: {project_path}")
