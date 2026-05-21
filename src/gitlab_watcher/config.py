@@ -270,7 +270,14 @@ def load_config(config_path: str) -> Config:
             Path("/var/tmp").resolve(),
         ]
         
-        is_safe = any(str(project_path).startswith(str(base)) for base in safe_bases)
+        is_safe = False
+        for base in safe_bases:
+            try:
+                if project_path.is_relative_to(base):
+                    is_safe = True
+                    break
+            except (ValueError, AttributeError):
+                continue
         
         if not is_safe:
              logger.warning(f"Skipping project directory outside safe bases: {project_path}")

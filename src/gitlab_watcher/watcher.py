@@ -79,8 +79,14 @@ class Watcher:
         try:
             # Ensure the directory exists and has restricted permissions (0700)
             log_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Security: Verify parent directory permissions if it's in a sensitive location
             try:
-                os.chmod(log_path.parent, 0o700)
+                st = log_path.parent.stat()
+                # If directory is world-writable or group-writable, it's a risk (on non-Windows)
+                if os.name != 'nt' and (st.st_mode & 0o022):
+                    self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                    os.chmod(log_path.parent, 0o700)
             except OSError:
                 pass
 
@@ -104,10 +110,14 @@ class Watcher:
             # Fallback to work directory in /tmp
             fallback_dir = Path("/tmp/gitlab-watcher")
             fallback_dir.mkdir(parents=True, exist_ok=True)
+            
             try:
-                os.chmod(fallback_dir, 0o700)
+                st = fallback_dir.stat()
+                if os.name != 'nt' and (st.st_mode & 0o022):
+                    os.chmod(fallback_dir, 0o700)
             except OSError:
                 pass
+
             fallback_path = fallback_dir / "watcher.log"
             try:
                 # Same restricted permissions for fallback with O_NOFOLLOW
