@@ -5,6 +5,7 @@ import time
 import logging
 import re
 import shlex
+import shutil
 from pathlib import Path
 
 
@@ -19,6 +20,7 @@ class GitOps:
         """
         self.repo_path = repo_path
         self.logger = logging.getLogger(__name__)
+        self._git_path = shutil.which("git") or "git"
 
     def _validate_arg(self, arg: str, is_message: bool = False, command: str | None = None) -> str:
         """Validate a git argument to prevent injection."""
@@ -101,7 +103,7 @@ class GitOps:
         stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL
         
         return subprocess.run(
-            full_cmd,
+            [self._git_path] + validated_args,
             cwd=self.repo_path,
             stdout=stdout,
             stderr=stderr,

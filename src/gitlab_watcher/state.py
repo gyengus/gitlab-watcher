@@ -135,7 +135,7 @@ class StateManager:
             self._save_timer = None
 
     def _save_sync(self, project_id: int) -> None:
-        """Synchronous save to file with atomic replacement."""
+        """Synchronous save to file with atomic replacement and restricted permissions."""
         with self._lock:
             if project_id not in self._states:
                 return
@@ -146,8 +146,17 @@ class StateManager:
                 state_dict = asdict(self._states[project_id])
                 state_dict['branches_with_failed_mr'] = list(state_dict['branches_with_failed_mr'])
                 
-                # Write to temp file and rename atomically
-                temp_file.write_text(json.dumps(state_dict, indent=2))
+                # Write to temp file with restricted permissions (0600)
+                import os
+                fd = os.open(str(temp_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        json.dump(state_dict, f, indent=2)
+                except Exception:
+                    os.close(fd)
+                    raise
+                
+                # Rename atomically
                 temp_file.replace(state_file)
             except Exception as e:
                 logger.error(f"Failed to save state for project {project_id}: {e}")
