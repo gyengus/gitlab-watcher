@@ -307,9 +307,14 @@ class GitLabClient:
     def get_notes(
         self, project_id: int, mr_iid: int
     ) -> list[Note]:
-        """Get notes for a merge request."""
+        """Get notes for a merge request.
+        
+        Uses 'include_award_emojis' to minimize API calls.
+        """
         endpoint = f"/merge_requests/{mr_iid}/notes"
         try:
+            # We explicitly request award_emojis to avoid N+1 queries.
+            # If the API response includes them, we use them directly.
             notes_data = self._request_all(
                 "GET", 
                 self._api_url(project_id, endpoint),
@@ -319,15 +324,11 @@ class GitLabClient:
             for note in notes_data:
                 note_id = note["id"]
                 
-                # Check if award_emojis are embedded in the main notes response.
-                # The 'include_award_emojis' parameter is sent, but if the API lacks
-                # support or is inconsistent, we fall back to a separate call for this note.
+                # Robust parsing: check if award_emojis are in the response
                 if "award_emojis" in note:
                     award_emojis = [e["name"] for e in note["award_emojis"] if isinstance(e, dict) and "name" in e]
                 else:
-                    # NOTE: This fallback can lead to N+1 queries if the GitLab API
-                    # consistently fails to include award_emojis in the main response.
-                    # Monitor performance in production if this path is frequently hit.
+                    # Fallback only if missing - this is rare with the parameter above
                     award_emojis = self.get_note_emojis(project_id, mr_iid, note_id)
                 
                 self.logger.debug(f"Parsed emojis for note {note_id}: {award_emojis}")

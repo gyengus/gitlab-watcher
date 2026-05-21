@@ -248,16 +248,13 @@ class Processor:
                 else:
                     # Fallback to string replacement with a warning in documentation
                     # if the placeholder is embedded in a string.
-                    # Note: We use .replace() which is generally safe within a list-based 
-                    # subprocess call (shell=False), but exact match is preferred.
+                    # Note: We use shlex.quote() to ensure safety even if the string
+                    # is later interpreted by a sub-shell or another tool.
+                    safe_prompt = shlex.quote(prompt)
+                    safe_cwd = shlex.quote(str(repo_path))
+                    safe_model = shlex.quote(model_val)
                     
-                    # Sanity check for embedded placeholders
-                    if "{prompt}" in part and part != "{prompt}":
-                        # If prompt is embedded, it's safer to just reject it or warn.
-                        # For now we allow it but ensure safe characters.
-                        pass
-                        
-                    replaced = part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path)).replace("{model}", model_val)
+                    replaced = part.replace("{prompt}", safe_prompt).replace("{cwd}", safe_cwd).replace("{model}", safe_model)
                     cmd.append(replaced)
         else:
             raise ValueError(f"Unknown AI_TOOL_MODE: {self.ai_tool_mode}")

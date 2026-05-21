@@ -239,12 +239,13 @@ def load_config(config_path: str) -> Config:
             logger.warning(f"Project directory not found or not a directory: {project_path}")
             continue
         
-        # Ensure the project path is absolute and not something sensitive like /etc
+        # Ensure the project path is absolute and not something sensitive
         if not project_path.is_absolute():
-            # Should be absolute after resolve()
             continue
             
-        if any(project_path.match(p) for p in ["/etc", "/root", "/var", "/bin", "/sbin"]):
+        # Hardened path traversal protection: reject system-level paths
+        sensitive_bases = ["/etc", "/root", "/var", "/bin", "/sbin", "/usr/bin", "/usr/sbin"]
+        if any(str(project_path).startswith(base) for base in sensitive_bases):
             logger.warning(f"Skipping potentially sensitive project directory: {project_path}")
             continue
 

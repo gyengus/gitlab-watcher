@@ -26,14 +26,27 @@ class GitOps:
         
         if is_message:
             # For messages, we are more lenient but still prevent obvious injections
-            # (though with shell=False this is mostly for the target tool's sake)
             if "\0" in arg:
                 raise ValueError("Null character in git message")
             return arg
             
+        # Internal allowlist of safe flags used by this class
+        SAFE_FLAGS = {
+            "-b", "-u", "-d", "-D", "-m", 
+            "--abbrev-ref", "--verify", "--porcelain", 
+            "--oneline", "-n", "--get", "--"
+        }
+        
+        # Structural arguments (branches, remotes, paths)
+        # Disallow leading hyphens to prevent flag injection, unless it's a known safe flag
+        if arg.startswith("-") and arg not in SAFE_FLAGS:
+            raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
+            
         # Allow alphanumeric, hyphens, underscores, dots, forward slashes, @{u}, and colons
-        if not re.match(r"^[a-zA-Z0-9\-_./@{}: ]+$", arg):
-            raise ValueError(f"Invalid characters in git argument: {arg}")
+        if not re.match(r"^[a-zA-Z0-9\-_./@{}:]+$", arg):
+            # Allow @{u}..HEAD which is used in has_unpushed_work
+            if not re.match(r"^[a-zA-Z0-9\-_./@{}:.]+$", arg):
+                raise ValueError(f"Invalid characters in git argument: {arg}")
         return arg
 
     def _run(

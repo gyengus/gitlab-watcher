@@ -161,6 +161,7 @@ class Watcher:
             )
         
         # Validate GitLab Token to prevent header injection
+        # Apply to the final token regardless of source (config, env, or remote)
         if not re.match(r"^[a-zA-Z0-9_\-]+$", gitlab_token):
             raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
 
