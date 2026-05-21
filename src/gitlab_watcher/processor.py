@@ -310,13 +310,18 @@ class Processor:
 
     def _execute_ai_subprocess(self, cmd: list[str], repo_path: Path) -> tuple[int, str, bool, bool]:
         """Execute the AI tool subprocess and capture output."""
-        env = dict(os.environ)
-        env.update({
+        # Clean environment: only pass necessary variables to the AI tool
+        # Avoid leaking sensitive info like GITLAB_TOKEN
+        env = {
             "CI": "true",
             "PYTHONUNBUFFERED": "1",
             "DEBIAN_FRONTEND": "noninteractive",
-            "CLAUDECODE": "",
-        })
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+            "TERM": os.environ.get("TERM", "xterm-256color"),
+            "USER": os.environ.get("USER", ""),
+        }
         
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
 
