@@ -173,26 +173,35 @@ class Processor:
         binary_path = Path(binary)
         binary_name = binary_path.name
         
-        # If it looks like a path (has slashes), validate it strictly
+        # Canonicalize the path to prevent traversal/symlink bypass
+        resolved_path = binary_path.resolve()
+        
+        # Strictly define trusted system directories for absolute paths
+        TRUSTED_BINARY_DIRS = ["/usr/bin", "/usr/local/bin", "/bin", "/snap/bin"]
+        
+        # If it looks like a path (has slashes) or is absolute
         if "/" in binary or binary_path.is_absolute():
-            resolved_path = binary_path.resolve()
-            sensitive_dirs = ["/tmp", "/var/tmp", "/dev/shm"]
-            if any(str(resolved_path).startswith(sd) for sd in sensitive_dirs):
-                raise ValueError(f"AI tool binary located in sensitive directory: {binary}")
+            # Ensure it resides within a trusted system directory
+            is_trusted = any(str(resolved_path).startswith(td) for td in TRUSTED_BINARY_DIRS)
             
-            # If it was a relative path, it must be within the repository or a trusted location
-            # (For now we just check if it's executable if absolute)
-            if resolved_path.is_absolute():
-                if not os.access(resolved_path, os.X_OK):
-                    # Only check if it exists if it's actually an absolute path on disk
-                    if resolved_path.exists():
-                        raise ValueError(f"AI tool binary is not executable: {binary}")
+            # Also allow binaries within the current user's home (e.g. ~/.local/bin)
+            home_bin = (Path.home() / ".local" / "bin").resolve()
+            if not is_trusted and str(resolved_path).startswith(str(home_bin)):
+                is_trusted = True
+                
+            if not is_trusted:
+                raise ValueError(f"AI tool binary located in untrusted directory: {binary}. Binary must be in {TRUSTED_BINARY_DIRS} or {home_bin}")
+
+            if not os.access(resolved_path, os.X_OK):
+                raise ValueError(f"AI tool binary is not executable: {binary}")
+                
             return str(resolved_path)
 
         if binary_name in ALLOWED_BINARIES:
             resolved = shutil.which(binary)
             if resolved:
-                return resolved
+                # Still check if the resolved path from PATH is trusted
+                return self._validate_ai_binary(resolved)
             return binary
             
         # If not in allowed list, check if it exists in PATH
@@ -200,7 +209,7 @@ class Processor:
         if not resolved:
             raise ValueError(f"AI tool binary not found or not executable: {binary}")
             
-        return resolved
+        return self._validate_ai_binary(resolved)
 
     def _get_instructions(self, continue_instruction: str, is_mr_comment: bool = False) -> str:
         """Generate mandatory instructions for the AI tool."""

@@ -78,11 +78,11 @@ class Watcher:
             # Ensure the directory exists
             log_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Security: Use os.open to create file with restricted permissions (0600)
-            # if it doesn't exist, and open it for appending.
+            # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
+            # Create file with restricted permissions (0600) if it doesn't exist.
             fd = os.open(
                 log_path, 
-                os.O_WRONLY | os.O_CREAT | os.O_APPEND, 
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 
                 0o600
             )
             # Ensure permissions are restricted even if file already existed
@@ -100,10 +100,10 @@ class Watcher:
             fallback_dir.mkdir(parents=True, exist_ok=True)
             fallback_path = fallback_dir / "watcher.log"
             try:
-                # Same restricted permissions for fallback
+                # Same restricted permissions for fallback with O_NOFOLLOW
                 fd = os.open(
                     fallback_path, 
-                    os.O_WRONLY | os.O_CREAT | os.O_APPEND, 
+                    os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 
                     0o600
                 )
                 try:
