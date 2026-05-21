@@ -229,17 +229,16 @@ def load_config(config_path: str) -> Config:
         if not project_dir or project_dir.strip().startswith("#"):
             continue
 
-        project_path = Path(project_dir).expanduser().resolve()
-
-        if project_path.is_symlink():
-            logger.warning(f"Skipping symbolic link project directory: {project_path}")
-            continue
+        # Use os.path.realpath to fully resolve symlinks and canonicalize the path
+        # then convert to Path object for further processing.
+        real_project_path = os.path.realpath(os.path.expanduser(project_dir))
+        project_path = Path(real_project_path)
 
         if not project_path.exists() or not project_path.is_dir():
             logger.warning(f"Project directory not found or not a directory: {project_path}")
             continue
         
-        # Ensure the project path is absolute and not something sensitive
+        # Ensure the project path is absolute
         if not project_path.is_absolute():
             continue
             
@@ -261,22 +260,25 @@ def load_config(config_path: str) -> Config:
             continue
 
         # Hardened path validation: Ensure project is within a safe workspace
-        # If not specified, we default to the current user's home directory, 
-        # the current working directory, or /tmp (common for containers/tests)
+        # Resolve all safe bases to real paths for robust comparison
+        # We explicitly resolve Path.home() and os.getcwd() to follow any symlinks.
         safe_bases = [
-            Path.home().resolve(),
-            Path.cwd().resolve(),
-            Path("/tmp").resolve(),
-            Path("/var/tmp").resolve(),
+            os.path.realpath(str(Path.home())),
+            os.path.realpath(os.getcwd()),
+            os.path.realpath("/tmp"),
+            os.path.realpath("/var/tmp"),
         ]
         
         is_safe = False
         for base in safe_bases:
             try:
-                if project_path.is_relative_to(base):
+                # Use os.path.commonpath for more reliable prefix checking on real paths
+                # and then check if the base is still a parent of the real_project_path
+                common = os.path.commonpath([real_project_path, base])
+                if common == base:
                     is_safe = True
                     break
-            except (ValueError, AttributeError):
+            except ValueError:
                 continue
         
         if not is_safe:

@@ -90,12 +90,14 @@ class GitOps:
         # Detect if we are in a commit command to be more lenient with the message
         is_commit = main_command == "commit"
         
-        validated_args = [main_command]
+        validated_args = []
         for i, arg in enumerate(args[1:], 1):
             is_message = is_commit and i > 1 and args[i-1] == "-m"
             validated_args.append(self._validate_arg(arg, is_message=is_message, command=main_command))
         
-        full_cmd = ["git"] + validated_args
+        # Strictly construct the command list starting with the resolved git binary
+        full_cmd = [self._git_path, main_command] + validated_args
+        
         # Use shlex.join for secure and readable command logging
         self.logger.debug(f"Running git command: {shlex.join(full_cmd)}")
 
@@ -103,7 +105,7 @@ class GitOps:
         stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL
         
         return subprocess.run(
-            [self._git_path] + validated_args,
+            full_cmd,
             cwd=self.repo_path,
             stdout=stdout,
             stderr=stderr,

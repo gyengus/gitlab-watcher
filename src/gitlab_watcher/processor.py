@@ -312,11 +312,12 @@ class Processor:
         """Execute the AI tool subprocess and capture output."""
         # Clean environment: only pass necessary variables to the AI tool
         # Avoid leaking sensitive info like GITLAB_TOKEN
+        # Use a hardcoded, minimal PATH to prevent environment manipulation
         env = {
             "CI": "true",
             "PYTHONUNBUFFERED": "1",
             "DEBIAN_FRONTEND": "noninteractive",
-            "PATH": os.environ.get("PATH", ""),
+            "PATH": "/usr/bin:/bin",
             "HOME": os.environ.get("HOME", ""),
             "LANG": os.environ.get("LANG", "en_US.UTF-8"),
             "TERM": os.environ.get("TERM", "xterm-256color"),
