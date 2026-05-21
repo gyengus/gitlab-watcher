@@ -103,11 +103,12 @@ class TestProcessorErrorPaths:
         assert success is False
         assert "Unknown AI_TOOL_MODE" in output
 
+    @patch("os.getpgid", return_value=1234)
     @patch("subprocess.Popen")
     @patch("time.time")
     @patch("os.killpg")
     def test_run_ai_tool_silence_timeout(
-        self, mock_killpg: Mock, mock_time: Mock, mock_popen: Mock,
+        self, mock_killpg: Mock, mock_time: Mock, mock_popen: Mock, mock_getpgid: Mock,
         processor: Processor, project_config: ProjectConfig
     ) -> None:
         """Test silence timeout detection (lines 333, 384)."""

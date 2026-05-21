@@ -139,7 +139,8 @@ class GitLabClient:
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic for 5xx errors."""
-        # Enforce SSL verification for all requests
+        # MANDATORY: Enforce SSL verification for all requests. 
+        # This overrides any potential caller-supplied verify=False for maximum security.
         kwargs["verify"] = True
         # Set default timeout if not provided
         kwargs.setdefault("timeout", self.timeout)

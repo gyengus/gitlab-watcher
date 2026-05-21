@@ -75,13 +75,17 @@ class Watcher:
         handler_path = None
 
         try:
-            # Ensure the directory exists
+            # Ensure the directory exists and has restricted permissions (0700)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            
+            try:
+                os.chmod(log_path.parent, 0o700)
+            except OSError:
+                pass
+
             # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
             # Create file with restricted permissions (0600) if it doesn't exist.
             fd = os.open(
-                log_path, 
+                str(log_path), 
                 os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 
                 0o600
             )
@@ -98,11 +102,15 @@ class Watcher:
             # Fallback to work directory in /tmp
             fallback_dir = Path("/tmp/gitlab-watcher")
             fallback_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(fallback_dir, 0o700)
+            except OSError:
+                pass
             fallback_path = fallback_dir / "watcher.log"
             try:
                 # Same restricted permissions for fallback with O_NOFOLLOW
                 fd = os.open(
-                    fallback_path, 
+                    str(fallback_path), 
                     os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 
                     0o600
                 )
