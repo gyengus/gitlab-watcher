@@ -1200,6 +1200,7 @@ class TestWatcherExtractFromRemote:
         assert token is None
 
 
+@patch("gitlab_watcher.watcher.os.fchmod")
 @patch("gitlab_watcher.watcher.os.close")
 @patch("gitlab_watcher.watcher.os.open")
 @patch("gitlab_watcher.watcher.logging.FileHandler")
@@ -1209,6 +1210,7 @@ def test_logging_fallback(
     mock_file_handler: MagicMock,
     mock_os_open: MagicMock,
     mock_os_close: MagicMock,
+    mock_os_fchmod: MagicMock,
     config_file: Path,
     mock_gitlab: MagicMock,
     mock_discord: MagicMock,
@@ -1236,6 +1238,8 @@ def test_logging_fallback(
     mock_file_handler.assert_any_call(fallback_path)
     # Verify os.open was called twice (once failed, once for fallback)
     assert mock_os_open.call_count == 2
+    # Verify os.fchmod was called for the successful open
+    mock_os_fchmod.assert_called_once_with(3, 0o600)
     # Verify os.close was called for the successful open
     mock_os_close.assert_called_once_with(3)
 

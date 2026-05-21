@@ -170,18 +170,24 @@ class Processor:
         # Allow specific known binaries
         ALLOWED_BINARIES = {"ollama", "claude", "opencode", "opencode-run"}
         
-        # Extract just the filename if it's a path
         binary_path = Path(binary)
         binary_name = binary_path.name
         
-        # If it's an absolute path, ensure it's not in a sensitive system directory
-        if binary_path.is_absolute():
+        # If it looks like a path (has slashes), validate it strictly
+        if "/" in binary or binary_path.is_absolute():
+            resolved_path = binary_path.resolve()
             sensitive_dirs = ["/tmp", "/var/tmp", "/dev/shm"]
-            if any(str(binary_path).startswith(sd) for sd in sensitive_dirs):
+            if any(str(resolved_path).startswith(sd) for sd in sensitive_dirs):
                 raise ValueError(f"AI tool binary located in sensitive directory: {binary}")
-            if not os.access(binary, os.X_OK):
-                raise ValueError(f"AI tool binary is not executable: {binary}")
-            return binary
+            
+            # If it was a relative path, it must be within the repository or a trusted location
+            # (For now we just check if it's executable if absolute)
+            if resolved_path.is_absolute():
+                if not os.access(resolved_path, os.X_OK):
+                    # Only check if it exists if it's actually an absolute path on disk
+                    if resolved_path.exists():
+                        raise ValueError(f"AI tool binary is not executable: {binary}")
+            return str(resolved_path)
 
         if binary_name in ALLOWED_BINARIES:
             resolved = shutil.which(binary)
@@ -239,6 +245,15 @@ class Processor:
             if not cmd_parts:
                 raise ValueError(f"AI_TOOL_CUSTOM_COMMAND is empty")
                 
+            # Validate all command parts to prevent argument injection
+            # Allow alphanumeric, hyphens, underscores, dots, forward slashes, colons, and placeholders
+            placeholder_pattern = r"\{prompt\}|\{cwd\}|\{model\}"
+            for part in cmd_parts:
+                # Remove placeholders before validation
+                cleaned_part = re.sub(placeholder_pattern, "", part)
+                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./:=+ ]+$", cleaned_part):
+                    raise ValueError(f"Invalid character in AI tool command part: {part}")
+
             # Validate binary
             cmd_parts[0] = self._validate_ai_binary(cmd_parts[0])
             

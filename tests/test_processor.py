@@ -407,6 +407,7 @@ class TestProcessorAIToolModes:
         assert args[1] == "launch"
         assert args[2] == "claude"
 
+    @patch("os.access", return_value=True)
     @patch("shutil.which", return_value="/usr/bin/my-opencode")
     @patch("subprocess.Popen")
     @patch("os.killpg")
@@ -417,6 +418,7 @@ class TestProcessorAIToolModes:
         mock_killpg: Mock,
         mock_popen: Mock,
         mock_which: Mock,
+        mock_os_access: Mock,
         gitlab_client: GitLabClient,
         discord_webhook: DiscordWebhook,
         state_manager: StateManager,
