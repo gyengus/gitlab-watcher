@@ -294,10 +294,8 @@ class Processor:
                     elif part == "{model}":
                         cmd.append(model_val)
                 else:
-                    # Fallback to string replacement with a warning in documentation
-                    # if the placeholder is embedded in a string.
-                    # Note: We use shlex.quote() to ensure safety even if the string
-                    # is later interpreted by a sub-shell or another tool.
+                    # Fallback to string replacement with shlex.quote for substituted variables
+                    # to ensure safety even if the string is later interpreted by a sub-shell.
                     safe_prompt = shlex.quote(prompt)
                     safe_cwd = shlex.quote(str(repo_path))
                     safe_model = shlex.quote(model_val)
@@ -311,17 +309,15 @@ class Processor:
     def _execute_ai_subprocess(self, cmd: list[str], repo_path: Path) -> tuple[int, str, bool, bool]:
         """Execute the AI tool subprocess and capture output."""
         # Clean environment: only pass necessary variables to the AI tool
-        # Avoid leaking sensitive info like GITLAB_TOKEN
-        # Use a hardcoded, minimal PATH to prevent environment manipulation
+        # Use a hardcoded, sanitized environment dictionary. 
+        # Do not pass HOME or USER from the parent process unless strictly necessary.
         env = {
             "CI": "true",
             "PYTHONUNBUFFERED": "1",
             "DEBIAN_FRONTEND": "noninteractive",
             "PATH": "/usr/bin:/bin",
-            "HOME": os.environ.get("HOME", ""),
-            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
-            "TERM": os.environ.get("TERM", "xterm-256color"),
-            "USER": os.environ.get("USER", ""),
+            "LANG": "en_US.UTF-8",
+            "TERM": "xterm-256color",
         }
         
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")

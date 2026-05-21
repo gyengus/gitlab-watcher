@@ -78,7 +78,13 @@ class Watcher:
 
         try:
             # Ensure the directory exists and has restricted permissions (0700)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+            if not log_path.parent.exists():
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.chmod(log_path.parent, 0o700)
+                except OSError:
+                    pass
+            
             try:
                 st = log_path.parent.stat()
                 # Security: Verify directory is owned by current user
