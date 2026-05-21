@@ -173,43 +173,43 @@ class Processor:
         binary_path = Path(binary)
         binary_name = binary_path.name
         
-        # Canonicalize the path using realpath to resolve all symlinks and relative parts
-        real_binary_path = os.path.realpath(str(binary_path))
-        
         # Strictly define trusted system directories for absolute paths
         # These should generally be non-writable by non-root users
-        TRUSTED_BINARY_DIRS = ["/usr/bin", "/usr/local/bin", "/bin", "/snap/bin"]
+        TRUSTED_BINARY_DIRS = [Path("/usr/bin"), Path("/usr/local/bin"), Path("/bin"), Path("/snap/bin")]
         
         # If it looks like a path (has slashes) or is absolute
         if "/" in binary or binary_path.is_absolute():
+            # Canonicalize the path using resolve() to follow symlinks and remove ..
+            # We use strict=False to avoid requiring the path to exist on disk during tests
+            # or if the path is partially virtualized, but we still canonicalize it.
+            resolved_path = binary_path.resolve()
+
             # Ensure it resides within a trusted system directory
-            is_trusted = any(real_binary_path.startswith(td) for td in TRUSTED_BINARY_DIRS)
+            is_trusted = any(resolved_path.is_relative_to(td) for td in TRUSTED_BINARY_DIRS)
             
             # Also allow binaries within the current user's home (e.g. ~/.local/bin)
-            # but resolve it first to ensure we compare apples to apples
-            home_bin = str((Path.home() / ".local" / "bin").resolve())
-            if not is_trusted and real_binary_path.startswith(home_bin):
+            home_bin = (Path.home() / ".local" / "bin").resolve()
+            if not is_trusted and resolved_path.is_relative_to(home_bin):
                 is_trusted = True
             
             # For development/tests, we might want to allow binaries in the current directory
-            # or the project root. We check if it's in a safe relative location.
-            # (Note: In production, this should be avoided unless absolutely necessary)
-            cwd = os.getcwd()
-            if not is_trusted and real_binary_path.startswith(cwd):
+            # but we check if it's in a safe relative location.
+            cwd = Path.cwd().resolve()
+            if not is_trusted and resolved_path.is_relative_to(cwd):
                 is_trusted = True
                 
             if not is_trusted:
                 raise ValueError(f"AI tool binary located in untrusted directory: {binary}. Binary must be in {TRUSTED_BINARY_DIRS}, {home_bin}, or {cwd}")
 
-            if not os.access(real_binary_path, os.X_OK):
+            if not os.access(resolved_path, os.X_OK):
                 raise ValueError(f"AI tool binary is not executable: {binary}")
                 
-            return real_binary_path
+            return str(resolved_path)
 
         if binary_name in ALLOWED_BINARIES:
             resolved = shutil.which(binary)
             if resolved:
-                # Still check if the resolved path from PATH is trusted
+                # Recursively validate the resolved path
                 return self._validate_ai_binary(resolved)
             return binary
             
@@ -230,7 +230,7 @@ class Processor:
             "4. YOU MUST COMMIT YOUR CHANGES AND PUSH THE BRANCH BEFORE FINISHING.",
             "5. WRITE COMMIT MESSAGES IN ENGLISH, NO CONVENTIONAL PREFIXES (feat/fix/etc).",
             "6. DO NOT ADD CO-AUTHORED-BY SIGNATURES.",
-            "7. IF YOU NEED TEMPORARY FILES, YOU MUST CREATE A SECURE, UNIQUE SUBDIRECTORY IN /tmp/ (E.G. USING python -c 'import tempfile; print(tempfile.mkdtemp())'). NEVER USE PREDICTABLE PATHS."
+            "7. IF YOU NEED TEMPORARY FILES, YOU MUST CREATE A SECURE, UNIQUE SUBDIRECTORY USING 'tempfile.mkdtemp()' (OR EQUIVALENT) WITH RESTRICTED PERMISSIONS (0700). NEVER USE PREDICTABLE PATHS."
         ]
         if is_mr_comment:
             instructions.append("8. IF YOU HAVE SUCCESSFULLY COMPLETED THE TASK, INCLUDE `/done` AT THE VERY END OF YOUR RESPONSE.")

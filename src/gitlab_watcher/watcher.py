@@ -7,6 +7,8 @@ import os
 import sys
 import fcntl
 import urllib.parse
+import socket
+import ipaddress
 from pathlib import Path
 from typing import Any, Optional
 
@@ -180,6 +182,21 @@ class Watcher:
         hostname = parsed_url.hostname.lower() if parsed_url.hostname else ""
         if hostname in forbidden_hosts:
             raise ValueError(f"GitLab URL hostname is forbidden for security: {hostname}")
+        
+        # Resolve hostname and check for private/loopback IPs
+        try:
+            # Note: socket.gethostbyname only supports IPv4. For full SSRF protection,
+            # we should handle IPv6 as well.
+            ip_addr = socket.gethostbyname(hostname)
+            ip = ipaddress.ip_address(ip_addr)
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                raise ValueError(f"GitLab URL resolves to a forbidden IP: {ip_addr}")
+        except (socket.gaierror, ValueError) as e:
+            # If resolution fails, we don't necessarily block it (might be a weird local name)
+            # but we log it if it was a valid-looking hostname that resolved to something suspicious.
+            if isinstance(e, ValueError):
+                 raise e
+            self.logger.debug(f"Could not resolve GitLab hostname {hostname} for SSRF check: {e}")
             
         if not gitlab_token:
             raise ValueError(

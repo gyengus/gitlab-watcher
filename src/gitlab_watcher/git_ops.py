@@ -4,6 +4,7 @@ import subprocess
 import time
 import logging
 import re
+import shlex
 from pathlib import Path
 
 
@@ -87,11 +88,15 @@ class GitOps:
             is_message = is_commit and i > 1 and args[i-1] == "-m"
             validated_args.append(self._validate_arg(arg, is_message=is_message, command=main_command))
         
+        full_cmd = ["git"] + validated_args
+        # Use shlex.join for secure and readable command logging
+        self.logger.debug(f"Running git command: {shlex.join(full_cmd)}")
+
         stdout = subprocess.PIPE if capture_output else subprocess.DEVNULL
         stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL
         
         return subprocess.run(
-            ["git"] + validated_args,
+            full_cmd,
             cwd=self.repo_path,
             stdout=stdout,
             stderr=stderr,
