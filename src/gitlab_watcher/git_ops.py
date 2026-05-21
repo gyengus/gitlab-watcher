@@ -119,6 +119,7 @@ class GitOps:
             text=True,
             check=check,
             timeout=timeout,
+            shell=False,
         )
 
     def fetch(self, remote: str = "origin") -> bool:

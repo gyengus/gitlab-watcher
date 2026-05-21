@@ -50,7 +50,11 @@ class StateManager:
             os.makedirs(self.work_dir, mode=0o700, exist_ok=True)
         try:
             import os
-            os.chmod(self.work_dir, 0o700)
+            st = self.work_dir.stat()
+            if os.name != 'nt' and st.st_uid == os.getuid():
+                os.chmod(self.work_dir, 0o700)
+            elif os.name != 'nt':
+                logger.warning(f"State directory {self.work_dir} is not owned by current user!")
         except OSError:
             pass
         self._states: dict[int, ProjectState] = {}

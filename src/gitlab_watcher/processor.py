@@ -320,13 +320,14 @@ class Processor:
         # Avoid leaking sensitive info like GITLAB_TOKEN
         # Use a hardcoded, minimal PATH to prevent environment manipulation
         # HOME and USER are now omitted for better isolation unless needed.
+        # Explicitly define LANG and TERM to avoid inheriting manipulated values from os.environ
         env = {
             "CI": "true",
             "PYTHONUNBUFFERED": "1",
             "DEBIAN_FRONTEND": "noninteractive",
             "PATH": "/usr/bin:/bin",
-            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
-            "TERM": os.environ.get("TERM", "xterm-256color"),
+            "LANG": "en_US.UTF-8",
+            "TERM": "xterm-256color",
         }
         
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
@@ -443,7 +444,11 @@ class Processor:
                  raise RuntimeError(f"Security risk: {ai_log_dir} is a symbolic link.")
             
             # Ensure permissions are correct even if it already existed
-            os.chmod(ai_log_dir, 0o700)
+            st = ai_log_dir.stat()
+            if os.name != 'nt' and st.st_uid == os.getuid():
+                os.chmod(ai_log_dir, 0o700)
+            elif os.name != 'nt':
+                self.logger.warning(f"AI log directory {ai_log_dir} is not owned by current user!")
         except OSError as e:
             self.logger.error(f"Failed to secure AI log directory: {e}")
             # Fallback to system temp if needed, but we prefer the configured state dir

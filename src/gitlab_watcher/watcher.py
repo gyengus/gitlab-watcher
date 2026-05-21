@@ -87,8 +87,11 @@ class Watcher:
 
                 # If directory is world-writable or group-writable, it's a risk (on non-Windows)
                 if os.name != 'nt' and (st.st_mode & 0o022):
-                    self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
-                    os.chmod(log_path.parent, 0o700)
+                    if st.st_uid == os.getuid():
+                        self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                        os.chmod(log_path.parent, 0o700)
+                    else:
+                        self.logger.warning(f"Log directory {log_path.parent} has insecure permissions but is not owned by current user. Cannot fix.")
             except OSError:
                 pass
 
@@ -120,7 +123,10 @@ class Watcher:
             try:
                 st = fallback_dir.stat()
                 if os.name != 'nt' and (st.st_mode & 0o022):
-                    os.chmod(fallback_dir, 0o700)
+                    if st.st_uid == os.getuid():
+                        os.chmod(fallback_dir, 0o700)
+                    else:
+                        self.logger.warning(f"Fallback log directory {fallback_dir} has insecure permissions but is not owned by current user. Cannot fix.")
             except OSError:
                 pass
 
@@ -176,7 +182,11 @@ class Watcher:
                  raise RuntimeError(f"Security risk: {self.work_dir} is a symbolic link and will not be used.")
             
             # Ensure permissions are restricted even if it already existed
-            os.chmod(self.work_dir, 0o700)
+            st = self.work_dir.stat()
+            if os.name != 'nt' and st.st_uid == os.getuid():
+                os.chmod(self.work_dir, 0o700)
+            elif os.name != 'nt':
+                self.logger.warning(f"Work directory {self.work_dir} is not owned by current user!")
         except OSError:
             pass
 
@@ -214,11 +224,13 @@ class Watcher:
         # Resolve hostname and check for private/loopback IPs
         hostname = parsed_url.hostname.lower() if parsed_url.hostname else ""
         try:
-            # Note: socket.gethostbyname only supports IPv4.
-            ip_addr = socket.gethostbyname(hostname)
-            ip = ipaddress.ip_address(ip_addr)
-            if ip.is_private or ip.is_loopback or ip.is_link_local:
-                raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr}")
+            # Use socket.getaddrinfo to resolve both IPv4 and IPv6
+            addr_info = socket.getaddrinfo(hostname, None)
+            for result in addr_info:
+                ip_addr = result[4][0]
+                ip = ipaddress.ip_address(ip_addr)
+                if ip.is_private or ip.is_loopback or ip.is_link_local:
+                    raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr}")
         except (socket.gaierror, ValueError) as e:
             # If resolution fails, we don't necessarily block it if it's not a loopback IP
             # but we should be wary of names like 'metadata.google.internal'
