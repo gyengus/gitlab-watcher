@@ -44,7 +44,13 @@ class StateManager:
             save_delay: Delay in seconds for debounced saves
         """
         self.work_dir = work_dir
+        # Security: Ensure work directory has restricted permissions (0700)
         self.work_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            import os
+            os.chmod(self.work_dir, 0o700)
+        except OSError:
+            pass
         self._states: dict[int, ProjectState] = {}
         self._dirty: set[int] = set()
         self._save_timer: Optional[threading.Timer] = None

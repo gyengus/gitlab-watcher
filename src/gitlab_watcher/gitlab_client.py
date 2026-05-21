@@ -129,6 +129,11 @@ class GitLabClient:
     def _api_url(self, project_id: Optional[int], endpoint: str) -> str:
         """Build full API URL for a project endpoint or general endpoint."""
         if project_id is not None:
+            if not isinstance(project_id, int):
+                try:
+                    project_id = int(project_id)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Invalid project_id type: {type(project_id)}. Must be int.")
             return f"{self.base_url}/api/v4/projects/{project_id}{endpoint}"
         return f"{self.base_url}/api/v4{endpoint}"
 

@@ -426,6 +426,10 @@ class Processor:
         # Dedicated subdirectory for AI logs
         ai_log_dir = self.state.work_dir / "ai_logs"
         ai_log_dir.mkdir(exist_ok=True)
+        try:
+            os.chmod(ai_log_dir, 0o700)
+        except OSError:
+            pass
 
         # Cleanup old log files (older than 7 days)
         try:

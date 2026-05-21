@@ -76,9 +76,14 @@ class GitOps:
             return subprocess.CompletedProcess(args, 0, "", "")
 
         main_command = args[0]
-        # Validate the main command itself
-        if main_command.startswith("-") or not re.match(r"^[a-z\-]+$", main_command):
-             raise ValueError(f"Invalid git command: {main_command}")
+        # Strict allowlist of git subcommands used by this class
+        ALLOWED_SUBCOMMANDS = {
+            "fetch", "checkout", "pull", "push", "branch", 
+            "log", "rev-parse", "status", "add", "commit", "config"
+        }
+        
+        if main_command not in ALLOWED_SUBCOMMANDS:
+             raise ValueError(f"Unauthorized git command: {main_command}")
 
         # Detect if we are in a commit command to be more lenient with the message
         is_commit = main_command == "commit"

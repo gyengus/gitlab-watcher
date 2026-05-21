@@ -79,10 +79,12 @@ class Watcher:
         try:
             # Ensure the directory exists and has restricted permissions (0700)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Security: Verify parent directory permissions if it's in a sensitive location
             try:
                 st = log_path.parent.stat()
+                # Security: Verify directory is owned by current user
+                if os.name != 'nt' and st.st_uid != os.getuid():
+                     self.logger.warning(f"Log directory {log_path.parent} is not owned by current user! This might be a security risk.")
+
                 # If directory is world-writable or group-writable, it's a risk (on non-Windows)
                 if os.name != 'nt' and (st.st_mode & 0o022):
                     self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
@@ -158,6 +160,10 @@ class Watcher:
         # Create work directory (for state files)
         self.work_dir = Path("/tmp/gitlab-watcher")
         self.work_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(self.work_dir, 0o700)
+        except OSError:
+            pass
 
         # Initialize or use injected state manager
         self.state = state or StateManager(self.work_dir)
