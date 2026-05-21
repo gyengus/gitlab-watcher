@@ -43,6 +43,7 @@ class GitOps:
             raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
             
         # Allow alphanumeric, hyphens, underscores, dots, forward slashes, @{u}, and colons
+        # Tightened regex: no spaces allowed in structural arguments
         if not re.match(r"^[a-zA-Z0-9\-_./@{}:]+$", arg):
             # Allow @{u}..HEAD which is used in has_unpushed_work
             if not re.match(r"^[a-zA-Z0-9\-_./@{}:.]+$", arg):
@@ -196,10 +197,12 @@ class GitOps:
             True if there are commits ahead of the default branch, False otherwise
         """
         try:
+            # Validate branch name
+            self._validate_arg(default_branch)
             # Limit log to avoid large memory buffering
             result = self._run("log", f"{default_branch}..HEAD", "--oneline", "-n", "100", "--", check=False)
             return bool(result.stdout.strip())
-        except Exception:
+        except (subprocess.CalledProcessError, ValueError, Exception):
             return False
 
     def has_unpushed_to_remote(self) -> bool:
@@ -210,7 +213,7 @@ class GitOps:
         """
         try:
             # Check if there's an upstream configured first
-            rev_parse = self._run("rev-parse", "--abbrev-ref", "@{u}", check=False)
+            rev_parse = self._run("rev-parse", "--abbrev-ref", "--", "@{u}", check=False)
             if rev_parse.returncode != 0:
                 return False
 
@@ -223,15 +226,17 @@ class GitOps:
     def branch_exists(self, branch: str) -> bool:
         """Check if a branch exists locally."""
         try:
+            # Validate branch name
+            self._validate_arg(branch)
             result = self._run("rev-parse", "--verify", "--", branch, check=False)
             return result.returncode == 0
-        except Exception:
+        except (subprocess.CalledProcessError, ValueError, Exception):
             return False
 
     def get_current_branch(self) -> str | None:
         """Get the current branch name."""
         try:
-            result = self._run("rev-parse", "--abbrev-ref", "HEAD")
+            result = self._run("rev-parse", "--abbrev-ref", "--", "HEAD")
             return result.stdout.strip() or None
         except subprocess.CalledProcessError:
             return None
@@ -299,9 +304,11 @@ class GitOps:
     def get_remote_url(self, remote: str = "origin") -> str | None:
         """Get the remote URL."""
         try:
+            # Validate remote name
+            self._validate_arg(remote)
             result = self._run("config", "--get", f"remote.{remote}.url")
             return result.stdout.strip() or None
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, ValueError):
             return None
 
     def get_current_commit(self) -> str:
@@ -315,7 +322,7 @@ class GitOps:
             Full SHA-1 hash of HEAD, or empty string on failure.
         """
         try:
-            result = self._run("rev-parse", "HEAD", check=False)
+            result = self._run("rev-parse", "--", "HEAD", check=False)
             return result.stdout.strip() if result.returncode == 0 else ""
         except Exception:
             return ""

@@ -244,7 +244,10 @@ def load_config(config_path: str) -> Config:
             continue
             
         # Hardened path traversal protection: reject system-level paths
-        sensitive_bases = ["/etc", "/root", "/var", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/proc", "/sys", "/dev"]
+        sensitive_bases = [
+            "/etc", "/root", "/var", "/bin", "/sbin", "/usr/bin", "/usr/sbin", 
+            "/proc", "/sys", "/dev", "/lib", "/lib64", "/usr/lib", "/usr/lib64"
+        ]
         if any(str(project_path).startswith(base) for base in sensitive_bases):
             logger.warning(f"Skipping potentially sensitive project directory: {project_path}")
             continue

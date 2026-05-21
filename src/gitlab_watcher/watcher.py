@@ -85,6 +85,12 @@ class Watcher:
                 os.O_WRONLY | os.O_CREAT | os.O_APPEND, 
                 0o600
             )
+            # Ensure permissions are restricted even if file already existed
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                # Might fail on some filesystems, but we tried
+                pass
             os.close(fd)
             
             handler_path = log_path
@@ -100,6 +106,10 @@ class Watcher:
                     os.O_WRONLY | os.O_CREAT | os.O_APPEND, 
                     0o600
                 )
+                try:
+                    os.fchmod(fd, 0o600)
+                except OSError:
+                    pass
                 os.close(fd)
                 
                 handler_path = fallback_path
