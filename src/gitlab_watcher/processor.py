@@ -268,11 +268,25 @@ class Processor:
             # Allow alphanumeric, hyphens, underscores, dots, forward slashes, colons, and placeholders
             # We explicitly exclude any shell metacharacters like &, |, ;, $, etc.
             placeholder_pattern = r"\{prompt\}|\{cwd\}|\{model\}"
-            for part in cmd_parts:
+            
+            # Whitelist of allowed flags for AI tools
+            ALLOWED_AI_FLAGS = {
+                "--model", "--thinking", "--log-level", "--print-logs", 
+                "--permission-mode", "acceptEdits", "-p", "--p", "run", "--"
+            }
+            
+            for i, part in enumerate(cmd_parts):
                 # Remove placeholders before validation
                 cleaned_part = re.sub(placeholder_pattern, "", part)
                 if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./:=+ ]+$", cleaned_part):
                     raise ValueError(f"Invalid character in AI tool command part: {part}. Shell metacharacters are forbidden.")
+                
+                # If it's a flag (starts with -), check against whitelist
+                # Skip the first element (binary) as it is validated separately
+                if i > 0 and part.startswith("-") and part not in ALLOWED_AI_FLAGS:
+                    # Allow numeric flags like -n 100 or numeric values
+                    if not re.match(r"^-?\d+$", part):
+                        raise ValueError(f"Unauthorized AI tool flag: {part}")
 
             # Validate binary
             cmd_parts[0] = self._validate_ai_binary(cmd_parts[0])
@@ -419,12 +433,20 @@ class Processor:
         
         # Dedicated subdirectory for AI logs
         ai_log_dir = self.state.work_dir / "ai_logs"
-        if not ai_log_dir.exists():
-            # Security: Atomic creation with restricted permissions (0700)
-            os.makedirs(ai_log_dir, mode=0o700, exist_ok=True)
         try:
+            # Use os.makedirs with mode 0o700
+            if not ai_log_dir.exists():
+                os.makedirs(ai_log_dir, mode=0o700, exist_ok=True)
+            
+            # Security: Explicitly verify it's a directory and not a symlink
+            if ai_log_dir.is_symlink():
+                 raise RuntimeError(f"Security risk: {ai_log_dir} is a symbolic link.")
+            
+            # Ensure permissions are correct even if it already existed
             os.chmod(ai_log_dir, 0o700)
-        except OSError:
+        except OSError as e:
+            self.logger.error(f"Failed to secure AI log directory: {e}")
+            # Fallback to system temp if needed, but we prefer the configured state dir
             pass
 
         # Cleanup old log files (older than 7 days)
@@ -432,19 +454,26 @@ class Processor:
             from datetime import datetime, timedelta
             for pattern in ["ai_error_*.log", "ai_failure_*.log"]:
                 for f in ai_log_dir.glob(pattern):
-                    if datetime.fromtimestamp(f.stat().st_ctime) < datetime.now() - timedelta(days=7):
-                        f.unlink()
+                    try:
+                        if datetime.fromtimestamp(f.stat().st_ctime) < datetime.now() - timedelta(days=7):
+                            f.unlink()
+                    except (OSError, FileNotFoundError):
+                        continue
         except Exception as e:
             self.logger.warning(f"Failed to cleanup old AI tool log files: {e}")
 
+        # Generate a unique, unpredictable filename for the log
+        import secrets
+        random_suffix = secrets.token_hex(8)
+        
         if timed_out:
-            error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
+            error_log_path = ai_log_dir / f"ai_error_{random_suffix}.log"
             self._write_ai_log(error_log_path, full_output)
             self.logger.error(f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s")
             return (False, f"AI tool ({tool_name}) timed out after {self.ai_tool_timeout}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
 
         if silence_timed_out:
-            error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
+            error_log_path = ai_log_dir / f"ai_error_{random_suffix}.log"
             self._write_ai_log(error_log_path, full_output)
             self.logger.error(f"AI tool silence timeout: no output for {SILENCE_TIMEOUT}s")
             return (False, f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
@@ -459,13 +488,13 @@ class Processor:
                 if re.search(pattern, sanitized_output, re.IGNORECASE):
                     error_lines = [line.strip() for line in sanitized_output.splitlines() if re.search(pattern, line, re.IGNORECASE)]
                     error_summary = error_lines[0] if error_lines else pattern
-                    error_log_path = ai_log_dir / f"ai_error_{time.time()}.log"
+                    error_log_path = ai_log_dir / f"ai_error_{random_suffix}.log"
                     self._write_ai_log(error_log_path, full_output)
                     self.logger.error(f"AI tool error pattern detected: exit code 0 but output contains '{pattern}'. Summary: {error_summary}. Full log: {error_log_path}")
                     return (False, f"AI tool execution failed (error pattern detected: '{pattern}')\nError summary: {error_summary}\nFull log: {error_log_path}\nExit code: {returncode}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
         
         if not success:
-            error_log_path = ai_log_dir / f"ai_failure_{time.time()}.log"
+            error_log_path = ai_log_dir / f"ai_failure_{random_suffix}.log"
             self._write_ai_log(error_log_path, full_output)
             self.logger.error(f"AI tool failed (rc {returncode}). Full log: {error_log_path}")
             return (False, f"AI tool execution failed (Exit code: {returncode})\nFull log: {error_log_path}\nOutput snippet:\n{self._get_error_snippet(full_output)}")
@@ -481,19 +510,32 @@ class Processor:
         """
         try:
             # Check size in bytes (approximate for UTF-8)
-            if len(output.encode("utf-8", errors="replace")) > MAX_AI_LOG_SIZE:
+            encoded_output = output.encode("utf-8", errors="replace")
+            if len(encoded_output) > MAX_AI_LOG_SIZE:
                 # Truncate: keep first half and last half of the limit
                 half_limit = MAX_AI_LOG_SIZE // 2
-                # Note: slicing characters might not be exactly half-limit in bytes if multi-byte,
-                # but it's a safe approximation for text logs.
-                truncated = (
-                    output[:half_limit] 
-                    + "\n\n... (output truncated due to size limit) ...\n\n" 
-                    + output[-half_limit:]
+                truncated_encoded = (
+                    encoded_output[:half_limit] 
+                    + b"\n\n... (output truncated due to size limit) ...\n\n" 
+                    + encoded_output[-half_limit:]
                 )
-                path.write_text(truncated, encoding="utf-8", errors="replace")
+                final_output = truncated_encoded.decode("utf-8", errors="replace")
             else:
-                path.write_text(output, encoding="utf-8", errors="replace")
+                final_output = output
+
+            # Security: Use os.open with O_NOFOLLOW and O_CREAT to prevent symlink attacks.
+            # We create the file with 0600 permissions.
+            fd = os.open(
+                str(path), 
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 
+                0o600
+            )
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
+                    f.write(final_output)
+            except Exception:
+                os.close(fd)
+                raise
         except Exception as e:
             self.logger.error(f"Failed to write AI log to {path}: {e}")
 

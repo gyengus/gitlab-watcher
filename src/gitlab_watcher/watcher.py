@@ -166,10 +166,16 @@ class Watcher:
 
         # Create work directory (for state files)
         self.work_dir = Path("/tmp/gitlab-watcher")
-        if not self.work_dir.exists():
-            # Security: Atomic creation with restricted permissions (0700)
-            os.makedirs(self.work_dir, mode=0o700, exist_ok=True)
         try:
+            if not self.work_dir.exists():
+                # Security: Atomic creation with restricted permissions (0700)
+                os.makedirs(self.work_dir, mode=0o700, exist_ok=True)
+            
+            # Security: Explicitly verify it's a directory and not a symlink
+            if self.work_dir.is_symlink():
+                 raise RuntimeError(f"Security risk: {self.work_dir} is a symbolic link and will not be used.")
+            
+            # Ensure permissions are restricted even if it already existed
             os.chmod(self.work_dir, 0o700)
         except OSError:
             pass

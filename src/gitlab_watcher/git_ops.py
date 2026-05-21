@@ -35,7 +35,7 @@ class GitOps:
             
         # Command-specific allowlist of safe flags
         SAFE_COMMANDS = {
-            "rev-parse": {"--abbrev-ref", "--verify", "--", "HEAD"},
+            "rev-parse": {"--abbrev-ref", "--verify", "--", "HEAD", "@{u}"},
             "checkout": {"-b", "--"},
             "pull": {"--"},
             "push": {"-u", "--"},
@@ -52,14 +52,20 @@ class GitOps:
         if arg.startswith("-"):
             if command and command in SAFE_COMMANDS and arg in SAFE_COMMANDS[command]:
                 return arg
-            # Global allowlist for common structural elements
-            if arg in {"--", "@{u}"}:
-                 pass
-            else:
-                raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
+            
+            # Special case for --oneline or -n followed by a number which are in SAFE_COMMANDS
+            # but might be passed as part of a list
+            if command == "log" and arg.startswith("-n"):
+                 return arg
+                 
+            raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
             
         # Allow alphanumeric, hyphens, underscores, dots, forward slashes, @{u}, and colons
         # Tightened regex: no spaces allowed in structural arguments
+        # We also specifically block any string that looks like an assignment in config
+        if "=" in arg and command == "config":
+             raise ValueError(f"Potential config injection in git argument: {arg}")
+
         if not re.match(r"^[a-zA-Z0-9\-_./@{}:]+$", arg):
             # Allow @{u}..HEAD which is used in has_unpushed_work
             if not re.match(r"^[a-zA-Z0-9\-_./@{}:.]+$", arg):
