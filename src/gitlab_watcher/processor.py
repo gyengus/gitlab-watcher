@@ -387,12 +387,14 @@ class Processor:
             except OSError as e:
                 self.logger.error(f"Error cleaning up process group {pgid}: {e}")
 
-        try:
-            process.stdout.close()
-        except Exception:
-            pass
+            try:
+                process.stdout.close()
+            except Exception:
+                pass
 
-        thread.join(timeout=2)
+            # Security: Ensure reader thread is joined to prevent resource leaks
+            thread.join(timeout=2)
+
         full_output = "".join(all_output)
         return process.returncode, full_output, timed_out, silence_timed_out
 
@@ -417,16 +419,12 @@ class Processor:
         # Dedicated subdirectory for AI logs
         ai_log_dir = self.state.work_dir / "ai_logs"
         if not ai_log_dir.exists():
-            ai_log_dir.mkdir(exist_ok=True)
-            try:
-                os.chmod(ai_log_dir, 0o700)
-            except OSError:
-                pass
-        else:
-            try:
-                os.chmod(ai_log_dir, 0o700)
-            except OSError:
-                pass
+            # Security: Atomic creation with restricted permissions (0700)
+            os.makedirs(ai_log_dir, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(ai_log_dir, 0o700)
+        except OSError:
+            pass
 
         # Cleanup old log files (older than 7 days)
         try:

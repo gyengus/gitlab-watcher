@@ -46,19 +46,13 @@ class StateManager:
         self.work_dir = work_dir
         # Security: Ensure work directory exists and has restricted permissions (0700)
         if not self.work_dir.exists():
-            self.work_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                import os
-                os.chmod(self.work_dir, 0o700)
-            except OSError:
-                pass
-        else:
-            # If it exists, still try to ensure restricted permissions
-            try:
-                import os
-                os.chmod(self.work_dir, 0o700)
-            except OSError:
-                pass
+            import os
+            os.makedirs(self.work_dir, mode=0o700, exist_ok=True)
+        try:
+            import os
+            os.chmod(self.work_dir, 0o700)
+        except OSError:
+            pass
         self._states: dict[int, ProjectState] = {}
         self._dirty: set[int] = set()
         self._save_timer: Optional[threading.Timer] = None

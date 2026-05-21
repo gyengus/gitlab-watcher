@@ -64,7 +64,7 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
     - Quoted values
     """
     result: dict[str, str | list[str]] = {}
-    content = config_path.read_text()
+    content = config_path.read_text(encoding="utf-8")
 
     lines = content.splitlines()
     i = 0
@@ -152,7 +152,7 @@ def extract_project_id(project_file_path: Path) -> Optional[int]:
     if not project_file_path.exists():
         return None
 
-    content = project_file_path.read_text()
+    content = project_file_path.read_text(encoding="utf-8")
 
     match = re.search(r"(?i)(?:\*{1,3}|_{1,3}|`{1,2})?project[_\s]*id:?[*_`\s]*(\d+)(?:\*{1,3}|_{1,3}|`{1,2})?", content)
     if match:
@@ -277,6 +277,10 @@ def load_config(config_path: str) -> Config:
                     break
             except (ValueError, AttributeError):
                 continue
+        
+        if not is_safe:
+             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
+             continue
         
         if not is_safe:
              logger.warning(f"Skipping project directory outside safe bases: {project_path}")
