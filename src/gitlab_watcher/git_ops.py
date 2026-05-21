@@ -96,6 +96,7 @@ class GitOps:
             validated_args.append(self._validate_arg(arg, is_message=is_message, command=main_command))
         
         # Strictly construct the command list starting with the resolved git binary
+        # Use a list of arguments directly to avoid any shell interpretation
         full_cmd = [self._git_path, main_command] + validated_args
         
         # Use shlex.join for secure and readable command logging

@@ -165,11 +165,17 @@ class Watcher:
 
         # Create work directory (for state files)
         self.work_dir = Path("/tmp/gitlab-watcher")
-        self.work_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(self.work_dir, 0o700)
-        except OSError:
-            pass
+        if not self.work_dir.exists():
+            self.work_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(self.work_dir, 0o700)
+            except OSError:
+                pass
+        else:
+            try:
+                os.chmod(self.work_dir, 0o700)
+            except OSError:
+                pass
 
         # Initialize or use injected state manager
         self.state = state or StateManager(self.work_dir)

@@ -309,15 +309,15 @@ class Processor:
     def _execute_ai_subprocess(self, cmd: list[str], repo_path: Path) -> tuple[int, str, bool, bool]:
         """Execute the AI tool subprocess and capture output."""
         # Clean environment: only pass necessary variables to the AI tool
-        # Use a hardcoded, sanitized environment dictionary. 
-        # Do not pass HOME or USER from the parent process unless strictly necessary.
+        # Avoid leaking sensitive info like GITLAB_TOKEN
+        # Use a hardcoded, minimal PATH to prevent environment manipulation
         env = {
             "CI": "true",
             "PYTHONUNBUFFERED": "1",
             "DEBIAN_FRONTEND": "noninteractive",
             "PATH": "/usr/bin:/bin",
-            "LANG": "en_US.UTF-8",
-            "TERM": "xterm-256color",
+            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+            "TERM": os.environ.get("TERM", "xterm-256color"),
         }
         
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
@@ -422,11 +422,17 @@ class Processor:
         
         # Dedicated subdirectory for AI logs
         ai_log_dir = self.state.work_dir / "ai_logs"
-        ai_log_dir.mkdir(exist_ok=True)
-        try:
-            os.chmod(ai_log_dir, 0o700)
-        except OSError:
-            pass
+        if not ai_log_dir.exists():
+            ai_log_dir.mkdir(exist_ok=True)
+            try:
+                os.chmod(ai_log_dir, 0o700)
+            except OSError:
+                pass
+        else:
+            try:
+                os.chmod(ai_log_dir, 0o700)
+            except OSError:
+                pass
 
         # Cleanup old log files (older than 7 days)
         try:
