@@ -1200,13 +1200,15 @@ class TestWatcherExtractFromRemote:
         assert token is None
 
 
+@patch("gitlab_watcher.watcher.os.close")
+@patch("gitlab_watcher.watcher.os.open")
 @patch("gitlab_watcher.watcher.logging.FileHandler")
 @patch("gitlab_watcher.watcher.Path.mkdir")
-@patch("builtins.open")
 def test_logging_fallback(
-    mock_open: MagicMock,
     mock_mkdir: MagicMock,
     mock_file_handler: MagicMock,
+    mock_os_open: MagicMock,
+    mock_os_close: MagicMock,
     config_file: Path,
     mock_gitlab: MagicMock,
     mock_discord: MagicMock,
@@ -1215,7 +1217,8 @@ def test_logging_fallback(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test logging fallback to /tmp when primary log file is not writable."""
-    mock_open.side_effect = [PermissionError("Perm denied"), MagicMock()]
+    # First call to os.open (primary) fails, second (fallback) succeeds
+    mock_os_open.side_effect = [PermissionError("Perm denied"), 3]
     mock_file_handler.return_value.level = logging.INFO
     mock_gitlab.get_current_user.return_value = {"username": "claude"}
     
@@ -1231,6 +1234,10 @@ def test_logging_fallback(
     # Verify fallback by checking if FileHandler was called with the fallback path
     fallback_path = Path("/tmp/gitlab-watcher/watcher.log")
     mock_file_handler.assert_any_call(fallback_path)
+    # Verify os.open was called twice (once failed, once for fallback)
+    assert mock_os_open.call_count == 2
+    # Verify os.close was called for the successful open
+    mock_os_close.assert_called_once_with(3)
 
 def test_run_loop_gitlab_error(
     config_file: Path,
