@@ -78,13 +78,7 @@ class Watcher:
 
         try:
             # Ensure the directory exists and has restricted permissions (0700)
-            if not log_path.parent.exists():
-                log_path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.chmod(log_path.parent, 0o700)
-                except OSError:
-                    pass
-            
+            log_path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 st = log_path.parent.stat()
                 # Security: Verify directory is owned by current user
@@ -208,27 +202,24 @@ class Watcher:
         if not parsed_url.netloc:
             raise ValueError(f"Invalid GitLab URL: {gitlab_url}. Missing hostname.")
         
-        # SSRF protection: block loopback and metadata service IPs
-        forbidden_hosts = {
-            "localhost", "127.0.0.1", "::1", 
-            "169.254.169.254", "instance-data", # AWS/GCP/Azure metadata
-            "metadata.google.internal",
-        }
-        hostname = parsed_url.hostname.lower() if parsed_url.hostname else ""
-        if hostname in forbidden_hosts:
-            raise ValueError(f"GitLab URL hostname is forbidden for security: {hostname}")
-        
         # Resolve hostname and check for private/loopback IPs
+        hostname = parsed_url.hostname.lower() if parsed_url.hostname else ""
         try:
-            # Note: socket.gethostbyname only supports IPv4. For full SSRF protection,
-            # we should handle IPv6 as well.
+            # Note: socket.gethostbyname only supports IPv4.
             ip_addr = socket.gethostbyname(hostname)
             ip = ipaddress.ip_address(ip_addr)
             if ip.is_private or ip.is_loopback or ip.is_link_local:
-                raise ValueError(f"GitLab URL resolves to a forbidden IP: {ip_addr}")
+                raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr}")
         except (socket.gaierror, ValueError) as e:
-            # If resolution fails, we don't necessarily block it (might be a weird local name)
-            # but we log it if it was a valid-looking hostname that resolved to something suspicious.
+            # If resolution fails, we don't necessarily block it if it's not a loopback IP
+            # but we should be wary of names like 'metadata.google.internal'
+            forbidden_names = {
+                "localhost", "instance-data", # AWS/GCP/Azure metadata
+                "metadata.google.internal",
+            }
+            if hostname in forbidden_names or hostname.startswith("127.") or hostname == "::1":
+                 raise ValueError(f"GitLab URL hostname is forbidden for security: {hostname}")
+            
             if isinstance(e, ValueError):
                  raise e
             self.logger.debug(f"Could not resolve GitLab hostname {hostname} for SSRF check: {e}")
@@ -240,6 +231,12 @@ class Watcher:
                 "or as an environment variable."
             )
         
+        # Validate GitLab Token to prevent header injection
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", gitlab_token):
+            raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
+        if len(gitlab_token) < 8:
+            raise ValueError("GITLAB_TOKEN is too short. Minimum 8 characters required.")
+
         # Initialize or use injected dependencies
         self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
         

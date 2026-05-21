@@ -173,43 +173,43 @@ class Processor:
         binary_path = Path(binary)
         binary_name = binary_path.name
         
+        # Use os.path.realpath to fully resolve symlinks and canonicalize the path
+        real_binary_path = os.path.realpath(str(binary_path))
+        
         # Strictly define trusted system directories for absolute paths
         # These should generally be non-writable by non-root users
-        TRUSTED_BINARY_DIRS = [Path("/usr/bin"), Path("/usr/local/bin"), Path("/bin"), Path("/snap/bin")]
+        TRUSTED_BINARY_DIRS = ["/usr/bin", "/usr/local/bin", "/bin", "/snap/bin"]
         
         # If it looks like a path (has slashes) or is absolute
         if "/" in binary or binary_path.is_absolute():
-            # Canonicalize the path using resolve() to follow symlinks and remove ..
-            # We use strict=False to avoid requiring the path to exist on disk during tests
-            # or if the path is partially virtualized, but we still canonicalize it.
-            resolved_path = binary_path.resolve()
-
             # Ensure it resides within a trusted system directory
-            is_trusted = any(resolved_path.is_relative_to(td) for td in TRUSTED_BINARY_DIRS)
+            is_trusted = any(real_binary_path.startswith(td) for td in TRUSTED_BINARY_DIRS)
             
             # Also allow binaries within the current user's home (e.g. ~/.local/bin)
-            home_bin = (Path.home() / ".local" / "bin").resolve()
-            if not is_trusted and resolved_path.is_relative_to(home_bin):
+            # but resolve it first to ensure we compare apples to apples
+            home_bin = str((Path.home() / ".local" / "bin").resolve())
+            if not is_trusted and real_binary_path.startswith(home_bin):
                 is_trusted = True
             
             # For development/tests, we might want to allow binaries in the current directory
-            # but we check if it's in a safe relative location.
-            cwd = Path.cwd().resolve()
-            if not is_trusted and resolved_path.is_relative_to(cwd):
+            # or the project root. We check if it's in a safe relative location.
+            # (Note: In production, this should be avoided unless absolutely necessary)
+            cwd = os.getcwd()
+            if not is_trusted and real_binary_path.startswith(cwd):
                 is_trusted = True
                 
             if not is_trusted:
                 raise ValueError(f"AI tool binary located in untrusted directory: {binary}. Binary must be in {TRUSTED_BINARY_DIRS}, {home_bin}, or {cwd}")
 
-            if not os.access(resolved_path, os.X_OK):
+            if not os.access(real_binary_path, os.X_OK):
                 raise ValueError(f"AI tool binary is not executable: {binary}")
                 
-            return str(resolved_path)
+            return real_binary_path
 
         if binary_name in ALLOWED_BINARIES:
             resolved = shutil.which(binary)
             if resolved:
-                # Recursively validate the resolved path
+                # Still check if the resolved path from PATH is trusted
                 return self._validate_ai_binary(resolved)
             return binary
             
@@ -514,11 +514,15 @@ class Processor:
             returncode, full_output, timed_out, silence_timed_out = self._execute_ai_subprocess(cmd, repo_path)
             return self._analyze_ai_output(returncode, full_output, timed_out, silence_timed_out, cmd)
         except ValueError as e:
-            return False, f"Prompt validation failed: {e}"
+            return False, f"Prompt or command validation failed: {e}"
         except FileNotFoundError:
-            return False, f"AI tool CLI not found"
+            return False, f"AI tool binary not found or not executable"
+        except subprocess.SubprocessError as e:
+            return False, f"AI tool subprocess error: {e}"
+        except OSError as e:
+            return False, f"AI tool system error: {e}"
         except Exception as e:
-            msg = f"AI tool execution failed ({self.ai_tool_mode}): {str(e)}"
+            msg = f"AI tool execution failed unexpectedly ({self.ai_tool_mode}): {str(e)}"
             self.logger.exception(msg)
             return False, msg
 
