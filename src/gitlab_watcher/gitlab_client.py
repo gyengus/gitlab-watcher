@@ -1,6 +1,7 @@
 """GitLab API client with retry logic."""
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -96,6 +97,10 @@ class GitLabClient:
         """
         self.logger = logging.getLogger(__name__)
         self.base_url = url.rstrip("/")
+        
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", token):
+            raise ValueError("Invalid characters in GITLAB_TOKEN")
+            
         self._token = token  # Private to avoid accidental logging
         self.max_retries = max_retries
         self.retry_delay = retry_delay
