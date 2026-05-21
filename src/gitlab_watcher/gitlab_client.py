@@ -139,8 +139,9 @@ class GitLabClient:
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic for 5xx errors."""
-        # Set default timeout if not provided
+        # Set default timeout and verification if not provided
         kwargs.setdefault("timeout", self.timeout)
+        kwargs.setdefault("verify", True)
 
         last_error: Optional[Exception] = None
 

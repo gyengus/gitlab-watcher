@@ -249,13 +249,15 @@ class Processor:
             # injection into flags (e.g. --prompt={prompt} is now discouraged
             # in favor of passing them as separate arguments).
             cmd = []
+            allowed_placeholders = {"{prompt}", "{cwd}", "{model}"}
             for part in cmd_parts:
-                if part == "{prompt}":
-                    cmd.append(prompt)
-                elif part == "{cwd}":
-                    cmd.append(str(repo_path))
-                elif part == "{model}":
-                    cmd.append(model_val)
+                if part in allowed_placeholders:
+                    if part == "{prompt}":
+                        cmd.append(prompt)
+                    elif part == "{cwd}":
+                        cmd.append(str(repo_path))
+                    elif part == "{model}":
+                        cmd.append(model_val)
                 else:
                     # Fallback to string replacement with a warning in documentation
                     # if the placeholder is embedded in a string.

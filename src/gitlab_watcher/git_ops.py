@@ -19,7 +19,7 @@ class GitOps:
         self.repo_path = repo_path
         self.logger = logging.getLogger(__name__)
 
-    def _validate_arg(self, arg: str, is_message: bool = False) -> str:
+    def _validate_arg(self, arg: str, is_message: bool = False, command: str | None = None) -> str:
         """Validate a git argument to prevent injection."""
         if not arg:
             return arg
@@ -30,17 +30,30 @@ class GitOps:
                 raise ValueError("Null character in git message")
             return arg
             
-        # Internal allowlist of safe flags used by this class
-        SAFE_FLAGS = {
-            "-b", "-u", "-d", "-D", "-m", 
-            "--abbrev-ref", "--verify", "--porcelain", 
-            "--oneline", "-n", "--get", "--"
+        # Command-specific allowlist of safe flags
+        SAFE_COMMANDS = {
+            "rev-parse": {"--abbrev-ref", "--verify", "--", "HEAD"},
+            "checkout": {"-b", "--"},
+            "pull": {"--"},
+            "push": {"-u", "--"},
+            "branch": {"-d", "-D", "--"},
+            "log": {"--oneline", "-n", "--"},
+            "status": {"--porcelain", "--"},
+            "add": {"--"},
+            "commit": {"-m", "--"},
+            "config": {"--get"}
         }
         
         # Structural arguments (branches, remotes, paths)
-        # Disallow leading hyphens to prevent flag injection, unless it's a known safe flag
-        if arg.startswith("-") and arg not in SAFE_FLAGS:
-            raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
+        # Disallow leading hyphens to prevent flag injection, unless it's a known safe flag for this command
+        if arg.startswith("-"):
+            if command and command in SAFE_COMMANDS and arg in SAFE_COMMANDS[command]:
+                return arg
+            # Global allowlist for common structural elements
+            if arg in {"--", "@{u}"}:
+                 pass
+            else:
+                raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
             
         # Allow alphanumeric, hyphens, underscores, dots, forward slashes, @{u}, and colons
         # Tightened regex: no spaces allowed in structural arguments
@@ -58,13 +71,17 @@ class GitOps:
         capture_output: bool = True
     ) -> subprocess.CompletedProcess[str]:
         """Run a git command in the repository with a timeout."""
+        if not args:
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        main_command = args[0]
         # Detect if we are in a commit command to be more lenient with the message
-        is_commit = len(args) > 0 and args[0] == "commit"
+        is_commit = main_command == "commit"
         
-        validated_args = []
-        for i, arg in enumerate(args):
-            is_message = is_commit and i > 0 and args[i-1] == "-m"
-            validated_args.append(self._validate_arg(arg, is_message=is_message))
+        validated_args = [main_command]
+        for i, arg in enumerate(args[1:], 1):
+            is_message = is_commit and i > 1 and args[i-1] == "-m"
+            validated_args.append(self._validate_arg(arg, is_message=is_message, command=main_command))
         
         stdout = subprocess.PIPE if capture_output else subprocess.DEVNULL
         stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL

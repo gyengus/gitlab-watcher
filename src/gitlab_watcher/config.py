@@ -260,6 +260,22 @@ def load_config(config_path: str) -> Config:
         except Exception:
             continue
 
+        # Hardened path validation: Ensure project is within a safe workspace
+        # If not specified, we default to the current user's home directory, 
+        # the current working directory, or /tmp (common for containers/tests)
+        safe_bases = [
+            Path.home().resolve(),
+            Path.cwd().resolve(),
+            Path("/tmp").resolve(),
+            Path("/var/tmp").resolve(),
+        ]
+        
+        is_safe = any(str(project_path).startswith(str(base)) for base in safe_bases)
+        
+        if not is_safe:
+             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
+             continue
+
         project_id = None
         for filename in ["PROJECT.md", "AGENTS.md", "CLAUDE.md"]:
             project_file = project_path / filename
