@@ -57,7 +57,8 @@ def sync_state(project_name: str, config: str) -> None:
 
     git = GitOps(project.path)
     state_work_dir = Path("/tmp/gitlab-watcher")
-    state_work_dir.mkdir(parents=True, exist_ok=True)
+    import os
+    os.makedirs(state_work_dir, mode=0o700, exist_ok=True)
     state = StateManager(state_work_dir)
     discord = DiscordWebhook(project.discord_webhook_url or "")
 

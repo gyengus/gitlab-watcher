@@ -31,6 +31,8 @@ class GitOps:
             # For messages, we are more lenient but still prevent obvious injections
             if "\0" in arg:
                 raise ValueError("Null character in git message")
+            if any(c in arg for c in "&|;$><"):
+                raise ValueError(f"Shell metacharacters are forbidden in git message: {arg}")
             return arg
             
         # Command-specific allowlist of safe flags

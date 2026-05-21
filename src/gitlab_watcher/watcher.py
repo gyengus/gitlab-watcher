@@ -78,7 +78,7 @@ class Watcher:
 
         try:
             # Ensure the directory exists and has restricted permissions (0700)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+            os.makedirs(log_path.parent, mode=0o700, exist_ok=True)
             try:
                 st = log_path.parent.stat()
                 # Security: Verify directory is owned by current user
@@ -118,7 +118,7 @@ class Watcher:
         except (PermissionError, OSError) as e:
             # Fallback to work directory in /tmp
             fallback_dir = Path("/tmp/gitlab-watcher")
-            fallback_dir.mkdir(parents=True, exist_ok=True)
+            os.makedirs(fallback_dir, mode=0o700, exist_ok=True)
             
             try:
                 st = fallback_dir.stat()
@@ -321,7 +321,9 @@ class Watcher:
         """Acquire a file lock to prevent multiple instances from running."""
         lock_path = self.work_dir / "gitlab-watcher.lock"
         try:
-            self._lock_file = open(lock_path, "w")
+            # Security: Use os.open with O_CREAT | O_WRONLY | O_TRUNC to ensure secure permissions
+            fd = os.open(str(lock_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            self._lock_file = os.fdopen(fd, "w")
             fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self._lock_file.write(str(os.getpid()))
             self._lock_file.flush()
