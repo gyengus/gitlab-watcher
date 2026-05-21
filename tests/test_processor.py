@@ -442,10 +442,10 @@ class TestProcessorAIToolModes:
         )
 
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)
-
+    
         assert success is True
         args = mock_popen.call_args[0][0]
-        assert args[0] == "my-opencode"
+        assert args[0] == "/usr/bin/my-opencode"
         assert args[1] == "--p"
         assert args[2] == "Fix the bug"
 

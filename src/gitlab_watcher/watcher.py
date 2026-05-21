@@ -152,6 +152,16 @@ class Watcher:
             raise ValueError(f"Invalid GitLab URL scheme: {parsed_url.scheme}. Only https and http are supported.")
         if not parsed_url.netloc:
             raise ValueError(f"Invalid GitLab URL: {gitlab_url}. Missing hostname.")
+        
+        # SSRF protection: block loopback and metadata service IPs
+        forbidden_hosts = {
+            "localhost", "127.0.0.1", "::1", 
+            "169.254.169.254", "instance-data", # AWS/GCP/Azure metadata
+            "metadata.google.internal",
+        }
+        hostname = parsed_url.hostname.lower() if parsed_url.hostname else ""
+        if hostname in forbidden_hosts:
+            raise ValueError(f"GitLab URL hostname is forbidden for security: {hostname}")
             
         if not gitlab_token:
             raise ValueError(

@@ -174,7 +174,19 @@ class Processor:
         binary_path = Path(binary)
         binary_name = binary_path.name
         
+        # If it's an absolute path, ensure it's not in a sensitive system directory
+        if binary_path.is_absolute():
+            sensitive_dirs = ["/tmp", "/var/tmp", "/dev/shm"]
+            if any(str(binary_path).startswith(sd) for sd in sensitive_dirs):
+                raise ValueError(f"AI tool binary located in sensitive directory: {binary}")
+            if not os.access(binary, os.X_OK):
+                raise ValueError(f"AI tool binary is not executable: {binary}")
+            return binary
+
         if binary_name in ALLOWED_BINARIES:
+            resolved = shutil.which(binary)
+            if resolved:
+                return resolved
             return binary
             
         # If not in allowed list, check if it exists in PATH
@@ -182,8 +194,7 @@ class Processor:
         if not resolved:
             raise ValueError(f"AI tool binary not found or not executable: {binary}")
             
-        # Optional: Add more strict checks here if needed
-        return binary
+        return resolved
 
     def _get_instructions(self, continue_instruction: str, is_mr_comment: bool = False) -> str:
         """Generate mandatory instructions for the AI tool."""
@@ -195,7 +206,7 @@ class Processor:
             "4. YOU MUST COMMIT YOUR CHANGES AND PUSH THE BRANCH BEFORE FINISHING.",
             "5. WRITE COMMIT MESSAGES IN ENGLISH, NO CONVENTIONAL PREFIXES (feat/fix/etc).",
             "6. DO NOT ADD CO-AUTHORED-BY SIGNATURES.",
-            "7. IF YOU NEED TEMPORARY FILES, USE A SECURE, UNIQUE SUBDIRECTORY IN /tmp/."
+            "7. IF YOU NEED TEMPORARY FILES, YOU MUST CREATE A SECURE, UNIQUE SUBDIRECTORY IN /tmp/ (E.G. USING python -c 'import tempfile; print(tempfile.mkdtemp())'). NEVER USE PREDICTABLE PATHS."
         ]
         if is_mr_comment:
             instructions.append("8. IF YOU HAVE SUCCESSFULLY COMPLETED THE TASK, INCLUDE `/done` AT THE VERY END OF YOUR RESPONSE.")
