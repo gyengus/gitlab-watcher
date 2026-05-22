@@ -31,6 +31,7 @@ class Config:
 
     gitlab_url: str = ""
     gitlab_token: str = ""
+    gitlab_ssl_verify: bool = True
     discord_webhook: str = ""
     label_in_progress: str = "In progress"
     label_review: str = "Review"
@@ -198,9 +199,20 @@ def load_config(config_path: str) -> Config:
             return int(str(value[0])) if value else default
         return int(str(value))
 
+    def get_bool(key: str, default: bool = False) -> bool:
+        value = raw_config.get(key, str(default))
+        if isinstance(value, list):
+            if len(value) > 1:
+                logger.warning(f"Config key '{key}' expected a single bool but found a list. Using the first element.")
+            val_str = str(value[0]) if value else ""
+        else:
+            val_str = str(value)
+        return val_str.lower() in ("true", "yes", "1", "t", "y")
+
     config = Config(
         gitlab_url=get_str("GITLAB_URL"),
         gitlab_token=get_str("GITLAB_TOKEN"),
+        gitlab_ssl_verify=get_bool("GITLAB_SSL_VERIFY", True),
         discord_webhook=get_str("DISCORD_WEBHOOK"),
         label_in_progress=get_str("LABEL_IN_PROGRESS", "In progress"),
         label_review=get_str("LABEL_REVIEW", "Review"),

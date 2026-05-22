@@ -82,6 +82,7 @@ class GitLabClient:
         pool_connections: int = DEFAULT_POOL_CONNECTIONS,
         pool_maxsize: int = DEFAULT_POOL_MAXSIZE,
         cache_ttl: float = DEFAULT_CACHE_TTL,
+        ssl_verify: bool = True,
     ) -> None:
         """Initialize GitLab client.
 
@@ -105,6 +106,7 @@ class GitLabClient:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.timeout = timeout
+        self.ssl_verify = ssl_verify
         self._cache: TimedCache[dict[str, Any]] = TimedCache(ttl_seconds=cache_ttl)
 
         # Configure session with connection pooling and retry strategy
@@ -146,9 +148,9 @@ class GitLabClient:
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic for 5xx errors."""
-        # MANDATORY: Enforce SSL verification for all requests. 
-        # This overrides any potential caller-supplied verify=False for maximum security.
-        kwargs["verify"] = True
+        # Enforce SSL verification based on client configuration
+        if "verify" not in kwargs:
+            kwargs["verify"] = self.ssl_verify
         # Set default timeout if not provided
         kwargs.setdefault("timeout", self.timeout)
 

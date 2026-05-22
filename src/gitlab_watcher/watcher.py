@@ -253,7 +253,7 @@ class Watcher:
             )
         
         # Initialize or use injected dependencies
-        self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token)
+        self.gitlab = gitlab or GitLabClient(url=gitlab_url, token=gitlab_token, ssl_verify=self.config.gitlab_ssl_verify)
         
         # Auto-detect username from GitLab API
         self.gitlab_username = self.config.gitlab_username
