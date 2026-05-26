@@ -199,8 +199,8 @@ class Watcher:
 
         # Validate GitLab Token immediately to prevent header injection
         if gitlab_token:
-            if not re.match(r"^[a-zA-Z0-9_\-]+$", gitlab_token):
-                raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
+            if not re.match(r"^[a-zA-Z0-9_\-\.]+$", gitlab_token):
+                raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, hyphens, and dots are allowed.")
             if len(gitlab_token) < 8:
                 raise ValueError("GITLAB_TOKEN is too short. Minimum 8 characters required.")
 
@@ -229,7 +229,8 @@ class Watcher:
             for result in addr_info:
                 ip_addr = result[4][0]
                 ip = ipaddress.ip_address(ip_addr)
-                if ip.is_private or ip.is_loopback or ip.is_link_local:
+                # Allow private IPs as it's common in corporate environments
+                if ip.is_loopback or ip.is_link_local:
                     raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr}")
         except (socket.gaierror, ValueError) as e:
             # If resolution fails, we don't necessarily block it if it's not a loopback IP

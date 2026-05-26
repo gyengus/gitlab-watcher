@@ -49,15 +49,24 @@ pip install gitlab-watcher
 ## Usage
 
 ```bash
-# Run with default config
+# Run with default config (automatically starts the watcher)
 gitlab-watcher
+
+# Explicitly start the watcher
+gitlab-watcher run
 
 # Custom config file
 gitlab-watcher -c /path/to/config.conf
 
-# Verbose mode
+# Synchronize local git state with remote (useful after manual intervention)
+gitlab-watcher sync-state "Project Name"
+
+# Verbose mode for debugging
 gitlab-watcher --verbose
 ```
+
+### Improved Error Handling
+The CLI now provides clean, human-readable error messages for common configuration issues (like missing files or invalid tokens) instead of showing a Python traceback. Use the `--verbose` flag if you need the full debug information.
 
 ## Configuration
 
@@ -82,10 +91,10 @@ mkdir -p ~/.config/gitlab-watcher
 Create `~/.config/gitlab-watcher/config.conf` with your environment details:
 
 ```bash
-# Your GitLab instance URL
+# Your GitLab instance URL (supports public domains and private/corporate IPs)
 GITLAB_URL="https://git.example.com"
 
-# Personal or Group Access Token
+# Personal or Group Access Token (supports standard and OIDC tokens with dots)
 GITLAB_TOKEN="your_token_here"
 
 # (Optional) Discord Webhook for detailed event notifications
