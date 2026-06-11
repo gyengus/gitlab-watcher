@@ -494,13 +494,16 @@ class TestProcessorProcessIssue:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.branch_exists.return_value = False
+        mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_to_remote.return_value = True
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
             gitlab=processor.gitlab,
             discord=MagicMock(spec=DiscordWebhook),
             state=processor.state,
-            gitlab_username=processor.gitlab_username,
+            gitlab_username="claude",
             label_in_progress=processor.label_in_progress,
             label_review=processor.label_review,
             default_branch="master",
@@ -510,7 +513,7 @@ class TestProcessorProcessIssue:
         # Mock AI Tool
         mock_process = MagicMock()
         mock_process.poll.side_effect = [None, 0, 0, 0, 0]
-        mock_process.stdout.readline.return_value = ""
+        mock_process.stdout.readline.side_effect = ["Done /done\n", ""]
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
@@ -663,6 +666,9 @@ class TestProcessorProcessComment:
         # Mock GitOps
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
+        mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_to_remote.return_value = True
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -679,7 +685,7 @@ class TestProcessorProcessComment:
         # Mock AI Tool
         mock_process = MagicMock()
         mock_process.poll.side_effect = [None, 0, 0, 0, 0]
-        mock_process.stdout.readline.return_value = ""
+        mock_process.stdout.readline.side_effect = ["Done /done\n", ""]
         mock_process.returncode = 0
         mock_process.pid = 1234
         mock_popen.return_value = mock_process
@@ -1336,31 +1342,44 @@ class TestProcessorCommentNoChanges:
         p.discord.notify_changes_applied.assert_called_once()
         p.discord.notify_no_changes_needed.assert_not_called()
 
-    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    @patch.object(Processor, "_run_ai_tool_with_failover")
     def test_uncommitted_changes_marks_checkmark(
         self,
-        mock_run_ai: Mock,
+        mock_run_ai_failover: Mock,
         processor: Processor,
         project_config: ProjectConfig,
         sample_mr: MergeRequest,
     ) -> None:
-        """When the LLM left uncommitted changes (same HEAD but dirty tree), the
-        note must still get ✅ so the watcher pushes those changes."""
+        """When the LLM left uncommitted changes but claims it's done, the watcher
+        tries a mop-up. If mop-up succeeds in committing, the note gets ✅."""
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
-        # Same HEAD → no new commits, but working tree is dirty
+        # Same HEAD → no new commits initially, but working tree is dirty
         mock_git.get_current_commit.return_value = "abc123"
-        mock_git.has_uncommitted_changes.return_value = True
+        # 1. line 995 (before AI), 2. line 1049 (after AI), 3. line 1110 (after mop-up)
+        mock_git.has_uncommitted_changes.side_effect = [True, True, False]
+        mock_git.has_unpushed_to_remote.return_value = True
 
         p = self._make_processor(processor, mock_git)
-        p.gitlab.create_note_award_emoji = Mock(return_value=True)
+        # Mock the whole gitlab client to avoid real network calls
+        p.gitlab = MagicMock()
+        p.gitlab.create_note_award_emoji.return_value = True
         p.discord.notify_changes_applied = Mock()
         p.discord.notify_no_changes_needed = Mock()
         p.state.init_state(project_config.project_id)
 
+        # Mock the main run (returns /done but leaves uncommitted changes)
+        # and the mop-up run (succeeds)
+        mock_run_ai_failover.side_effect = [
+            (True, "I am done /done"),
+            (True, "Mop-up done /done")
+        ]
+
         result = p.process_comment(project_config, sample_mr, 999, "Fix typo")
 
         assert result is True
+        # Mop-up should have been called
+        assert mock_run_ai_failover.call_count == 2
         emoji_calls = [c[0] for c in p.gitlab.create_note_award_emoji.call_args_list]
         emojis_used = [c[3] for c in emoji_calls]
         assert "white_check_mark" in emojis_used

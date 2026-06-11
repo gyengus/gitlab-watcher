@@ -260,7 +260,7 @@ class TestProcessorErrorPaths:
 class TestProcessorMrConflict:
     """Tests for the HTTP 409 'MR already exists' handling in process_issue."""
 
-    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok /done"))
     def test_process_issue_409_reuses_existing_mr(
         self,
         mock_run_ai: Mock,
@@ -281,6 +281,7 @@ class TestProcessorMrConflict:
 
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
+        mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
         mock_git.has_uncommitted_changes.return_value = False
         mock_git.has_unpushed_to_remote.return_value = True  # LLM made commits
         mock_git.generate_slug.return_value = "fix-the-bug"
@@ -352,7 +353,7 @@ class TestProcessorMrConflict:
         assert result is False
         p.discord.notify_error.assert_called()
 
-    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
+    @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok /done"))
     def test_process_issue_non_409_api_error_propagates(
         self,
         mock_run_ai: Mock,
@@ -364,6 +365,9 @@ class TestProcessorMrConflict:
 
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
+        mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_to_remote.return_value = True
 
         mock_gitlab = MagicMock()
         mock_gitlab.create_merge_request.side_effect = GitLabAPIError(500, "Internal Server Error")
@@ -386,6 +390,12 @@ class TestProcessorMrConflict:
         assert result is False
         p.discord.notify_error.assert_called()
         # Error message must contain something about GitLab API Error (not 409-specific)
-        assert "GitLab API Error" in p.discord.notify_error.call_args[0][1]
+        # We need to check the call args correctly
+        found_api_error = False
+        for call_args in p.discord.notify_error.call_args_list:
+            if "GitLab API Error" in call_args[0][1]:
+                found_api_error = True
+                break
+        assert found_api_error, f"Expected 'GitLab API Error' in notifications, but got: {p.discord.notify_error.call_args_list}"
 
 

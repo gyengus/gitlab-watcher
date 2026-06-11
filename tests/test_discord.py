@@ -170,8 +170,8 @@ class TestDiscordWebhook:
         webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
         result = webhook.notify_no_changes_needed(
             project_name="test-project",
-            mr_title="Fix bug",
-            mr_url="https://git.example.com/merge_requests/1",
+            title="Fix bug",
+            url="https://git.example.com/merge_requests/1",
         )
 
         assert result is True
@@ -180,7 +180,7 @@ class TestDiscordWebhook:
         assert "No Changes Needed" in message
         assert "test-project" in message
         assert "Fix bug" in message
-        assert "The AI reviewed the feedback" in message
+        assert "The AI reviewed the task/feedback" in message
 
     @patch("requests.post")
     def test_notify_ai_tool_crash(self, mock_post: Mock) -> None:
