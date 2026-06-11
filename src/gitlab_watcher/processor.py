@@ -343,7 +343,11 @@ class Processor:
             start_new_session=True,
         )
 
-        pgid = os.getpgid(process.pid) if hasattr(os, "getpgid") else None
+        # [2] Potential ProcessLookupError fix: 
+        # pgid is guaranteed to be equal to process.pid on Unix with start_new_session=True.
+        # Calling os.getpgid(process.pid) is redundant and can raise ProcessLookupError
+        # if the process terminates extremely quickly.
+        pgid = process.pid if os.name != "nt" else None
         all_output = []
         output_queue: queue.Queue = queue.Queue()
 

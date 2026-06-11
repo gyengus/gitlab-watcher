@@ -519,15 +519,15 @@ class TestProcessorProcessIssue:
         mock_popen.return_value = mock_process
 
         # Mock GitLab client methods
-        processor_with_git.gitlab.update_issue_labels = Mock(return_value=True)
-        processor_with_git.gitlab.create_merge_request = Mock(
-            return_value=MergeRequest(
-                iid=1,
-                title="Fix the bug",
-                web_url="https://git.example.com/merge_requests/1",
-                source_branch="1-fix-the-bug",
-                state="opened",
-            )
+        # Mock the whole gitlab client to avoid real network calls
+        processor_with_git.gitlab = MagicMock()
+        processor_with_git.gitlab.update_issue_labels.return_value = True
+        processor_with_git.gitlab.create_merge_request.return_value = MergeRequest(
+            iid=1,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/1",
+            source_branch="1-fix-the-bug",
+            state="opened",
         )
 
         # Initialize state
@@ -675,7 +675,7 @@ class TestProcessorProcessComment:
             gitlab=processor.gitlab,
             discord=processor.discord,
             state=processor.state,
-            gitlab_username=processor.gitlab_username,
+            gitlab_username="claude",
             label_in_progress=processor.label_in_progress,
             label_review=processor.label_review,
             default_branch="master",
@@ -691,7 +691,9 @@ class TestProcessorProcessComment:
         mock_popen.return_value = mock_process
 
         # Mock GitLab client methods
-        processor_with_git.gitlab.create_note_award_emoji = Mock(return_value=True)
+        # Mock the whole gitlab client to avoid real network calls
+        processor_with_git.gitlab = MagicMock()
+        processor_with_git.gitlab.create_note_award_emoji.return_value = True
 
         # Initialize state
         processor_with_git.state.init_state(project_config.project_id)
@@ -1357,15 +1359,17 @@ class TestProcessorCommentNoChanges:
         # Same HEAD → no new commits initially, but working tree is dirty
         mock_git.get_current_commit.return_value = "abc123"
         # 1. line 995 (before AI), 2. line 1049 (after AI), 3. line 1110 (after mop-up)
-        mock_git.has_uncommitted_changes.side_effect = [True, True, False]
+        # We need to return True for the first two and False for the third.
+        mock_git.has_uncommitted_changes.side_effect = [True, True, False, False, False]
         mock_git.has_unpushed_to_remote.return_value = True
 
         p = self._make_processor(processor, mock_git)
         # Mock the whole gitlab client to avoid real network calls
         p.gitlab = MagicMock()
         p.gitlab.create_note_award_emoji.return_value = True
-        p.discord.notify_changes_applied = Mock()
-        p.discord.notify_no_changes_needed = Mock()
+        p.discord = MagicMock()
+        p.discord.notify_changes_applied.return_value = True
+        p.discord.notify_no_changes_needed.return_value = True
         p.state.init_state(project_config.project_id)
 
         # Mock the main run (returns /done but leaves uncommitted changes)

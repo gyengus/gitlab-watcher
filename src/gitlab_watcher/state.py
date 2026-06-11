@@ -85,7 +85,7 @@ class StateManager:
             try:
                 data = json.loads(state_file.read_text())
                 
-                # Migration logic: if we have legacy data but no tracked_mrs, migrate it
+                # migration logic: if we have legacy data but no tracked_mrs, migrate it
                 if "tracked_mrs" not in data:
                     data["tracked_mrs"] = {}
                 
@@ -98,6 +98,11 @@ class StateManager:
                 # Filter data to only include valid ProjectState fields
                 valid_fields = {f.name for f in ProjectState.__dataclass_fields__.values()}
                 filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+                
+                # [1] AttributeError fix: dataclasses don't auto-convert list to set from JSON
+                if "branches_with_failed_mr" in filtered_data and isinstance(filtered_data["branches_with_failed_mr"], list):
+                    filtered_data["branches_with_failed_mr"] = set(filtered_data["branches_with_failed_mr"])
+                
                 state = ProjectState(**filtered_data)
             except (json.JSONDecodeError, TypeError, KeyError) as e:
                 logger.warning(f"Failed to load state for project {project_id}: {e}. Creating new state.")

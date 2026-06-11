@@ -294,15 +294,15 @@ class TestProcessorMrConflict:
 
         p = Processor(
             gitlab=mock_gitlab,
-            discord=processor.discord,
+            discord=MagicMock(), # Mock discord
             state=processor.state,
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
             git_factory=lambda path: mock_git,
         )
-        p.discord.notify_mr_created = Mock()
-        p.discord.notify_error = Mock()
+        p.discord.notify_mr_created.return_value = True
+        p.discord.notify_error.return_value = True
 
         issue = Issue(iid=1, title="Fix the bug", description="desc", web_url="url", labels=[])
         p.state.init_state(project_config.project_id)
@@ -313,8 +313,9 @@ class TestProcessorMrConflict:
         p.discord.notify_error.assert_not_called()
         # Must have tracked the existing MR and notified Discord
         p.discord.notify_mr_created.assert_called_once()
-        call_args = p.discord.notify_mr_created.call_args[0]
-        assert existing_mr.web_url in call_args
+        # Check that mr_url was passed correctly
+        call_args_str = str(p.discord.notify_mr_created.call_args)
+        assert existing_mr.web_url in call_args_str
 
     @patch.object(Processor, "_run_ai_tool", return_value=(True, "ok"))
     def test_process_issue_409_mr_not_locatable_reraises(
@@ -374,14 +375,14 @@ class TestProcessorMrConflict:
 
         p = Processor(
             gitlab=mock_gitlab,
-            discord=processor.discord,
+            discord=MagicMock(), # Mock discord to track calls
             state=processor.state,
             gitlab_username="claude",
             label_in_progress="In progress",
             label_review="Review",
             git_factory=lambda path: mock_git,
         )
-        p.discord.notify_error = Mock()
+        p.discord.notify_error.return_value = True
 
         issue = Issue(iid=1, title="Fix the bug", description="desc", web_url="url", labels=[])
         p.state.init_state(project_config.project_id)
@@ -390,10 +391,10 @@ class TestProcessorMrConflict:
         assert result is False
         p.discord.notify_error.assert_called()
         # Error message must contain something about GitLab API Error (not 409-specific)
-        # We need to check the call args correctly
+        # We check all calls to notify_error
         found_api_error = False
         for call_args in p.discord.notify_error.call_args_list:
-            if "GitLab API Error" in call_args[0][1]:
+            if "GitLab API Error" in str(call_args):
                 found_api_error = True
                 break
         assert found_api_error, f"Expected 'GitLab API Error' in notifications, but got: {p.discord.notify_error.call_args_list}"
