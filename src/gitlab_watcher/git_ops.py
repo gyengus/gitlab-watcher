@@ -226,9 +226,9 @@ class GitOps:
                 args.append("-d")
             args.extend(["--", branch])
 
-            self._run(*args, check=False, capture_output=False)
-            return True
-        except subprocess.CalledProcessError as e:
+            res = self._run(*args, check=False, capture_output=False)
+            return res.returncode == 0
+        except Exception as e:
             self.logger.error(f"Git branch delete failed: {str(e)}")
             return False
 

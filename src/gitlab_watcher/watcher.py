@@ -5,7 +5,10 @@ import re
 import time
 import os
 import sys
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import urllib.parse
 import socket
 import ipaddress
@@ -101,14 +104,19 @@ class Watcher:
                  raise PermissionError(f"Security risk: {log_path} is a symbolic link and will not be opened.")
 
             # Create file with restricted permissions (0600) if it doesn't exist.
+            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            
             fd = os.open(
                 str(log_path), 
-                os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 
+                flags, 
                 0o600
             )
             # Ensure permissions are restricted even if file already existed
             try:
-                os.fchmod(fd, 0o600)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fd, 0o600)
             except OSError:
                 # Might fail on some filesystems, but we tried
                 pass
@@ -136,13 +144,18 @@ class Watcher:
                 if fallback_path.exists() and fallback_path.is_symlink():
                      raise PermissionError(f"Security risk: {fallback_path} is a symbolic link and will not be opened.")
 
+                flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+
                 fd = os.open(
                     str(fallback_path), 
-                    os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 
+                    flags, 
                     0o600
                 )
                 try:
-                    os.fchmod(fd, 0o600)
+                    if hasattr(os, "fchmod"):
+                        os.fchmod(fd, 0o600)
                 except OSError:
                     pass
                 os.close(fd)
@@ -320,6 +333,10 @@ class Watcher:
 
     def _acquire_lock(self) -> None:
         """Acquire a file lock to prevent multiple instances from running."""
+        if fcntl is None:
+            self.logger.debug("Skipping instance lock (fcntl not available)")
+            return
+
         lock_path = self.work_dir / "gitlab-watcher.lock"
         try:
             # Security: Use os.open with O_CREAT | O_WRONLY | O_TRUNC to ensure secure permissions
@@ -608,7 +625,7 @@ class Watcher:
     def stop(self) -> None:
         """Stop the watcher and cleanup resources."""
         # Release lock file
-        if self._lock_file:
+        if self._lock_file and fcntl:
             try:
                 fcntl.flock(self._lock_file, fcntl.LOCK_UN)
                 self._lock_file.close()

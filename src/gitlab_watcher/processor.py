@@ -325,7 +325,7 @@ class Processor:
             "CI": "true",
             "PYTHONUNBUFFERED": "1",
             "DEBIAN_FRONTEND": "noninteractive",
-            "PATH": "/usr/bin:/bin",
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "LANG": "en_US.UTF-8",
             "TERM": "xterm-256color",
         }
@@ -344,7 +344,7 @@ class Processor:
             start_new_session=True,
         )
 
-        pgid = os.getpgid(process.pid)
+        pgid = os.getpgid(process.pid) if hasattr(os, "getpgid") else None
         all_output = []
         output_queue: queue.Queue = queue.Queue()
 
@@ -390,14 +390,18 @@ class Processor:
                     break
         finally:
             try:
-                os.killpg(pgid, signal.SIGTERM)
+                if pgid and hasattr(os, "killpg"):
+                    os.killpg(pgid, signal.SIGTERM)
                 wait_start = time.time()
                 while time.time() - wait_start < 2:
                     if process.poll() is not None:
                         break
                     time.sleep(0.1)
                 if process.poll() is None:
-                    os.killpg(pgid, signal.SIGKILL)
+                    if pgid and hasattr(os, "killpg"):
+                        os.killpg(pgid, signal.SIGKILL)
+                    else:
+                        process.kill()
             except ProcessLookupError:
                 pass
             except OSError as e:
@@ -530,14 +534,19 @@ class Processor:
 
             # Security: Use os.open with O_NOFOLLOW and O_CREAT to prevent symlink attacks.
             # We create the file with 0600 permissions.
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            
             fd = os.open(
                 str(path), 
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 
+                flags, 
                 0o600
             )
             try:
                 # Explicitly enforce permissions to handle cases where file existed with broader permissions
-                os.fchmod(fd, 0o600)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fd, 0o600)
                 with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
                     f.write(final_output)
             except Exception:

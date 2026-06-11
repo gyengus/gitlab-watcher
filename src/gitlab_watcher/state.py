@@ -163,12 +163,18 @@ class StateManager:
                     except OSError:
                         raise RuntimeError(f"Security risk: {temp_file} is a symbolic link and cannot be removed.")
 
+                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+
                 fd = os.open(
                     str(temp_file), 
-                    os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 
+                    flags, 
                     0o600
                 )
                 try:
+                    if hasattr(os, "fchmod"):
+                        os.fchmod(fd, 0o600)
                     with os.fdopen(fd, 'w', encoding='utf-8') as f:
                         json.dump(state_dict, f, indent=2)
                 except Exception:

@@ -147,49 +147,33 @@ class GitLabClient:
         return response.json()
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
-        """Make HTTP request with timeout and retry logic for 5xx errors."""
+        """Make HTTP request with timeout and retry logic."""
         # Enforce SSL verification based on client configuration
         if "verify" not in kwargs:
             kwargs["verify"] = self.ssl_verify
         # Set default timeout if not provided
         kwargs.setdefault("timeout", self.timeout)
 
-        last_error: Optional[Exception] = None
+        try:
+            response = self.session.request(method, url, **kwargs)
 
-        for attempt in range(self.max_retries):
-            try:
-                response = self.session.request(method, url, **kwargs)
+            if response.status_code == 401:
+                raise GitLabAuthenticationError()
+            elif response.status_code == 403:
+                raise GitLabForbiddenError(url)
+            elif response.status_code == 404:
+                raise GitLabNotFoundError("Resource", url)
+            elif response.status_code == 429:
+                retry_after_str = response.headers.get("Retry-After")
+                retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
+                raise GitLabRateLimitError(retry_after)
+            elif response.status_code >= 400:
+                raise GitLabAPIError(response.status_code, response.text)
 
-                # Retry on 5xx errors
-                if response.status_code >= 500:
-                    last_error = Exception(
-                        f"Server error {response.status_code}: {response.text}"
-                    )
-                    time.sleep(self.retry_delay * (attempt + 1))
-                    continue
+            return response
 
-                if response.status_code == 401:
-                    raise GitLabAuthenticationError()
-                elif response.status_code == 403:
-                    raise GitLabForbiddenError(url)
-                elif response.status_code == 404:
-                    raise GitLabNotFoundError("Resource", url)
-                elif response.status_code == 429:
-                    retry_after_str = response.headers.get("Retry-After")
-                    retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
-                    raise GitLabRateLimitError(retry_after)
-                elif response.status_code >= 400:
-                    raise GitLabAPIError(response.status_code, response.text)
-
-                return response
-
-            except requests.RequestException as e:
-                last_error = e
-                time.sleep(self.retry_delay * (attempt + 1))
-
-        raise GitLabConnectionError(
-            f"Request failed after {self.max_retries} retries. Last error: {last_error}"
-        )
+        except requests.RequestException as e:
+            raise GitLabConnectionError(f"Request failed: {e}")
     def _request_all(self, method: str, url: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Make HTTP request and follow pagination to fetch all items."""
         params = kwargs.get("params", {}).copy()
