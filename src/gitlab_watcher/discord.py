@@ -88,14 +88,14 @@ class DiscordWebhook:
     def notify_no_changes_needed(
         self,
         project_name: str,
-        mr_title: str,
-        mr_url: str,
+        title: str,
+        url: str,
     ) -> bool:
-        """Notify that no changes were required after reviewing feedback."""
+        """Notify that no changes were required after review."""
         return self.send(
             f"👀 **No Changes Needed** [{project_name}]\n"
-            f"[{mr_title}]({mr_url})\n\n"
-            f"The AI reviewed the feedback but found no necessary code changes."
+            f"[{title}]({url})\n\n"
+            f"The AI reviewed the task/feedback but found no necessary code changes."
         )
 
     def notify_changes_applied(

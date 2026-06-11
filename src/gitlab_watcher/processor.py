@@ -774,6 +774,9 @@ class Processor:
         Issue description:
         {description}"""
 
+        # Snapshot HEAD so we can detect whether the LLM made any new commits
+        pre_ai_commit = git.get_current_commit()
+
         # Run AI tool
         try:
             self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
@@ -790,6 +793,12 @@ class Processor:
 
             self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
             
+            # Determine whether the LLM actually produced any work
+            post_ai_commit = git.get_current_commit()
+            has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
+            has_uncommitted = git.has_uncommitted_changes()
+            llm_made_changes = has_new_commits or has_uncommitted
+
             # Push branch
             if not git.push("origin", branch, set_upstream=True):
                 self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
@@ -834,7 +843,7 @@ class Processor:
                     return False
 
             if mr:
-                if git.has_unpushed_to_remote() or git.has_uncommitted_changes():
+                if llm_made_changes:
                     # Track the MR we just created so the watcher knows it's ours
                     self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
                     # Move to Review
