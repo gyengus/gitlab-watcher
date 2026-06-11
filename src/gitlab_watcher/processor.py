@@ -799,15 +799,19 @@ class Processor:
             has_uncommitted = git.has_uncommitted_changes()
             llm_made_changes = has_new_commits or has_uncommitted
 
-            # Push branch
-            if not git.push("origin", branch, set_upstream=True):
-                self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
-                self.discord.notify_error(
-                    project.name,
-                    f"Failed to push changes for issue #{issue.iid}",
-                    details="Git push returned failure. No changes were pushed to remote.",
-                )
-                return False
+            # If the LLM already pushed, we skip git.push
+            if not git.has_unpushed_to_remote() and not git.has_uncommitted_changes():
+                self.logger.info(f"[{project.name}] No unpushed work found for issue #{issue.iid} - assuming already pushed by AI tool.")
+            else:
+                # Push branch (safety net if LLM didn't push)
+                if not git.push("origin", branch, set_upstream=True):
+                    self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
+                    self.discord.notify_error(
+                        project.name,
+                        f"Failed to push changes for issue #{issue.iid}",
+                        details="Git push returned failure. No changes were pushed to remote.",
+                    )
+                    return False
 
             # Create MR, or reuse existing one if already open for this branch
             mr = None
