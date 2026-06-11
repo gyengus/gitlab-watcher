@@ -799,19 +799,32 @@ class Processor:
             has_uncommitted = git.has_uncommitted_changes()
             llm_made_changes = has_new_commits or has_uncommitted
 
-            # If the LLM already pushed, we skip git.push
-            if not git.has_unpushed_to_remote() and not git.has_uncommitted_changes():
-                self.logger.info(f"[{project.name}] No unpushed work found for issue #{issue.iid} - assuming already pushed by AI tool.")
+            if not llm_made_changes:
+                self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid}")
             else:
-                # Push branch (safety net if LLM didn't push)
-                if not git.push("origin", branch, set_upstream=True):
-                    self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
+                # Safety check: if there are uncommitted changes, the LLM failed its task
+                if has_uncommitted:
+                    self.logger.error(f"[{project.name}] AI tool left uncommitted changes for issue #{issue.iid}")
                     self.discord.notify_error(
                         project.name,
-                        f"Failed to push changes for issue #{issue.iid}",
-                        details="Git push returned failure. No changes were pushed to remote.",
+                        f"AI tool failed to commit changes for issue #{issue.iid}",
+                        details="The AI tool made changes but did not commit them. The watcher will not commit on its behalf to avoid poor commit messages."
                     )
                     return False
+
+                # If the LLM committed but didn't push, we provide a safety net push
+                if git.has_unpushed_to_remote():
+                    self.logger.info(f"[{project.name}] Pushing unpushed commits for issue #{issue.iid} (safety net)")
+                    if not git.push("origin", branch, set_upstream=True):
+                        self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
+                        self.discord.notify_error(
+                            project.name,
+                            f"Failed to push changes for issue #{issue.iid}",
+                            details="Git push returned failure. No changes were pushed to remote.",
+                        )
+                        return False
+                else:
+                    self.logger.info(f"[{project.name}] All changes already pushed by AI tool for issue #{issue.iid}")
 
             # Create MR, or reuse existing one if already open for this branch
             mr = None
@@ -1022,7 +1035,6 @@ class Processor:
             has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
             has_uncommitted = git.has_uncommitted_changes()
             llm_made_changes = has_new_commits or has_uncommitted
-            has_done_command = "/done" in output
 
             if not llm_made_changes and not has_done_command:
                 # Distinguish: intentional no-op vs silent failure
@@ -1071,11 +1083,22 @@ class Processor:
                 )
                 return True
 
+            # Safety check: if there are uncommitted changes, the LLM failed its task
+            if has_uncommitted:
+                self.logger.error(f"[{project.name}] AI tool left uncommitted changes for MR !{mr.iid}")
+                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
+                self.discord.notify_error(
+                    project.name,
+                    f"AI tool failed to commit changes for MR !{mr.iid}",
+                    details="The AI tool made changes but did not commit them. The watcher will not commit on its behalf to avoid poor commit messages."
+                )
+                return False
+
             # If the LLM already pushed, we skip git.push
             if not git.has_unpushed_to_remote():
                 self.logger.info(f"[{project.name}] No unpushed work found for MR !{mr.iid} - assuming already pushed by AI tool.")
             else:
-                # Push changes
+                # Push changes (safety net)
                 if not git.push("origin", mr.source_branch):
                     self.logger.error(f"[{project.name}] Failed to push changes for MR !{mr.iid}")
                     self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
