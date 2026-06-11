@@ -230,10 +230,9 @@ class Processor:
             "4. YOU MUST COMMIT YOUR CHANGES AND PUSH THE BRANCH BEFORE FINISHING.",
             "5. WRITE COMMIT MESSAGES IN ENGLISH, NO CONVENTIONAL PREFIXES (feat/fix/etc).",
             "6. DO NOT ADD CO-AUTHORED-BY SIGNATURES.",
-            "7. IF YOU NEED TEMPORARY FILES, YOU MUST USE 'tempfile.TemporaryDirectory()' AS A CONTEXT MANAGER TO ENSURE AUTOMATIC CLEANUP AND SECURE PERMISSIONS. NEVER USE PREDICTABLE PATHS."
+            "7. IF YOU NEED TEMPORARY FILES, YOU MUST USE 'tempfile.TemporaryDirectory()' AS A CONTEXT MANAGER TO ENSURE AUTOMATIC CLEANUP AND SECURE PERMISSIONS. NEVER USE PREDICTABLE PATHS.",
+            "8. IF YOU HAVE SUCCESSFULLY COMPLETED THE TASK, YOU MUST INCLUDE `/done` AT THE VERY END OF YOUR RESPONSE."
         ]
-        if is_mr_comment:
-            instructions.append("8. IF YOU HAVE SUCCESSFULLY COMPLETED THE TASK, INCLUDE `/done` AT THE VERY END OF YOUR RESPONSE.")
         instructions.append(continue_instruction)
         return "\n".join(instructions)
 
@@ -798,11 +797,25 @@ class Processor:
             has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
             has_uncommitted = git.has_uncommitted_changes()
             llm_made_changes = has_new_commits or has_uncommitted
+            is_finished = "/done" in output
 
             if not llm_made_changes:
                 self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid}")
             else:
-                # Safety check: if there are uncommitted changes, the LLM failed its task
+                # If LLM says it's done but left uncommitted changes, try a mop-up run
+                if is_finished and has_uncommitted:
+                    self.logger.info(f"[{project.name}] AI tool claims it is done but left uncommitted changes. Attempting mop-up.")
+                    mop_up_prompt = (
+                        "It looks like you completed the task but forgot to commit and push your changes. "
+                        "Please review your changes with `git status` and `git diff`, run tests to be sure, "
+                        "then commit with a descriptive message and push the branch."
+                    )
+                    success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
+                    if success_mop:
+                        has_uncommitted = git.has_uncommitted_changes()
+                        output = output_mop # Update output for later analysis
+
+                # Safety check: if there are still uncommitted changes, the LLM failed its task
                 if has_uncommitted:
                     self.logger.error(f"[{project.name}] AI tool left uncommitted changes for issue #{issue.iid}")
                     self.discord.notify_error(
@@ -1035,8 +1048,9 @@ class Processor:
             has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
             has_uncommitted = git.has_uncommitted_changes()
             llm_made_changes = has_new_commits or has_uncommitted
+            is_finished = "/done" in output
 
-            if not llm_made_changes and not has_done_command:
+            if not llm_made_changes and not is_finished:
                 # Distinguish: intentional no-op vs silent failure
                 suspected_error_pattern = None
                 for hint in NO_CHANGES_ERROR_HINTS:
@@ -1083,7 +1097,20 @@ class Processor:
                 )
                 return True
 
-            # Safety check: if there are uncommitted changes, the LLM failed its task
+            # If LLM says it's done but left uncommitted changes, try a mop-up run
+            if is_finished and has_uncommitted:
+                self.logger.info(f"[{project.name}] AI tool claims it is done but left uncommitted changes for MR !{mr.iid}. Attempting mop-up.")
+                mop_up_prompt = (
+                    "It looks like you completed the task but forgot to commit and push your changes. "
+                    "Please review your changes with `git status` and `git diff`, run tests to be sure, "
+                    "then commit with a descriptive message and push the branch."
+                )
+                success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
+                if success_mop:
+                    has_uncommitted = git.has_uncommitted_changes()
+                    output = output_mop
+
+            # Safety check: if there are still uncommitted changes, the LLM failed its task
             if has_uncommitted:
                 self.logger.error(f"[{project.name}] AI tool left uncommitted changes for MR !{mr.iid}")
                 self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
