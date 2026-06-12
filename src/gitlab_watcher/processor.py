@@ -491,6 +491,8 @@ class Processor:
             return (False, f"AI tool ({tool_name}) silence timeout: no output for {SILENCE_TIMEOUT}s.\nCommand: `{truncated_cmd}`\n\n--- Captured Output ---\n{self._get_error_snippet(full_output)}")
 
         success = returncode == 0
+        is_finished = "/done" in full_output
+        
         if success and full_output:
             # TODO: This regex for filtering AI tool's internal log lines is brittle.
             # Consider if the AI tool can be configured to suppress its own logs,
@@ -498,6 +500,13 @@ class Processor:
             sanitized_output = "\n".join([line for line in full_output.splitlines() if not re.match(r"^(INFO|DEBUG|WARN|ERROR)\s+\d{4}-\d{2}-\d{2}T", line.strip())])
             for pattern in AI_TOOL_ERROR_PATTERNS:
                 if re.search(pattern, sanitized_output, re.IGNORECASE):
+                    # If the AI tool reported completion with /done and exited with 0,
+                    # we trust it even if some error-like patterns (e.g. "Permission denied") 
+                    # appeared in the logs (often from secondary commands like mvnw).
+                    if is_finished:
+                        self.logger.warning(f"AI tool finished with /done but output contained suspicious pattern '{pattern}'. Ignoring as it exited with 0.")
+                        continue
+
                     error_lines = [line.strip() for line in sanitized_output.splitlines() if re.search(pattern, line, re.IGNORECASE)]
                     error_summary = error_lines[0] if error_lines else pattern
                     error_log_path = ai_log_dir / f"ai_error_{random_suffix}.log"
