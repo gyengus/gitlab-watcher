@@ -460,9 +460,24 @@ class Watcher:
     def _handle_merge_cleanup(self, project: ProjectConfig, state: Any) -> bool:
         """Check all tracked MRs and cleanup those that are merged or closed."""
         tracked_iids = list(state.tracked_mrs.keys())
-        project_name = project.name
+        if not tracked_iids:
+            return False
+
+        # PERF-01: Bulk fetch open MRs first to avoid N+1 queries.
+        # Only query individual MRs that are no longer present in the open list.
+        open_mrs = {
+            mr.iid for mr in self.gitlab.get_merge_requests(
+                project_id=project.project_id,
+                state="opened",
+                author_username=self.gitlab_username,
+            )
+        }
+
         for iid_str in tracked_iids:
             iid = int(iid_str)
+            if iid in open_mrs:
+                continue
+
             mr = self.gitlab.get_merge_request(project.project_id, iid)
 
             if mr and mr.state in ["merged", "closed"]:
@@ -509,11 +524,10 @@ class Watcher:
 
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
             SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
-            has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
             
-            if not has_emojis and note.id not in self._processed_notes:
-                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
-                has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
+            # PERF-02: Rely on pre-fetched award_emojis from get_notes() call above.
+            # get_notes() uses include_award_emojis=true to fetch them efficiently.
+            has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
             
             is_skipped = has_emojis or note.id in self._processed_notes
             

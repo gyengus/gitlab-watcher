@@ -202,12 +202,13 @@ class StateManager:
         This does NOT reset the processing flag. Use init_state() for
         startup initialization.
         """
-        if project_id in self._states:
-            return self._states[project_id]
+        with self._lock:
+            if project_id in self._states:
+                return self._states[project_id]
 
-        state = self._load_from_file(project_id)
-        self._states[project_id] = state
-        return state
+            state = self._load_from_file(project_id)
+            self._states[project_id] = state
+            return state
 
     def init_state(self, project_id: int) -> ProjectState:
         """Initialize state for a project, resetting processing flag.
@@ -224,9 +225,10 @@ class StateManager:
 
     def save(self, project_id: int) -> None:
         """Save state for a project (debounced)."""
-        if project_id not in self._states:
-            return
-        self._schedule_save(project_id)
+        with self._lock:
+            if project_id not in self._states:
+                return
+            self._schedule_save(project_id)
 
     def force_save(self, project_id: int) -> None:
         """Immediately save state for a project."""
@@ -246,8 +248,9 @@ class StateManager:
 
     def get(self, project_id: int, key: str) -> Optional[str | int | bool]:
         """Get a state value."""
-        state = self.load(project_id)
-        return getattr(state, key, None)
+        with self._lock:
+            state = self.load(project_id)
+            return getattr(state, key, None)
 
     def set(
         self,
@@ -256,20 +259,23 @@ class StateManager:
         value: Optional[str | int | bool],
     ) -> None:
         """Set a state value."""
-        state = self.load(project_id)
-        if hasattr(state, key):
-            setattr(state, key, value)
-            self.save(project_id)
+        with self._lock:
+            state = self.load(project_id)
+            if hasattr(state, key):
+                setattr(state, key, value)
+                self.save(project_id)
 
     def is_processing(self, project_id: int) -> bool:
         """Check if a project is currently processing."""
-        state = self.load(project_id)
-        return state.processing
+        with self._lock:
+            state = self.load(project_id)
+            return state.processing
 
     def set_processing(self, project_id: int, processing: bool) -> None:
         """Set the processing flag and force an immediate save."""
-        self.set(project_id, "processing", processing)
-        self.force_save(project_id)
+        with self._lock:
+            self.set(project_id, "processing", processing)
+            self.force_save(project_id)
 
     def update_mr_state(
         self,
@@ -279,83 +285,91 @@ class StateManager:
         branch: Optional[str],
     ) -> None:
         """Update MR tracking state and force an immediate save."""
-        state = self.load(project_id)
-        
-        # Update legacy fields for backward compatibility
-        state.last_mr_iid = mr_iid
-        state.last_mr_state = mr_state
-        state.last_branch = branch
-        
-        # Update multi-MR tracking
-        mr_id_str = str(mr_iid)
-        existing = state.tracked_mrs.get(mr_id_str, {})
-        state.tracked_mrs[mr_id_str] = existing
-        
-        existing.update({
-            "branch": branch,
-        })
-        
-        self.force_save(project_id)
+        with self._lock:
+            state = self.load(project_id)
+            
+            # Update legacy fields for backward compatibility
+            state.last_mr_iid = mr_iid
+            state.last_mr_state = mr_state
+            state.last_branch = branch
+            
+            # Update multi-MR tracking
+            mr_id_str = str(mr_iid)
+            existing = state.tracked_mrs.get(mr_id_str, {})
+            state.tracked_mrs[mr_id_str] = existing
+            
+            existing.update({
+                "branch": branch,
+            })
+            
+            self.force_save(project_id)
 
     def update_last_processed_note(self, project_id: int, note_id: int) -> None:
         """Update the last processed note ID and force an immediate save."""
-        self.set(project_id, "last_processed_note_id", note_id)
-        self.force_save(project_id)
+        with self._lock:
+            self.set(project_id, "last_processed_note_id", note_id)
+            self.force_save(project_id)
 
     def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str, created_by_watcher: bool = False) -> None:
         """Add an MR to the tracked list if not already present."""
-        state = self.load(project_id)
-        mr_id_str = str(mr_iid)
-        if mr_id_str not in state.tracked_mrs:
-            state.tracked_mrs[mr_id_str] = {
-                "branch": branch,
-                "created_by_watcher": created_by_watcher,
-            }
-            self.force_save(project_id)
-        
-        # Clear failed MR flag when MR is successfully created BY THE WATCHER
-        if created_by_watcher and branch in state.branches_with_failed_mr:
-            state.branches_with_failed_mr.remove(branch)
-            self.force_save(project_id)
+        with self._lock:
+            state = self.load(project_id)
+            mr_id_str = str(mr_iid)
+            if mr_id_str not in state.tracked_mrs:
+                state.tracked_mrs[mr_id_str] = {
+                    "branch": branch,
+                    "created_by_watcher": created_by_watcher,
+                }
+                self.force_save(project_id)
+            
+            # Clear failed MR flag when MR is successfully created BY THE WATCHER
+            if created_by_watcher and branch in state.branches_with_failed_mr:
+                state.branches_with_failed_mr.remove(branch)
+                self.force_save(project_id)
 
     def remove_tracked_mr(self, project_id: int, mr_iid: int) -> None:
         """Remove an MR from the tracked list."""
-        state = self.load(project_id)
-        mr_id_str = str(mr_iid)
-        if mr_id_str in state.tracked_mrs:
-            del state.tracked_mrs[mr_id_str]
-            
-            # If this was the last_mr_iid, clear legacy fields too
-            if state.last_mr_iid == mr_iid:
-                state.last_mr_iid = None
-                state.last_branch = None
-                state.last_mr_state = None
+        with self._lock:
+            state = self.load(project_id)
+            mr_id_str = str(mr_iid)
+            if mr_id_str in state.tracked_mrs:
+                del state.tracked_mrs[mr_id_str]
                 
-            self.force_save(project_id)
+                # If this was the last_mr_iid, clear legacy fields too
+                if state.last_mr_iid == mr_iid:
+                    state.last_mr_iid = None
+                    state.last_branch = None
+                    state.last_mr_state = None
+                    
+                self.force_save(project_id)
 
     def reset(self, project_id: int) -> None:
         """Reset state for a project."""
-        self._states[project_id] = ProjectState()
-        self.save(project_id)
+        with self._lock:
+            self._states[project_id] = ProjectState()
+            self.save(project_id)
 
     def mark_branch_failed_mr(self, project_id: int, branch: str) -> None:
         """Mark a branch as having failed MR creation."""
-        state = self.load(project_id)
-        if branch not in state.branches_with_failed_mr:
-            state.branches_with_failed_mr.add(branch)
-            self.force_save(project_id)
+        with self._lock:
+            state = self.load(project_id)
+            if branch not in state.branches_with_failed_mr:
+                state.branches_with_failed_mr.add(branch)
+                self.force_save(project_id)
 
     def has_branch_failed_mr(self, project_id: int, branch: str) -> bool:
         """Check if a branch has previously failed MR creation."""
-        state = self.load(project_id)
-        return branch in state.branches_with_failed_mr
+        with self._lock:
+            state = self.load(project_id)
+            return branch in state.branches_with_failed_mr
 
     def clear_failed_mr_flag(self, project_id: int, branch: str) -> None:
         """Clear the failed MR creation flag for a branch."""
-        state = self.load(project_id)
-        if branch in state.branches_with_failed_mr:
-            state.branches_with_failed_mr.remove(branch)
-            self.force_save(project_id)
+        with self._lock:
+            state = self.load(project_id)
+            if branch in state.branches_with_failed_mr:
+                state.branches_with_failed_mr.remove(branch)
+                self.force_save(project_id)
 
 
 __all__ = ["StateManager", "ProjectState", "DEFAULT_SAVE_DELAY"]
