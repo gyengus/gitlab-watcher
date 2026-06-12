@@ -62,6 +62,16 @@ def run_command(config: str, verbose: bool) -> None:
         sys.exit(1)
 
 
+def _init_components(config_path: str) -> tuple[Config, StateManager]:
+    """Helper to initialize shared components for CLI commands."""
+    cfg = load_config(config_path)
+    # Ensure work directory exists with restricted permissions
+    work_dir = Path("/tmp/gitlab-watcher")
+    os.makedirs(work_dir, mode=0o700, exist_ok=True)
+    state = StateManager(work_dir)
+    return cfg, state
+
+
 @cli.command(name="sync-state")
 @click.argument("project_name")
 @click.option(
@@ -78,18 +88,14 @@ def sync_state(project_name: str, config: str) -> None:
     in ``StateManager`` so that the watcher can continue normal operation.
     """
     try:
-        # Load configuration
-        cfg = load_config(config)
+        # Load configuration and state
+        cfg, state = _init_components(config)
         project = cfg.get_project_by_name(project_name)
         if not project:
             click.echo(f"Project '{project_name}' not found in config.", err=True)
             sys.exit(1)
 
         git = GitOps(project.path)
-        state_work_dir = Path("/tmp/gitlab-watcher")
-        import os
-        os.makedirs(state_work_dir, mode=0o700, exist_ok=True)
-        state = StateManager(state_work_dir)
         discord = DiscordWebhook(project.discord_webhook_url or "")
 
         # Determine current branch and push if there is unpushed work

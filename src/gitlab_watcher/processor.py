@@ -22,6 +22,7 @@ from .constants import (
     MAX_AI_LOG_SIZE,
     MAX_DESCRIPTION_LENGTH,
     MAX_DOC_CONTENT_LENGTH,
+    MAX_ERROR_SNIPPET_LENGTH,
     MAX_SLUG_LENGTH,
     MAX_TITLE_LENGTH,
     MAX_TOTAL_PROMPT_LENGTH,
@@ -271,7 +272,7 @@ class Processor:
             # Whitelist of allowed flags for AI tools
             ALLOWED_AI_FLAGS = {
                 "--model", "--thinking", "--log-level", "--print-logs", 
-                "--permission-mode", "acceptEdits", "-p", "--p", "run", "--"
+                "--permission-mode", "acceptEdits", "-p", "run", "--"
             }
             
             for i, part in enumerate(cmd_parts):
@@ -421,7 +422,7 @@ class Processor:
         full_output = "".join(all_output)
         return process.returncode, full_output, timed_out, silence_timed_out
 
-    def _get_error_snippet(self, output: str, max_chars: int = 2000) -> str:
+    def _get_error_snippet(self, output: str, max_chars: int = MAX_ERROR_SNIPPET_LENGTH) -> str:
         """Extract relevant error snippet from AI tool output."""
         patterns = AI_TOOL_ERROR_PATTERNS + NO_CHANGES_ERROR_HINTS + [r"error", r"fail", r"exception", r"traceback"]
         for pattern in patterns:
@@ -494,10 +495,14 @@ class Processor:
         is_finished = "/done" in full_output
         
         if success and full_output:
-            # TODO: This regex for filtering AI tool's internal log lines is brittle.
-            # Consider if the AI tool can be configured to suppress its own logs,
-            # or if a more robust/configurable filtering mechanism is needed.
-            sanitized_output = "\n".join([line for line in full_output.splitlines() if not re.match(r"^(INFO|DEBUG|WARN|ERROR)\s+\d{4}-\d{2}-\d{2}T", line.strip())])
+            # Improved robust filtering of AI tool's internal log lines.
+            # Filters lines starting with common log levels followed by ISO-like timestamps.
+            # Example: "INFO 2026-06-12T10:00:00.000Z"
+            log_line_pattern = r"^(INFO|DEBUG|WARN|ERROR)\s+\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}"
+            sanitized_output = "\n".join([
+                line for line in full_output.splitlines() 
+                if not re.match(log_line_pattern, line.strip())
+            ])
             for pattern in AI_TOOL_ERROR_PATTERNS:
                 if re.search(pattern, sanitized_output, re.IGNORECASE):
                     # If the AI tool reported completion with /done and exited with 0,

@@ -458,7 +458,7 @@ class TestProcessorAIToolModes:
             label_in_progress="In progress",
             label_review="Review",
             ai_tool_mode="opencode-custom",
-            ai_tool_custom_command="my-opencode --p {prompt}",
+            ai_tool_custom_command="my-opencode -p {prompt}",
         )
 
         success, output = processor._run_ai_tool("Fix the bug", project_config.path)

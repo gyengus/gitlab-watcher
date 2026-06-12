@@ -339,8 +339,11 @@ class Watcher:
 
         lock_path = self.work_dir / "gitlab-watcher.lock"
         try:
-            # Security: Use os.open with O_CREAT | O_WRONLY | O_TRUNC to ensure secure permissions
-            fd = os.open(str(lock_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            # Security: Use os.open with O_CREAT | O_WRONLY | O_TRUNC | O_NOFOLLOW to ensure secure permissions and avoid symlink attacks
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(str(lock_path), flags, 0o600)
             self._lock_file = os.fdopen(fd, "w")
             fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self._lock_file.write(str(os.getpid()))

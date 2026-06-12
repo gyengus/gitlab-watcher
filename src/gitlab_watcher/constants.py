@@ -10,6 +10,7 @@ MAX_DOC_CONTENT_LENGTH = 10000  # Maximum combined length of project documentati
 DEFAULT_AI_TOOL_TIMEOUT = 3600 # 1 hour
 MAX_TOTAL_PROMPT_LENGTH = 60000 # Overall safety limit for combined AI prompts
 MAX_AI_LOG_SIZE = 10 * 1024 * 1024 # 10 MB limit for AI tool error log files
+MAX_ERROR_SNIPPET_LENGTH = 2000 # Maximum length for error snippets in notifications
 
 # GitLab client defaults
 DEFAULT_GITLAB_TIMEOUT = 30.0
