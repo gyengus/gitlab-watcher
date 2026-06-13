@@ -331,6 +331,12 @@ class Processor:
             "TERM": "xterm-256color",
         }
         
+        # SEC-01 fix: Pass HOME and other essential environment variables
+        # so AI tools can find their configuration and cache directories.
+        for var in ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]:
+            if var in os.environ:
+                env[var] = os.environ[var]
+        
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
 
         process = subprocess.Popen(

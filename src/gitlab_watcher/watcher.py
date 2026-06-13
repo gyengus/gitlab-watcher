@@ -409,6 +409,13 @@ class Watcher:
                 self._log_warning(project.project_id, "Could not pre-fetch commits for MR !%s: %s", mr.iid, e)
                 mr_commits_cache[mr.iid] = []
 
+        # MR-01 fix: Prioritize already "In progress" issues to avoid concurrent processing
+        # on the same repository. If any issue is already being worked on, only consider
+        # those for potential retry; do not pick up new backlog issues.
+        ip_issues = [i for i in issues if self.config.label_in_progress in i.labels and self.config.label_review not in i.labels]
+        if ip_issues:
+            issues = ip_issues
+
         for issue in issues:
             has_in_progress = self.config.label_in_progress in issue.labels
             has_review = self.config.label_review in issue.labels
