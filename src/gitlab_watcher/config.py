@@ -100,7 +100,10 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
 
                 if array_line:
                     # Parse array values using shlex
-                    values.extend(shlex.split(array_line))
+                    try:
+                        values.extend(shlex.split(array_line))
+                    except ValueError:
+                        pass
 
                 i += 1
 
@@ -114,7 +117,10 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
             values_str = inline_array.group(2)
 
             # Parse array values using shlex
-            result[key] = shlex.split(values_str)
+            try:
+                result[key] = shlex.split(values_str)
+            except ValueError:
+                result[key] = []
             i += 1
             continue
 
