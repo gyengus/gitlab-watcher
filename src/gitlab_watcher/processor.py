@@ -184,19 +184,20 @@ class Processor:
         # If it looks like a path (has slashes) or is absolute
         if "/" in binary or binary_path.is_absolute():
             # Ensure it resides within a trusted system directory
-            is_trusted = any(real_binary_path.startswith(td) for td in TRUSTED_BINARY_DIRS)
+            # SEC-01 fix: use is_relative_to for robust path prefix checking
+            is_trusted = any(Path(real_binary_path).is_relative_to(Path(td)) for td in TRUSTED_BINARY_DIRS)
             
             # Also allow binaries within the current user's home (e.g. ~/.local/bin)
             # but resolve it first to ensure we compare apples to apples
-            home_bin = str((Path.home() / ".local" / "bin").resolve())
-            if not is_trusted and real_binary_path.startswith(home_bin):
+            home_bin = (Path.home() / ".local" / "bin").resolve()
+            if not is_trusted and Path(real_binary_path).is_relative_to(home_bin):
                 is_trusted = True
             
             # For development/tests, we might want to allow binaries in the current directory
             # or the project root. We check if it's in a safe relative location.
             # (Note: In production, this should be avoided unless absolutely necessary)
-            cwd = os.getcwd()
-            if not is_trusted and real_binary_path.startswith(cwd):
+            cwd = Path.cwd().resolve()
+            if not is_trusted and Path(real_binary_path).is_relative_to(cwd):
                 is_trusted = True
                 
             if not is_trusted:
