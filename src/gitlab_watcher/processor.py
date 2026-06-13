@@ -278,9 +278,10 @@ class Processor:
             for i, part in enumerate(cmd_parts):
                 # Remove placeholders before validation
                 cleaned_part = re.sub(placeholder_pattern, "", part)
-                # Tightened regex: no spaces, colons, or equals signs in general arguments
-                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./+]+$", cleaned_part):
-                    raise ValueError(f"Invalid character in AI tool command part: {part}. Shell metacharacters, spaces, colons, and equals signs are forbidden in general arguments.")
+                # Tightened regex: no spaces in general arguments. 
+                # Allowed characters include alphanumeric, hyphens, underscores, dots, forward slashes, colons, and equals signs.
+                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./+:=]+$", cleaned_part):
+                    raise ValueError(f"Invalid character in AI tool command part: {part}. Shell metacharacters and spaces are forbidden in general arguments.")
                 
                 # If it's a flag (starts with -), check against whitelist
                 # Skip the first element (binary) as it is validated separately

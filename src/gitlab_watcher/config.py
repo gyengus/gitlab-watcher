@@ -125,7 +125,11 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
             value_str = simple_match.group(2).strip()
 
             # Parse simple values using shlex
-            parts = shlex.split(value_str)
+            try:
+                parts = shlex.split(value_str)
+            except ValueError:
+                parts = []
+            
             if parts:
                 result[key] = parts[0]
             else:

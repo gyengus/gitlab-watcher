@@ -511,7 +511,12 @@ class Watcher:
 
             mr = self.gitlab.get_merge_request(project.project_id, iid)
 
-            if mr and mr.state in ["merged", "closed"]:
+            if mr is None:
+                # PERF-01: Remove tracked MR if it no longer exists or is inaccessible
+                self.state.remove_tracked_mr(project.project_id, iid)
+                continue
+
+            if mr.state in ["merged", "closed"]:
                 action = "merged" if mr.state == "merged" else "closed"
                 self._log_info(project.project_id, "MR !%s was %s", iid, action)
 
