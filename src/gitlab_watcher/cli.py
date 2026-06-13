@@ -97,7 +97,7 @@ def sync_state(project_name: str, config: str) -> None:
             sys.exit(1)
 
         git = GitOps(project.path)
-        discord = DiscordWebhook(project.discord_webhook_url or "")
+        discord = DiscordWebhook(cfg.discord_webhook)
 
         # Determine current branch and push if there is unpushed work
         current_branch = git.get_current_branch()

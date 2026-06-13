@@ -22,7 +22,6 @@ class ProjectConfig:
     project_id: int
     path: Path
     name: str
-    discord_webhook_url: str = ""
 
 
 @dataclass

@@ -268,6 +268,36 @@ class GitOps:
         except Exception:
             return False
 
+    def has_unpushed_commits(self, branch: str, remote: str = "origin") -> bool:
+        """Check if a specific branch has commits not yet pushed to its remote counterpart.
+
+        Args:
+            branch: The local branch name
+            remote: The remote name (default "origin")
+
+        Returns:
+            True if the local branch is ahead of the remote branch, False otherwise
+        """
+        try:
+            # Validate args
+            self._validate_arg(branch)
+            self._validate_arg(remote)
+            # Check if both branches exist
+            rev_parse = self._run("rev-parse", "--verify", "--", branch, check=False)
+            if rev_parse.returncode != 0:
+                return False
+            
+            rev_parse_remote = self._run("rev-parse", "--verify", "--", f"{remote}/{branch}", check=False)
+            if rev_parse_remote.returncode != 0:
+                # If remote branch doesn't exist, and local does, it's "unpushed"
+                return True
+
+            # Limit log to avoid large memory buffering
+            result = self._run("log", f"{remote}/{branch}..{branch}", "--oneline", "-n", "1", "--", check=False)
+            return bool(result.stdout.strip())
+        except Exception:
+            return False
+
     def branch_exists(self, branch: str) -> bool:
         """Check if a branch exists locally."""
         try:

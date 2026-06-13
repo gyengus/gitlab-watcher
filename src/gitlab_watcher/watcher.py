@@ -417,7 +417,7 @@ class Watcher:
                 self._log_info(project.project_id, "Found backlog issue #%s: %s", issue.iid, sanitize_for_log(issue.title))
                 return issue, False
 
-            # Retry: "In progress" but no MR exists or MR is empty (likely timed out)
+            # Retry: "In progress" but not "Review" (likely timed out or crashed)
             if has_in_progress and not has_review:
                 matching_mrs = [mr for mr in open_mrs if mr.source_branch.startswith(f"{issue.iid}-")] if open_mrs else []
 
@@ -431,6 +431,16 @@ class Watcher:
                 if not mr_commits:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but MR has no commits)", issue.iid)
                     return issue, True
+                
+                # If MR has commits but we are still "In progress", it might be because 
+                # of unpushed local work or failed label update.
+                mr = matching_mrs[0]
+                git = GitOps(project.path)
+                if git.has_unpushed_commits(mr.source_branch):
+                    self._log_info(project.project_id, "Retrying stuck issue #%s (In progress with unpushed commits on branch %s)", issue.iid, mr.source_branch)
+                    return issue, True
+
+                return None
         return None
 
     def check_issues(self, project: ProjectConfig) -> None:
