@@ -51,11 +51,14 @@ class StateManager:
         try:
             import os
             st = self.work_dir.stat()
+            if os.name != 'nt' and st.st_uid != os.getuid():
+                raise PermissionError(f"Directory {self.work_dir} is owned by UID {st.st_uid}, not current UID {os.getuid()}. Aborting for security.")
+            
             if os.name != 'nt' and st.st_uid == os.getuid():
                 os.chmod(self.work_dir, 0o700)
-            elif os.name != 'nt':
-                logger.warning(f"State directory {self.work_dir} is not owned by current user!")
-        except OSError:
+        except (OSError, PermissionError) as e:
+            if isinstance(e, PermissionError):
+                raise
             pass
         self._states: dict[int, ProjectState] = {}
         self._dirty: set[int] = set()

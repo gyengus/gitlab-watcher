@@ -194,18 +194,19 @@ class Watcher:
             
             # Ensure permissions are restricted even if it already existed
             st = self.work_dir.stat()
+            if os.name != 'nt' and st.st_uid != os.getuid():
+                raise PermissionError(f"Directory {self.work_dir} is owned by UID {st.st_uid}, not current UID {os.getuid()}. Aborting for security.")
+            
             if os.name != 'nt' and st.st_uid == os.getuid():
                 os.chmod(self.work_dir, 0o700)
-            elif os.name != 'nt':
-                self.logger.warning(f"Work directory {self.work_dir} is not owned by current user!")
             
             # Always attempt to restrict permissions if they are too broad
             if os.name != 'nt' and (st.st_mode & 0o022):
                 self.logger.warning(f"Work directory {self.work_dir} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
                 os.chmod(self.work_dir, 0o700)
-        except OSError as e:
+        except (OSError, PermissionError) as e:
             self.logger.error(f"Failed to secure work directory permissions for {self.work_dir}: {e}")
-            pass
+            raise
 
         # Initialize or use injected state manager
         self.state = state or StateManager(self.work_dir)
@@ -246,9 +247,10 @@ class Watcher:
             for result in addr_info:
                 ip_addr = result[4][0]
                 ip = ipaddress.ip_address(ip_addr)
-                # Disallow private/loopback/link-local IPs by default for stronger security
-                if ip.is_loopback or ip.is_link_local or ip.is_private:
-                    raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr} (Private/Loopback/Link-Local IPs are not allowed)")
+                # BUG-01 fix: Allow private IPs by default, only blocking loopback and link-local.
+                # This ensures compatibility with self-hosted GitLab instances on intranets.
+                if ip.is_loopback or ip.is_link_local:
+                    raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr} (Loopback/Link-Local IPs are not allowed)")
         except (socket.gaierror, ValueError) as e:
             # If resolution fails, we don't necessarily block it if it's not a loopback IP
             # but we should be wary of names like 'metadata.google.internal'
@@ -564,11 +566,14 @@ class Watcher:
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
             SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
             
-            # PERF-02: Rely on pre-fetched award_emojis from get_notes() call above.
-            # get_notes() uses include_award_emojis=true to fetch them efficiently.
-            has_emojis = any(e in note.award_emojis for e in SKIP_EMOJIS)
+            # PERF-01 fix: GitLab Notes API does not support include_award_emojis=true.
+            # We fetch emojis only when needed to avoid N+1 queries for every note.
+            is_skipped = note.id in self._processed_notes
             
-            is_skipped = has_emojis or note.id in self._processed_notes
+            if not is_skipped:
+                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
+                has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
+                is_skipped = has_emojis
             
             if is_skipped and not is_retry_request:
                 # If it's effectively skipped but we haven't updated the persistent state, do it now
