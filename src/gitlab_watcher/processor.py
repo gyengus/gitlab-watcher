@@ -196,12 +196,11 @@ class Processor:
             # For development/tests, we might want to allow binaries in the current directory
             # or the project root. We check if it's in a safe relative location.
             # (Note: In production, this should be avoided unless absolutely necessary)
-            cwd = Path.cwd().resolve()
-            if not is_trusted and Path(real_binary_path).is_relative_to(cwd):
-                is_trusted = True
+            # Remove Path(real_binary_path).is_relative_to(cwd) to prevent path traversal via malicious project repo
+            # is_trusted = True
                 
             if not is_trusted:
-                raise ValueError(f"AI tool binary located in untrusted directory: {binary}. Binary must be in {TRUSTED_BINARY_DIRS}, {home_bin}, or {cwd}")
+                raise ValueError(f"AI tool binary located in untrusted directory: {binary}. Binary must be in {TRUSTED_BINARY_DIRS} or {home_bin}")
 
             if not os.access(real_binary_path, os.X_OK):
                 raise ValueError(f"AI tool binary is not executable: {binary}")
@@ -279,8 +278,9 @@ class Processor:
             for i, part in enumerate(cmd_parts):
                 # Remove placeholders before validation
                 cleaned_part = re.sub(placeholder_pattern, "", part)
-                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./:=+ ]+$", cleaned_part):
-                    raise ValueError(f"Invalid character in AI tool command part: {part}. Shell metacharacters are forbidden.")
+                # Tightened regex: no spaces, colons, or equals signs in general arguments
+                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./+]+$", cleaned_part):
+                    raise ValueError(f"Invalid character in AI tool command part: {part}. Shell metacharacters, spaces, colons, and equals signs are forbidden in general arguments.")
                 
                 # If it's a flag (starts with -), check against whitelist
                 # Skip the first element (binary) as it is validated separately
@@ -333,9 +333,9 @@ class Processor:
         
         # SEC-01 fix: Pass HOME and other essential environment variables
         # so AI tools can find their configuration and cache directories.
-        for var in ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]:
-            if var in os.environ:
-                env[var] = os.environ[var]
+        # Only pass HOME, as USERPROFILE, APPDATA, LOCALAPPDATA are generally not needed for Linux daemons.
+        if "HOME" in os.environ:
+            env["HOME"] = os.environ["HOME"]
         
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
 
@@ -568,7 +568,7 @@ class Processor:
                 0o600
             )
             try:
-                # Explicitly enforce permissions to handle cases where file existed with broader permissions
+                # Explicitly enforce permissions immediately after opening
                 if hasattr(os, "fchmod"):
                     os.fchmod(fd, 0o600)
                 with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
@@ -712,7 +712,8 @@ class Processor:
             return False
 
         # Generate and validate branch name
-        slug = git.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
+        # Use static method directly
+        slug = GitOps.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
         branch = self._validate_branch_name(f"{issue.iid}-{slug}")
 
         self.logger.info(

@@ -99,8 +99,8 @@ class GitLabClient:
         self.logger = logging.getLogger(__name__)
         self.base_url = url.rstrip("/")
         
-        if not re.match(r"^[a-zA-Z0-9_\-\.]+$", token):
-            raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, hyphens, and dots are allowed.")
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", token):
+            raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
             
         self._token = token  # Private to avoid accidental logging
         self.max_retries = max_retries

@@ -208,23 +208,30 @@ def load_config(config_path: str) -> Config:
             val_str = str(value)
         return val_str.lower() in ("true", "yes", "1", "t", "y")
 
-    config = Config(
-        gitlab_url=get_str("GITLAB_URL"),
-        gitlab_token=get_str("GITLAB_TOKEN"),
-        gitlab_ssl_verify=get_bool("GITLAB_SSL_VERIFY", True),
-        discord_webhook=get_str("DISCORD_WEBHOOK"),
-        label_in_progress=get_str("LABEL_IN_PROGRESS", "In progress"),
-        label_review=get_str("LABEL_REVIEW", "Review"),
-        poll_interval=get_int("POLL_INTERVAL", 30),
-        ai_tool_mode=get_str("AI_TOOL_MODE", "ollama"),
-        ai_tool_custom_command=raw_config.get("AI_TOOL_CUSTOM_COMMAND", ""),
-        ai_tool_failover_model=get_str("AI_TOOL_FAILOVER_MODEL"),
-        ai_tool_timeout=get_int("AI_TOOL_TIMEOUT", 3600),
-        log_file=get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
-        log_level=get_str("LOG_LEVEL", "INFO").upper(),
-        gitlab_username=get_str("GITLAB_USERNAME", "OpenCode"),
-        default_branch=get_str("DEFAULT_BRANCH", "master"),
-    )
+    # Collect all config values
+    config_args = {
+        "gitlab_url": get_str("GITLAB_URL"),
+        "gitlab_token": get_str("GITLAB_TOKEN"),
+        "gitlab_ssl_verify": get_bool("GITLAB_SSL_VERIFY", True),
+        "discord_webhook": get_str("DISCORD_WEBHOOK"),
+        "label_in_progress": get_str("LABEL_IN_PROGRESS", "In progress"),
+        "label_review": get_str("LABEL_REVIEW", "Review"),
+        "poll_interval": get_int("POLL_INTERVAL", 30),
+        "ai_tool_mode": get_str("AI_TOOL_MODE", "ollama"),
+        "ai_tool_custom_command": raw_config.get("AI_TOOL_CUSTOM_COMMAND", ""),
+        "ai_tool_failover_model": get_str("AI_TOOL_FAILOVER_MODEL"),
+        "ai_tool_timeout": get_int("AI_TOOL_TIMEOUT", 3600),
+        "log_file": get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
+        "log_level": get_str("LOG_LEVEL", "INFO").upper(),
+        "default_branch": get_str("DEFAULT_BRANCH", "master"),
+    }
+
+    # Only override gitlab_username if explicitly set in config
+    # This allows the dataclass default to take precedence
+    if "GITLAB_USERNAME" in raw_config:
+        config_args["gitlab_username"] = get_str("GITLAB_USERNAME")
+
+    config = Config(**config_args)
 
 
     # Get project directories

@@ -88,14 +88,12 @@ class Watcher:
                 if os.name != 'nt' and st.st_uid != os.getuid():
                      self.logger.warning(f"Log directory {log_path.parent} is not owned by current user! This might be a security risk.")
 
-                # If directory is world-writable or group-writable, it's a risk (on non-Windows)
+                # Always attempt to restrict permissions if they are too broad
                 if os.name != 'nt' and (st.st_mode & 0o022):
-                    if st.st_uid == os.getuid():
-                        self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
-                        os.chmod(log_path.parent, 0o700)
-                    else:
-                        self.logger.warning(f"Log directory {log_path.parent} has insecure permissions but is not owned by current user. Cannot fix.")
-            except OSError:
+                    self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                    os.chmod(log_path.parent, 0o700)
+            except OSError as e:
+                self.logger.error(f"Failed to secure log directory permissions for {log_path.parent}: {e}")
                 pass
 
             # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
@@ -200,7 +198,13 @@ class Watcher:
                 os.chmod(self.work_dir, 0o700)
             elif os.name != 'nt':
                 self.logger.warning(f"Work directory {self.work_dir} is not owned by current user!")
-        except OSError:
+            
+            # Always attempt to restrict permissions if they are too broad
+            if os.name != 'nt' and (st.st_mode & 0o022):
+                self.logger.warning(f"Work directory {self.work_dir} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                os.chmod(self.work_dir, 0o700)
+        except OSError as e:
+            self.logger.error(f"Failed to secure work directory permissions for {self.work_dir}: {e}")
             pass
 
         # Initialize or use injected state manager
@@ -212,8 +216,8 @@ class Watcher:
 
         # Validate GitLab Token immediately to prevent header injection
         if gitlab_token:
-            if not re.match(r"^[a-zA-Z0-9_\-\.]+$", gitlab_token):
-                raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, hyphens, and dots are allowed.")
+            if not re.match(r"^[a-zA-Z0-9_\-]+$", gitlab_token):
+                raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
             if len(gitlab_token) < 8:
                 raise ValueError("GITLAB_TOKEN is too short. Minimum 8 characters required.")
 
@@ -242,18 +246,28 @@ class Watcher:
             for result in addr_info:
                 ip_addr = result[4][0]
                 ip = ipaddress.ip_address(ip_addr)
-                # Allow private IPs as it's common in corporate environments
-                if ip.is_loopback or ip.is_link_local:
-                    raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr}")
+                # Disallow private/loopback/link-local IPs by default for stronger security
+                if ip.is_loopback or ip.is_link_local or ip.is_private:
+                    raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr} (Private/Loopback/Link-Local IPs are not allowed)")
         except (socket.gaierror, ValueError) as e:
             # If resolution fails, we don't necessarily block it if it's not a loopback IP
             # but we should be wary of names like 'metadata.google.internal'
             forbidden_names = {
                 "localhost", "instance-data", # AWS/GCP/Azure metadata
-                "metadata.google.internal",
+                "metadata.google.internal", "169.254.169.254", # AWS metadata IP
             }
             if hostname in forbidden_names or hostname.startswith("127.") or hostname == "::1":
                  raise ValueError(f"GitLab URL hostname is forbidden for security: {hostname}")
+            
+            # Also check if the hostname resolves to a private IP range
+            try:
+                for result in socket.getaddrinfo(hostname, None):
+                    ip_addr = result[4][0]
+                    ip = ipaddress.ip_address(ip_addr)
+                    if ip.is_private:
+                        raise ValueError(f"GitLab URL hostname resolves to a forbidden private IP: {ip_addr}")
+            except (socket.gaierror, ValueError):
+                pass # Ignore if resolution fails or not a private IP
             
             if isinstance(e, ValueError):
                  raise e
@@ -271,15 +285,16 @@ class Watcher:
         
         # Auto-detect username from GitLab API
         self.gitlab_username = self.config.gitlab_username
-        try:
-            # In tests, mock_gitlab might not return what we expect if not configured
-            user_info = self.gitlab.get_current_user()
-            if isinstance(user_info, dict) and "username" in user_info:
-                self.gitlab_username = user_info["username"]
-                self.logger.info(f"Auto-detected GitLab username: {self.gitlab_username}")
-        except Exception as e:
-            # Don't let auto-detection failure break the watcher
-            self.logger.warning(f"Could not auto-detect GitLab username: {e}")
+        if not self.gitlab_username or self.gitlab_username == "OpenCode":
+            try:
+                # In tests, mock_gitlab might not return what we expect if not configured
+                user_info = self.gitlab.get_current_user()
+                if isinstance(user_info, dict) and "username" in user_info:
+                    self.gitlab_username = user_info["username"]
+                    self.logger.info(f"Auto-detected GitLab username: {self.gitlab_username}")
+            except Exception as e:
+                # Don't let auto-detection failure break the watcher
+                self.logger.warning(f"Could not auto-detect GitLab username: {e}")
 
         self.discord = discord or DiscordWebhook(
             webhook_url=self.config.discord_webhook
@@ -344,16 +359,21 @@ class Watcher:
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
             fd = os.open(str(lock_path), flags, 0o600)
-            self._lock_file = os.fdopen(fd, "w")
-            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self._lock_file.write(str(os.getpid()))
-            self._lock_file.flush()
-            self.logger.debug(f"Acquired instance lock at {lock_path}")
-        except (IOError, BlockingIOError):
-            print(f"Error: Another instance of gitlab-watcher is already running (locked {lock_path})", file=sys.stderr)
-            sys.exit(1)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self._lock_file = os.fdopen(fd, "w", encoding="utf-8")
+                self._lock_file.write(str(os.getpid()))
+                self._lock_file.flush()
+                self.logger.debug(f"Acquired instance lock at {lock_path}")
+            except (IOError, BlockingIOError):
+                os.close(fd)
+                print(f"Error: Another instance of gitlab-watcher is already running (locked {lock_path})", file=sys.stderr)
+                sys.exit(1)
+            except Exception as e:
+                os.close(fd)
+                self.logger.warning(f"Could not acquire instance lock: {e}")
         except Exception as e:
-            self.logger.warning(f"Could not acquire instance lock: {e}")
+            self.logger.warning(f"Failed to open lock file: {e}")
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, None]:
         """Extract GitLab URL from git remote.
