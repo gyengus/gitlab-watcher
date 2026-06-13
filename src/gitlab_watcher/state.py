@@ -190,14 +190,12 @@ class StateManager:
                 try:
                     if hasattr(os, "fchmod"):
                         os.fchmod(fd, 0o600)
-                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                        json.dump(state_dict, f, indent=2)
                 except Exception:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
+                    os.close(fd)
                     raise
+
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    json.dump(state_dict, f, indent=2)
                 
                 # Rename atomically
                 temp_file.replace(state_file)

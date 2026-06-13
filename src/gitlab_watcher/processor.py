@@ -571,14 +571,12 @@ class Processor:
                 # Explicitly enforce permissions immediately after opening
                 if hasattr(os, "fchmod"):
                     os.fchmod(fd, 0o600)
-                with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
-                    f.write(final_output)
             except Exception:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+                os.close(fd)
                 raise
+
+            with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
+                f.write(final_output)
         except Exception as e:
             self.logger.error(f"Failed to write AI log to {path}: {e}")
 
@@ -1206,53 +1204,6 @@ class Processor:
         finally:
             self.state.set_processing(project.project_id, False)
 
-
-    def retry_mr_creation_only(
-        self,
-        project: ProjectConfig,
-        issue: Issue,
-        branch: str,
-    ) -> bool:
-        """Retry creating an MR for an issue that already has a branch.
-
-        Args:
-            project: Project configuration
-            issue: The issue to create MR for
-            branch: The branch name to create MR from
-
-        Returns:
-            True if MR was created successfully, False otherwise
-        """
-        try:
-            # Create MR
-            mr = self.gitlab.create_merge_request(
-                project.project_id,
-                source_branch=branch,
-                target_branch=self.default_branch,
-                title=issue.title,
-                description=f"{issue.description}\n\nCloses #{issue.iid}",
-            )
-
-            if mr:
-                # Track the MR we just created
-                self.state.add_tracked_mr(
-                    project.project_id, mr.iid, mr.source_branch, created_by_watcher=True
-                )
-                # Move to Review
-                self.gitlab.update_issue_labels(
-                    project.project_id,
-                    issue.iid,
-                    [self.label_review],
-                )
-                self.logger.info(f"[{project.name}] Successfully created MR !{mr.iid} for branch {branch}")
-                return True
-            else:
-                self.logger.error(f"[{project.name}] Failed to create MR for branch {branch}")
-                self.state.mark_branch_failed_mr(project.project_id, branch)
-                return False
-        except Exception as e:
-            self.logger.error(f"[{project.name}] Error creating MR for branch {branch}: {str(e)}")
-            return False
 
     def cleanup_after_merge(
         self,

@@ -106,19 +106,16 @@ class Watcher:
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
             
-            fd = os.open(
-                str(log_path), 
-                flags, 
-                0o600
-            )
-            # Ensure permissions are restricted even if file already existed
+            fd = os.open(str(log_path), flags, 0o600)
             try:
+                # Ensure permissions are restricted even if file already existed
                 if hasattr(os, "fchmod"):
                     os.fchmod(fd, 0o600)
             except OSError:
                 # Might fail on some filesystems, but we tried
                 pass
-            os.close(fd)
+            finally:
+                os.close(fd)
             
             handler_path = log_path
         except (PermissionError, OSError) as e:
@@ -146,17 +143,14 @@ class Watcher:
                 if hasattr(os, "O_NOFOLLOW"):
                     flags |= os.O_NOFOLLOW
 
-                fd = os.open(
-                    str(fallback_path), 
-                    flags, 
-                    0o600
-                )
+                fd = os.open(str(fallback_path), flags, 0o600)
                 try:
                     if hasattr(os, "fchmod"):
                         os.fchmod(fd, 0o600)
                 except OSError:
                     pass
-                os.close(fd)
+                finally:
+                    os.close(fd)
                 
                 handler_path = fallback_path
                 self.logger.warning(
@@ -261,16 +255,6 @@ class Watcher:
             if hostname in forbidden_names or hostname.startswith("127.") or hostname == "::1":
                  raise ValueError(f"GitLab URL hostname is forbidden for security: {hostname}")
             
-            # Also check if the hostname resolves to a private IP range
-            try:
-                for result in socket.getaddrinfo(hostname, None):
-                    ip_addr = result[4][0]
-                    ip = ipaddress.ip_address(ip_addr)
-                    if ip.is_private:
-                        raise ValueError(f"GitLab URL hostname resolves to a forbidden private IP: {ip_addr}")
-            except (socket.gaierror, ValueError):
-                pass # Ignore if resolution fails or not a private IP
-            
             if isinstance(e, ValueError):
                  raise e
             self.logger.debug(f"Could not resolve GitLab hostname {hostname} for SSRF check: {e}")
@@ -355,27 +339,33 @@ class Watcher:
             return
 
         lock_path = self.work_dir / "gitlab-watcher.lock"
+        fd = None
         try:
             # Security: Use os.open with O_CREAT | O_WRONLY | O_TRUNC | O_NOFOLLOW to ensure secure permissions and avoid symlink attacks
             flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
             fd = os.open(str(lock_path), flags, 0o600)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                self._lock_file = os.fdopen(fd, "w", encoding="utf-8")
-                self._lock_file.write(str(os.getpid()))
-                self._lock_file.flush()
-                self.logger.debug(f"Acquired instance lock at {lock_path}")
-            except (IOError, BlockingIOError):
+            
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._lock_file = os.fdopen(fd, "w", encoding="utf-8")
+            self._lock_file.write(str(os.getpid()))
+            self._lock_file.flush()
+            self.logger.debug(f"Acquired instance lock at {lock_path}")
+        except (IOError, BlockingIOError):
+            if fd is not None:
                 os.close(fd)
-                print(f"Error: Another instance of gitlab-watcher is already running (locked {lock_path})", file=sys.stderr)
-                sys.exit(1)
-            except Exception as e:
-                os.close(fd)
-                self.logger.warning(f"Could not acquire instance lock: {e}")
+            print(f"Error: Another instance of gitlab-watcher is already running (locked {lock_path})", file=sys.stderr)
+            sys.exit(1)
         except Exception as e:
-            self.logger.warning(f"Failed to open lock file: {e}")
+            if fd is not None and self._lock_file is None:
+                os.close(fd)
+            self.logger.warning(f"Could not acquire instance lock: {e}")
+        except BaseException:
+            # Handle KeyboardInterrupt etc.
+            if fd is not None and self._lock_file is None:
+                os.close(fd)
+            raise
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, None]:
         """Extract GitLab URL from git remote.
