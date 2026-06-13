@@ -216,8 +216,8 @@ class Watcher:
 
         # Validate GitLab Token immediately to prevent header injection
         if gitlab_token:
-            if not re.match(r"^[a-zA-Z0-9_\-]+$", gitlab_token):
-                raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, and hyphens are allowed.")
+            if not re.match(r"^[a-zA-Z0-9_\-\.]+$", gitlab_token):
+                raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, hyphens, and dots are allowed.")
             if len(gitlab_token) < 8:
                 raise ValueError("GITLAB_TOKEN is too short. Minimum 8 characters required.")
 
@@ -509,7 +509,6 @@ class Watcher:
             mr.iid for mr in self.gitlab.get_merge_requests(
                 project_id=project.project_id,
                 state="opened",
-                author_username=self.gitlab_username,
             )
         }
 
