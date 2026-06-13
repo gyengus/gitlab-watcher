@@ -314,11 +314,13 @@ class GitLabClient:
             )
             notes = []
             for note in notes_data:
+                author_data = note.get("author") or {}
+                author_username = author_data.get("username", "ghost")
                 notes.append(
                     Note(
                         id=note["id"],
                         body=note["body"],
-                        author_username=note["author"]["username"],
+                        author_username=author_username,
                         system=note["system"],
                         award_emojis=[], # Emojis are fetched lazily in the watcher
                         discussion_id=note.get("discussion_id", ""),

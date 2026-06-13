@@ -86,7 +86,7 @@ class StateManager:
 
         if state_file.exists():
             try:
-                data = json.loads(state_file.read_text())
+                data = json.loads(state_file.read_text(encoding="utf-8"))
                 
                 # migration logic: if we have legacy data but no tracked_mrs, migrate it
                 if "tracked_mrs" not in data:

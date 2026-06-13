@@ -459,7 +459,7 @@ class Watcher:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress with unpushed commits on branch %s)", issue.iid, mr.source_branch)
                     return issue, True
 
-                return None
+                continue
         return None
 
     def check_issues(self, project: ProjectConfig) -> None:
