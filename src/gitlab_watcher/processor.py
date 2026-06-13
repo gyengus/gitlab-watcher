@@ -765,7 +765,7 @@ class Processor:
 
         # Check for previous work on this branch (e.g. from a timed-out run)
         continue_instruction = ""
-        has_unpushed = git.has_unpushed_to_remote()
+        has_unpushed = git.has_unpushed_commits(branch)
         has_uncommitted = git.has_uncommitted_changes()
         if has_uncommitted:
             continue_instruction = (
@@ -851,7 +851,7 @@ class Processor:
                     return False
 
                 # If the LLM committed but didn't push, we provide a safety net push
-                if git.has_unpushed_to_remote():
+                if git.has_unpushed_commits(branch):
                     self.logger.info(f"[{project.name}] Pushing unpushed commits for issue #{issue.iid} (safety net)")
                     if not git.push("origin", branch, set_upstream=True):
                         self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
@@ -1016,7 +1016,7 @@ class Processor:
 
         # Build prompt for Claude
         continue_instruction = ""
-        has_unpushed = git.has_unpushed_to_remote()
+        has_unpushed = git.has_unpushed_commits(mr.source_branch)
         has_uncommitted = git.has_uncommitted_changes()
         if has_uncommitted:
             continue_instruction = (
@@ -1147,7 +1147,7 @@ class Processor:
                 return False
 
             # If the LLM already pushed, we skip git.push
-            if not git.has_unpushed_to_remote():
+            if not git.has_unpushed_commits(mr.source_branch):
                 self.logger.info(f"[{project.name}] No unpushed work found for MR !{mr.iid} - assuming already pushed by AI tool.")
             else:
                 # Push changes (safety net)

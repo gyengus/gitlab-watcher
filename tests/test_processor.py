@@ -496,7 +496,7 @@ class TestProcessorProcessIssue:
         mock_git.branch_exists.return_value = False
         mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = True
+        mock_git.has_unpushed_commits.return_value = True
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -668,7 +668,7 @@ class TestProcessorProcessComment:
         mock_git.checkout.return_value = (True, "")
         mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = True
+        mock_git.has_unpushed_commits.return_value = True
 
         # Create processor with mocked git_factory
         processor_with_git = Processor(
@@ -877,7 +877,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.update_issue_labels = Mock(return_value=True)
@@ -911,7 +911,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.update_issue_labels = Mock(return_value=True)
@@ -983,7 +983,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = True
+        mock_git.has_unpushed_commits.return_value = True
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.update_issue_labels = Mock(return_value=True)
@@ -1023,7 +1023,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.update_issue_labels = Mock(return_value=True)
@@ -1057,7 +1057,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.update_issue_labels = Mock(return_value=True)
@@ -1107,7 +1107,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.create_note_award_emoji = Mock(return_value=True)
@@ -1132,7 +1132,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = True
-        mock_git.has_unpushed_to_remote.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.create_note_award_emoji = Mock(return_value=True)
@@ -1159,7 +1159,7 @@ class TestProcessorPromptContent:
         mock_git = MagicMock()
         mock_git.checkout.return_value = (True, "")
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
 
         p = self._make_processor(processor, mock_git)
         p.gitlab.create_note_award_emoji = Mock(return_value=True)
@@ -1273,7 +1273,7 @@ class TestProcessorCommentNoChanges:
         # 1. line 995 (before AI), 2. line 1049 (after AI), 3. line 1110 (after mop-up)
         # We need to return True for the first two and False for the third.
         mock_git.has_uncommitted_changes.side_effect = [True, True, False, False, False]
-        mock_git.has_unpushed_to_remote.return_value = True
+        mock_git.has_unpushed_commits.return_value = True
 
         p = self._make_processor(processor, mock_git)
         # Mock the whole gitlab client to avoid real network calls

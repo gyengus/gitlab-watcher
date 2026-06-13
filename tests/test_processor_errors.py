@@ -283,7 +283,7 @@ class TestProcessorMrConflict:
         mock_git.checkout.return_value = (True, "")
         mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
         mock_git.has_uncommitted_changes.return_value = False
-        mock_git.has_unpushed_to_remote.return_value = True  # LLM made commits
+        mock_git.has_unpushed_commits.return_value = True  # LLM made commits
         mock_git.generate_slug.return_value = "fix-the-bug"
 
         mock_gitlab = MagicMock()

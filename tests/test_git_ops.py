@@ -335,6 +335,41 @@ class TestGitOps:
         assert result is False
 
     @patch("subprocess.run")
+    def test_has_unpushed_commits_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_commits returns True when commits exist ahead of remote."""
+        # First call: rev-parse to verify local branch
+        # Second call: rev-parse to verify remote branch
+        # Third call: log to check diff
+        mock_run.side_effect = [
+            Mock(stdout="feature\n", returncode=0),
+            Mock(stdout="origin/feature\n", returncode=0),
+            Mock(stdout="abc1234 Some commit\n", returncode=0),
+        ]
+
+        result = git_ops.has_unpushed_commits("feature")
+
+        assert result is True
+        assert mock_run.call_count == 3
+        assert "origin/feature..feature" in mock_run.call_args_list[2][0][0]
+
+    @patch("subprocess.run")
+    def test_has_unpushed_commits_false_no_local(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_commits returns False when local branch doesn't exist."""
+        mock_run.return_value = Mock(stdout="", returncode=128)
+        result = git_ops.has_unpushed_commits("nonexistent")
+        assert result is False
+
+    @patch("subprocess.run")
+    def test_has_unpushed_commits_true_no_remote(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_commits returns True when remote branch doesn't exist."""
+        mock_run.side_effect = [
+            Mock(stdout="feature\n", returncode=0), # Local exists
+            Mock(stdout="", returncode=128),        # Remote doesn't exist
+        ]
+        result = git_ops.has_unpushed_commits("feature")
+        assert result is True
+
+    @patch("subprocess.run")
     def test_checkout_already_on_branch(self, mock_run: Mock, git_ops: GitOps) -> None:
         """Test checkout when already on the target branch."""
         mock_run.return_value = Mock(stdout="feature\n", returncode=0)

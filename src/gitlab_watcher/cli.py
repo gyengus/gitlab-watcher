@@ -101,7 +101,7 @@ def sync_state(project_name: str, config: str) -> None:
 
         # Determine current branch and push if there is unpushed work
         current_branch = git.get_current_branch()
-        if current_branch and git.has_unpushed_to_remote():
+        if current_branch and git.has_unpushed_commits(current_branch):
             pushed = git.push("origin", current_branch)
             if pushed:
                 # Reset processing flag – the watcher treats the repo as clean now
