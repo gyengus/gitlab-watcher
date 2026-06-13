@@ -318,8 +318,10 @@ class StateManager:
     def update_last_processed_note(self, project_id: int, note_id: int) -> None:
         """Update the last processed note ID and force an immediate save."""
         with self._lock:
-            self.set(project_id, "last_processed_note_id", note_id)
-            self.force_save(project_id)
+            current = self.get(project_id, "last_processed_note_id")
+            if current is None or not isinstance(current, int) or note_id > current:
+                self.set(project_id, "last_processed_note_id", note_id)
+                self.force_save(project_id)
 
     def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str, created_by_watcher: bool = False) -> None:
         """Add an MR to the tracked list if not already present."""

@@ -854,7 +854,8 @@ class TestWatcherCheckMRStatus:
         # Should NOT process comment — just mark as handled
         mock_processor.process_comment.assert_not_called()
         mock_gitlab.create_note_award_emoji.assert_called_once_with(
-            project.project_id, sample_mr.iid, 456, "white_check_mark"
+            project.project_id, sample_mr.iid, 456, "white_check_mark",
+            discussion_id="disc2"
         )
 
     def test_check_mr_status_skips_no_recommendations_case_insensitive(
@@ -928,7 +929,8 @@ class TestWatcherCheckMRStatus:
         # Should skip
         mock_processor.process_comment.assert_not_called()
         mock_gitlab.create_note_award_emoji.assert_called_once_with(
-            project.project_id, sample_mr.iid, 555, "white_check_mark"
+            project.project_id, sample_mr.iid, 555, "white_check_mark",
+            discussion_id="disc5"
         )
 
 

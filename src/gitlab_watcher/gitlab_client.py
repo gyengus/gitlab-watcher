@@ -463,6 +463,15 @@ class GitLabClient:
                 self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
             return False
 
+    def get_mr_award_emojis(self, project_id: int, mr_iid: int) -> list[dict[str, Any]]:
+        """Fetch all award emojis for a merge request."""
+        endpoint = f"/merge_requests/{mr_iid}/award_emoji"
+        try:
+            return self._request_all("GET", self._api_url(project_id, endpoint))
+        except Exception as e:
+            self.logger.debug(f"Could not fetch emojis for MR !{mr_iid}: {e}")
+            return []
+
     def delete_note_award_emoji(
         self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
     ) -> bool:

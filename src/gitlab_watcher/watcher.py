@@ -98,7 +98,7 @@ class Watcher:
 
             # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
             # Explicitly check for symlink to handle cases where the directory is not fully trusted.
-            if log_path.exists() and log_path.is_symlink():
+            if log_path.is_symlink():
                  raise PermissionError(f"Security risk: {log_path} is a symbolic link and will not be opened.")
 
             # Create file with restricted permissions (0600) if it doesn't exist.
@@ -136,7 +136,7 @@ class Watcher:
             fallback_path = fallback_dir / "watcher.log"
             try:
                 # Same restricted permissions for fallback with O_NOFOLLOW
-                if fallback_path.exists() and fallback_path.is_symlink():
+                if fallback_path.is_symlink():
                      raise PermissionError(f"Security risk: {fallback_path} is a symbolic link and will not be opened.")
 
                 flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
@@ -548,6 +548,16 @@ class Watcher:
         state = self.state.load(project.project_id)
         last_processed_id = state.last_processed_note_id or 0
 
+        # PERF-01 fix: Fetch all MR award emojis in one call to avoid N+1 queries.
+        mr_award_emojis = self.gitlab.get_mr_award_emojis(project.project_id, mr.iid)
+        # Create a mapping of note_id -> list of emoji names
+        note_emojis_map: dict[int, list[str]] = {}
+        for emoji in mr_award_emojis:
+            if emoji.get("awardable_type") == "Note":
+                note_id = emoji.get("awardable_id")
+                if isinstance(note_id, int):
+                    note_emojis_map.setdefault(note_id, []).append(emoji.get("name", ""))
+
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:
                 continue
@@ -561,14 +571,11 @@ class Watcher:
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
             SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
             
-            # PERF-01 fix: GitLab Notes API does not support include_award_emojis=true.
-            # We fetch emojis only when needed to avoid N+1 queries for every note.
-            is_skipped = note.id in self._processed_notes
+            # Use pre-fetched emojis from map
+            note_emojis = note_emojis_map.get(note.id, [])
+            has_emojis = any(e in note_emojis for e in SKIP_EMOJIS)
             
-            if not is_skipped:
-                refreshed_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
-                has_emojis = any(e in refreshed_emojis for e in SKIP_EMOJIS)
-                is_skipped = has_emojis
+            is_skipped = has_emojis or note.id in self._processed_notes
             
             if is_skipped and not is_retry_request:
                 # If it's effectively skipped but we haven't updated the persistent state, do it now
@@ -588,7 +595,11 @@ class Watcher:
             if is_positive_review:
                 self._log_info(project.project_id, "Comment on MR !%s indicates positive review — skipping", mr.iid)
                 self._processed_notes.add(note.id)
-                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note.id, "white_check_mark")
+                # CODE-01 fix: Pass discussion_id to create_note_award_emoji
+                self.gitlab.create_note_award_emoji(
+                    project.project_id, mr.iid, note.id, "white_check_mark", 
+                    discussion_id=note.discussion_id
+                )
                 self.state.update_last_processed_note(project.project_id, note.id)
                 continue
 
