@@ -495,6 +495,10 @@ class GitLabClient:
             response = self._request("GET", self._api_url(project_id, endpoint))
             emojis_data = response.json()
             
+            if not isinstance(emojis_data, list):
+                self.logger.warning(f"Unexpected response format from GitLab API when fetching emojis: {type(emojis_data)}")
+                return False
+            
             # Create a mapping of name -> list of award_ids (one emoji name can be added multiple times by different users)
             # However, our bot likely only cares about its own emojis or just any emoji with that name it has permission to delete.
             # In GitLab, you can only delete emojis you created.

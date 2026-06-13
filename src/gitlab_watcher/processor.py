@@ -476,7 +476,7 @@ class Processor:
             for pattern in ["ai_error_*.log", "ai_failure_*.log"]:
                 for f in ai_log_dir.glob(pattern):
                     try:
-                        if datetime.fromtimestamp(f.stat().st_ctime) < datetime.now() - timedelta(days=7):
+                        if datetime.fromtimestamp(f.stat().st_mtime) < datetime.now() - timedelta(days=7):
                             f.unlink()
                     except (OSError, FileNotFoundError):
                         continue
