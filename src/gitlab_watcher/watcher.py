@@ -495,24 +495,15 @@ class Watcher:
         if not tracked_iids:
             return False
 
-        # PERF-01: Bulk fetch open MRs first to avoid N+1 queries.
-        # Only query individual MRs that are no longer present in the open list.
-        open_mrs = {
-            mr.iid for mr in self.gitlab.get_merge_requests(
-                project_id=project.project_id,
-                state="opened",
-            )
-        }
-
+        # PERF-01 fix: Tracked MRs are typically few. Querying them individually via
+        # get_merge_request is more efficient than bulk-fetching ALL open MRs of the project
+        # which might involve pagination and high network overhead.
         for iid_str in tracked_iids:
             iid = int(iid_str)
-            if iid in open_mrs:
-                continue
-
             mr = self.gitlab.get_merge_request(project.project_id, iid)
 
             if mr is None:
-                # PERF-01: Remove tracked MR if it no longer exists or is inaccessible
+                # Remove tracked MR if it no longer exists or is inaccessible
                 self.state.remove_tracked_mr(project.project_id, iid)
                 continue
 
@@ -571,8 +562,12 @@ class Watcher:
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
             SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
             
-            # Use pre-fetched emojis from map
+            # BUG-01 fix: Use pre-fetched emojis from map, but fall back to per-note API
+            # call because MR-level award emoji endpoint might not return note emojis.
             note_emojis = note_emojis_map.get(note.id, [])
+            if not note_emojis:
+                note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
+            
             has_emojis = any(e in note_emojis for e in SKIP_EMOJIS)
             
             is_skipped = has_emojis or note.id in self._processed_notes

@@ -649,11 +649,8 @@ class Processor:
 
         if not self._should_failover(output):
             self.logger.info("Error not eligible for failover, returning failure")
-            self.discord.notify_error(
-                "AI Tool",
-                f"AI tool failed with default configuration and no failover attempted.",
-                details=self._get_error_snippet(output)
-            )
+            # UX-01 fix: Callers (process_issue/process_comment) already notify Discord
+            # on failure. Removing redundant notification here to avoid noise.
             return False, output
 
         if not self.ai_tool_failover_model:
