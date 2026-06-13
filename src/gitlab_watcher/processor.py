@@ -567,7 +567,10 @@ class Processor:
                 with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
                     f.write(final_output)
             except Exception:
-                os.close(fd)
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
                 raise
         except Exception as e:
             self.logger.error(f"Failed to write AI log to {path}: {e}")

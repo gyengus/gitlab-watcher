@@ -1,12 +1,13 @@
 """Click CLI entry point."""
 
+import os
 import sys
 import click
 
 
 from pathlib import Path
 
-from .config import DEFAULT_CONFIG_PATH, load_config
+from .config import DEFAULT_CONFIG_PATH, Config, load_config
 from .git_ops import GitOps
 from .state import StateManager
 from .discord import DiscordWebhook

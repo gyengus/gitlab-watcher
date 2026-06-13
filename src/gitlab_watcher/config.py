@@ -224,6 +224,7 @@ def load_config(config_path: str) -> Config:
         log_file=get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
         log_level=get_str("LOG_LEVEL", "INFO").upper(),
         gitlab_username=get_str("GITLAB_USERNAME", "OpenCode"),
+        default_branch=get_str("DEFAULT_BRANCH", "master"),
     )
 
 
