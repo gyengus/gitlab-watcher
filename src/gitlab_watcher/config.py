@@ -271,11 +271,13 @@ def load_config(config_path: str) -> Config:
         
         # Hardened path traversal protection: reject system-level paths
         # SEC-02 fix: use is_relative_to for robust path prefix checking
+        # GW-01 fix: Allow /var/tmp even though /var is sensitive
         sensitive_bases = [
             "/etc", "/root", "/var", "/bin", "/sbin", "/usr/bin", "/usr/sbin", 
             "/proc", "/sys", "/dev", "/lib", "/lib64", "/usr/lib", "/usr/lib64"
         ]
-        if any(project_path.is_relative_to(Path(base)) for base in sensitive_bases):
+        if any(project_path.is_relative_to(Path(base)) for base in sensitive_bases 
+               if base != "/var" or not project_path.is_relative_to(Path("/var/tmp"))):
             logger.warning(f"Skipping potentially sensitive project directory: {project_path}")
             continue
             
