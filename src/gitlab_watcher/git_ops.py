@@ -127,7 +127,7 @@ class GitOps:
     def fetch(self, remote: str = "origin") -> bool:
         """Fetch from remote."""
         try:
-            self._run("fetch", remote, capture_output=False)
+            self._run("fetch", remote)
             return True
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Git fetch failed: {str(e)}")
@@ -147,13 +147,13 @@ class GitOps:
             if create:
                 # Try checking out normally first (if it exists)
                 try:
-                    self._run("checkout", "--", branch, capture_output=False)
+                    self._run("checkout", "--", branch)
                     return True, ""
                 except subprocess.CalledProcessError:
                     # If normal checkout fails, try creating it
-                    self._run("checkout", "-b", branch, "--", capture_output=False)
+                    self._run("checkout", "-b", branch, "--")
             else:
-                self._run("checkout", "--", branch, capture_output=False)
+                self._run("checkout", "--", branch)
             return True, ""
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.strip() if e.stderr else str(e)
@@ -163,9 +163,9 @@ class GitOps:
         """Pull from remote."""
         try:
             if branch:
-                self._run("pull", remote, "--", branch, capture_output=False)
+                self._run("pull", remote, "--", branch)
             else:
-                self._run("pull", capture_output=False)
+                self._run("pull")
             return True
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Git pull failed: {str(e)}")
@@ -201,7 +201,7 @@ class GitOps:
         attempt = 0
         while attempt <= retries:
             try:
-                self._run(*args, capture_output=False)
+                self._run(*args)
                 return True
             except subprocess.CalledProcessError as e:
                 attempt += 1

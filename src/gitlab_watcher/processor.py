@@ -470,18 +470,20 @@ class Processor:
             # Fallback to system temp if needed, but we prefer the configured state dir
             pass
 
-        # Cleanup old log files (older than 7 days)
-        try:
-            from datetime import datetime, timedelta
-            for pattern in ["ai_error_*.log", "ai_failure_*.log"]:
-                for f in ai_log_dir.glob(pattern):
-                    try:
-                        if datetime.fromtimestamp(f.stat().st_mtime) < datetime.now() - timedelta(days=7):
-                            f.unlink()
-                    except (OSError, FileNotFoundError):
-                        continue
-        except Exception as e:
-            self.logger.warning(f"Failed to cleanup old AI tool log files: {e}")
+        # Cleanup old log files (older than 7 days), throttled to once per day
+        if time.time() - getattr(self, "_last_log_cleanup", 0) > 86400:
+            self._last_log_cleanup = time.time()
+            try:
+                from datetime import datetime, timedelta
+                for pattern in ["ai_error_*.log", "ai_failure_*.log"]:
+                    for f in ai_log_dir.glob(pattern):
+                        try:
+                            if datetime.fromtimestamp(f.stat().st_mtime) < datetime.now() - timedelta(days=7):
+                                f.unlink()
+                        except (OSError, FileNotFoundError):
+                            continue
+            except Exception as e:
+                self.logger.warning(f"Failed to cleanup old AI tool log files: {e}")
 
         # Generate a unique, unpredictable filename for the log
         import secrets
@@ -690,104 +692,102 @@ class Processor:
         Returns:
             True if successful, False otherwise
         """
-        git = self.git_factory(project.path)
-
-        # Read project documentation files
-        doc_content = self._read_project_docs(project.path)
-
-        # Validate issue title
         try:
-            validated_title = self._validate_issue_title(issue.title)
-        except ValueError as e:
-            self.logger.error(f"Invalid issue title: {e}")
-            self.discord.notify_error(
+            git = self.git_factory(project.path)
+
+            # Read project documentation files
+            doc_content = self._read_project_docs(project.path)
+
+            # Validate issue title
+            try:
+                validated_title = self._validate_issue_title(issue.title)
+            except ValueError as e:
+                self.logger.error(f"Invalid issue title: {e}")
+                self.discord.notify_error(
+                    project.name,
+                    f"Invalid issue title: {e}",
+                )
+                return False
+
+            # Generate and validate branch name
+            # Use static method directly
+            slug = GitOps.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
+            branch = self._validate_branch_name(f"{issue.iid}-{slug}")
+
+            self.logger.info(
+                f"[{project.name}] Processing issue #{issue.iid}: {sanitize_for_log(validated_title)}"
+            )
+            self.logger.debug(f"[{project.name}] Creating branch: {branch}")
+
+            self.discord.notify_issue_started(
                 project.name,
-                f"Invalid issue title: {e}",
-            )
-            self.state.set_processing(project.project_id, False)
-            return False
-
-        # Generate and validate branch name
-        # Use static method directly
-        slug = GitOps.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
-        branch = self._validate_branch_name(f"{issue.iid}-{slug}")
-
-        self.logger.info(
-            f"[{project.name}] Processing issue #{issue.iid}: {sanitize_for_log(validated_title)}"
-        )
-        self.logger.debug(f"[{project.name}] Creating branch: {branch}")
-
-        self.discord.notify_issue_started(
-            project.name,
-            validated_title,
-            issue.web_url,
-            branch,
-            is_retry=is_retry,
-        )
-
-        # Add "In progress" label
-        self.gitlab.update_issue_labels(
-            project.project_id,
-            issue.iid,
-            issue.labels + [self.label_in_progress],
-        )
-
-        # Create branch
-        try:
-            if not is_retry:
-                self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull)")
-                git.fetch()
-                git.checkout(self.default_branch)
-                git.pull()
-            else:
-                self.logger.info(f"[{project.name}] Retrying issue: skipping default branch preparation")
-        except Exception as e:
-            self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
-            self.discord.notify_error(
-                project.name,
-                f"Git preparation failed on branch `{self.default_branch}` (fetch/checkout/pull)",
-                details=str(e),
-            )
-            self.state.set_processing(project.project_id, False)
-            return False
-
-        self.logger.info(f"[{project.name}] Creating branch: {branch}")
-        success, error = git.checkout(branch, create=True)
-        if not success:
-            self.logger.error(f"[{project.name}] Could not create branch {branch}: {error}")
-            self.discord.notify_error(
-                project.name,
-                f"Could not create branch `{branch}`",
-                details=error,
-            )
-            self.state.set_processing(project.project_id, False)
-            return False
-
-        # Check for previous work on this branch (e.g. from a timed-out run)
-        continue_instruction = ""
-        has_unpushed = git.has_unpushed_commits(branch)
-        has_uncommitted = git.has_uncommitted_changes()
-        if has_uncommitted:
-            continue_instruction = (
-                "\n\nNote: This branch has uncommitted changes from a previous run. "
-                "Please review them with git diff and git status, commit all changes, "
-                "then push the branch and continue from where the previous work left off. "
-                "Do not start over."
-            )
-        elif has_unpushed:
-            continue_instruction = (
-                "\n\nNote: This branch already has previous work (commits exist but not pushed). "
-                "Please review the current state with git log and git diff, "
-                "push the existing commits, then continue from where the previous work left off. "
-                "Do not start over."
+                validated_title,
+                issue.web_url,
+                branch,
+                is_retry=is_retry,
             )
 
-        # Build prompt for Claude (truncate description if too long)
-        description = issue.description or ""
-        if len(description) > MAX_DESCRIPTION_LENGTH:
-            description = description[:MAX_DESCRIPTION_LENGTH]
+            # Add "In progress" label
+            self.gitlab.update_issue_labels(
+                project.project_id,
+                issue.iid,
+                issue.labels + [self.label_in_progress],
+            )
 
-        prompt = f"""{self._get_instructions(continue_instruction)}
+            # Create branch
+            try:
+                if not is_retry:
+                    self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull)")
+                    git.fetch()
+                    git.checkout(self.default_branch)
+                    git.pull()
+                else:
+                    self.logger.info(f"[{project.name}] Retrying issue: skipping default branch preparation")
+            except Exception as e:
+                self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
+                self.discord.notify_error(
+                    project.name,
+                    f"Git preparation failed on branch `{self.default_branch}` (fetch/checkout/pull)",
+                    details=str(e),
+                )
+                return False
+
+            self.logger.info(f"[{project.name}] Creating branch: {branch}")
+            success, error = git.checkout(branch, create=True)
+            if not success:
+                self.logger.error(f"[{project.name}] Could not create branch {branch}: {error}")
+                self.discord.notify_error(
+                    project.name,
+                    f"Could not create branch `{branch}`",
+                    details=error,
+                )
+                return False
+
+            # Check for previous work on this branch (e.g. from a timed-out run)
+            continue_instruction = ""
+            has_unpushed = git.has_unpushed_commits(branch)
+            has_uncommitted = git.has_uncommitted_changes()
+            if has_uncommitted:
+                continue_instruction = (
+                    "\n\nNote: This branch has uncommitted changes from a previous run. "
+                    "Please review them with git diff and git status, commit all changes, "
+                    "then push the branch and continue from where the previous work left off. "
+                    "Do not start over."
+                )
+            elif has_unpushed:
+                continue_instruction = (
+                    "\n\nNote: This branch already has previous work (commits exist but not pushed). "
+                    "Please review the current state with git log and git diff, "
+                    "push the existing commits, then continue from where the previous work left off. "
+                    "Do not start over."
+                )
+
+            # Build prompt for Claude (truncate description if too long)
+            description = issue.description or ""
+            if len(description) > MAX_DESCRIPTION_LENGTH:
+                description = description[:MAX_DESCRIPTION_LENGTH]
+
+            prompt = f"""{self._get_instructions(continue_instruction)}
 
         === PROJECT DOCUMENTATION ===
         {doc_content}
@@ -798,151 +798,158 @@ class Processor:
         Issue description:
         {description}"""
 
-        # Snapshot HEAD so we can detect whether the LLM made any new commits
-        pre_ai_commit = git.get_current_commit()
+            # Snapshot HEAD so we can detect whether the LLM made any new commits
+            pre_ai_commit = git.get_current_commit()
 
-        # Run AI tool
-        try:
-            self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
-            success, output = self._run_ai_tool_with_failover(prompt, project.path)
-            
-            if not success:
-                self.logger.error(f"[{project.name}] AI tool failed for issue #{issue.iid}: {output}")
-                self.discord.notify_error(
-                    project.name,
-                    f"AI tool failed for issue #{issue.iid}",
-                    details=output,
-                )
-                return False
-
-            self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
-            
-            # Determine whether the LLM actually produced any work
-            post_ai_commit = git.get_current_commit()
-            has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
-            has_uncommitted = git.has_uncommitted_changes()
-            llm_made_changes = has_new_commits or has_uncommitted
-            is_finished = "/done" in output
-
-            if not llm_made_changes:
-                self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid}")
-            else:
-                # If LLM says it's done but left uncommitted changes, try a mop-up run
-                if is_finished and has_uncommitted:
-                    self.logger.info(f"[{project.name}] AI tool claims it is done but left uncommitted changes. Attempting mop-up.")
-                    mop_up_prompt = (
-                        "It looks like you completed the task but forgot to commit and push your changes. "
-                        "Please review your changes with `git status` and `git diff`, run tests to be sure, "
-                        "then commit with a descriptive message and push the branch."
-                    )
-                    success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
-                    if success_mop:
-                        has_uncommitted = git.has_uncommitted_changes()
-                        output = output_mop # Update output for later analysis
-
-                # Safety check: if there are still uncommitted changes, the LLM failed its task
-                if has_uncommitted:
-                    self.logger.error(f"[{project.name}] AI tool left uncommitted changes for issue #{issue.iid}")
+            # Run AI tool
+            try:
+                self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
+                success, output = self._run_ai_tool_with_failover(prompt, project.path)
+                
+                if not success:
+                    self.logger.error(f"[{project.name}] AI tool failed for issue #{issue.iid}: {output}")
                     self.discord.notify_error(
                         project.name,
-                        f"AI tool failed to commit changes for issue #{issue.iid}",
-                        details="The AI tool made changes but did not commit them. The watcher will not commit on its behalf to avoid poor commit messages."
+                        f"AI tool failed for issue #{issue.iid}",
+                        details=output,
                     )
                     return False
 
-                # If the LLM committed but didn't push, we provide a safety net push
-                if git.has_unpushed_commits(branch):
-                    self.logger.info(f"[{project.name}] Pushing unpushed commits for issue #{issue.iid} (safety net)")
-                    if not git.push("origin", branch, set_upstream=True):
-                        self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
+                self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
+                
+                # Determine whether the LLM actually produced any work
+                post_ai_commit = git.get_current_commit()
+                has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
+                has_uncommitted = git.has_uncommitted_changes()
+                llm_made_changes = has_new_commits or has_uncommitted
+                is_finished = "/done" in output
+
+                if not llm_made_changes:
+                    self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid}")
+                else:
+                    # If LLM says it's done but left uncommitted changes, try a mop-up run
+                    if is_finished and has_uncommitted:
+                        self.logger.info(f"[{project.name}] AI tool claims it is done but left uncommitted changes. Attempting mop-up.")
+                        mop_up_prompt = (
+                            "It looks like you completed the task but forgot to commit and push your changes. "
+                            "Please review your changes with `git status` and `git diff`, run tests to be sure, "
+                            "then commit with a descriptive message and push the branch."
+                        )
+                        success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
+                        if success_mop:
+                            has_uncommitted = git.has_uncommitted_changes()
+                            output = output_mop # Update output for later analysis
+
+                    # Safety check: if there are still uncommitted changes, the LLM failed its task
+                    if has_uncommitted:
+                        self.logger.error(f"[{project.name}] AI tool left uncommitted changes for issue #{issue.iid}")
                         self.discord.notify_error(
                             project.name,
-                            f"Failed to push changes for issue #{issue.iid}",
-                            details="Git push returned failure. No changes were pushed to remote.",
+                            f"AI tool failed to commit changes for issue #{issue.iid}",
+                            details="The AI tool made changes but did not commit them. The watcher will not commit on its behalf to avoid poor commit messages."
                         )
                         return False
-                else:
-                    self.logger.info(f"[{project.name}] All changes already pushed by AI tool for issue #{issue.iid}")
 
-            # Create MR, or reuse existing one if already open for this branch
-            mr = None
-            try:
-                mr = self.gitlab.create_merge_request(
-                    project.project_id,
-                    source_branch=branch,
-                    target_branch=self.default_branch,
-                    title=issue.title,
-                    description=f"{issue.description}\n\nCloses #{issue.iid}",
-                )
-            except GitLabAPIError as api_err:
-                if api_err.status_code == 409:
-                    # GitLab 409: an open MR already exists for this branch.
-                    # This is not an error — find and reuse the existing MR.
-                    self.logger.info(
-                        f"[{project.name}] MR already exists for branch `{branch}` (HTTP 409) "
-                        "— reusing the existing open MR"
-                    )
-                    open_mrs = self.gitlab.get_merge_requests(
+                    # If the LLM committed but didn't push, we provide a safety net push
+                    if git.has_unpushed_commits(branch):
+                        self.logger.info(f"[{project.name}] Pushing unpushed commits for issue #{issue.iid} (safety net)")
+                        if not git.push("origin", branch, set_upstream=True):
+                            self.logger.error(f"[{project.name}] Failed to push changes for issue #{issue.iid}")
+                            self.discord.notify_error(
+                                project.name,
+                                f"Failed to push changes for issue #{issue.iid}",
+                                details="Git push returned failure. No changes were pushed to remote.",
+                            )
+                            return False
+                    else:
+                        self.logger.info(f"[{project.name}] All changes already pushed by AI tool for issue #{issue.iid}")
+
+                # Create MR, or reuse existing one if already open for this branch
+                mr = None
+                try:
+                    mr = self.gitlab.create_merge_request(
                         project.project_id,
-                        state="opened",
+                        source_branch=branch,
+                        target_branch=self.default_branch,
+                        title=issue.title,
+                        description=f"{issue.description}\n\nCloses #{issue.iid}",
                     )
-                    mr = next((m for m in open_mrs if m.source_branch == branch), None)
-                
-                if mr is None:
-                    self.logger.error(f"[{project.name}] GitLab API Error during MR creation/lookup: {api_err}")
+                except GitLabAPIError as api_err:
+                    if api_err.status_code == 409:
+                        # GitLab 409: an open MR already exists for this branch.
+                        # This is not an error — find and reuse the existing MR.
+                        self.logger.info(
+                            f"[{project.name}] MR already exists for branch `{branch}` (HTTP 409) "
+                            "— reusing the existing open MR"
+                        )
+                        open_mrs = self.gitlab.get_merge_requests(
+                            project.project_id,
+                            state="opened",
+                        )
+                        mr = next((m for m in open_mrs if m.source_branch == branch), None)
+                    
+                    if mr is None:
+                        self.logger.error(f"[{project.name}] GitLab API Error during MR creation/lookup: {api_err}")
+                        self.discord.notify_error(
+                            project.name,
+                            f"GitLab API Error during MR creation/lookup (issue #{issue.iid})",
+                            details=f"Status Code: {api_err.status_code}\nMessage: {api_err.message}",
+                        )
+                        return False
+
+                if mr:
+                    if llm_made_changes:
+                        # Track the MR we just created so the watcher knows it's ours
+                        self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
+                        # Move to Review
+                        self.gitlab.update_issue_labels(
+                            project.project_id,
+                            issue.iid,
+                            [self.label_review],
+                        )
+                        self.discord.notify_mr_created(
+                            project.name,
+                            issue.title,
+                            mr.web_url,
+                            issue.iid,
+                        )
+                    else:
+                        self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - moving to Review with AI-No-Changes label")
+                        self.gitlab.update_issue_labels(
+                            project.project_id,
+                            issue.iid,
+                            [self.label_review, "AI-No-Changes"],
+                        )
+                        self.discord.notify_no_changes_needed(
+                            project.name,
+                            issue.title,
+                            mr.web_url,
+                        )
+                else:
                     self.discord.notify_error(
                         project.name,
-                        f"GitLab API Error during MR creation/lookup (issue #{issue.iid})",
-                        details=f"Status Code: {api_err.status_code}\nMessage: {api_err.message}",
+                        f"MR creation failed for issue #{issue.iid}",
                     )
                     return False
-
-            if mr:
-                if llm_made_changes:
-                    # Track the MR we just created so the watcher knows it's ours
-                    self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
-                    # Move to Review
-                    self.gitlab.update_issue_labels(
-                        project.project_id,
-                        issue.iid,
-                        [self.label_review],
-                    )
-                    self.discord.notify_mr_created(
-                        project.name,
-                        issue.title,
-                        mr.web_url,
-                        issue.iid,
-                    )
-                else:
-                    self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid} - moving to Review with AI-No-Changes label")
-                    self.gitlab.update_issue_labels(
-                        project.project_id,
-                        issue.iid,
-                        [self.label_review, "AI-No-Changes"],
-                    )
-                    self.discord.notify_no_changes_needed(
-                        project.name,
-                        issue.title,
-                        mr.web_url,
-                    )
-            else:
+                return True
+            except Exception as e:
+                self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
                 self.discord.notify_error(
                     project.name,
-                    f"MR creation failed for issue #{issue.iid}",
+                    f"Unexpected error during AI tool execution (issue #{issue.iid})",
+                    details=str(e),
                 )
                 return False
-            return True
         except Exception as e:
-            self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
+            self.logger.error(f"[{project.name}] Critical error in process_issue: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Unexpected error during AI tool execution (issue #{issue.iid})",
+                f"Critical error in process_issue (issue #{issue.iid})",
                 details=str(e),
             )
             return False
         finally:
             self.state.set_processing(project.project_id, False)
-
 
     def _read_project_docs(self, repo_path: Path) -> str:
         """Read relevant project documentation files (CLAUDE.md, ARCHITECTURE.md, etc)."""
@@ -983,219 +990,218 @@ class Processor:
         Returns:
             True if successful, False otherwise
         """
-        git = self.git_factory(project.path)
-
-        # Read project documentation files
-        doc_content = self._read_project_docs(project.path)
-
-        self.discord.send(
-            f"🤖 **Processing Comment** [{project.name}]\n"
-            f"[{mr.title}]({mr.web_url})\n\n"
-            f"Starting to work on: {comment}"
-        )
-
-        # Add eyes emoji to indicate processing has started
-        self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "eyes", discussion_id=discussion_id)
-
-        # Switch to MR branch
         try:
-            self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull/rebase)")
-            git.fetch()
-            git.checkout(mr.source_branch)
-            git.pull("origin", mr.source_branch)
-        except Exception as e:
-            self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
-            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
-            self.discord.notify_error(
-                project.name,
-                f"Git preparation failed on branch `{mr.source_branch}` (fetch/checkout/pull)",
-                details=str(e),
-            )
-            self.state.set_processing(project.project_id, False)
-            return False
+            git = self.git_factory(project.path)
 
-        # Build prompt for Claude
-        continue_instruction = ""
-        has_unpushed = git.has_unpushed_commits(mr.source_branch)
-        has_uncommitted = git.has_uncommitted_changes()
-        if has_uncommitted:
-            continue_instruction = (
-                "\n\nNote: This branch has uncommitted changes from a previous run. "
-                "Please review them with git diff and git status, commit all changes, "
-                "then push the branch and continue from where the previous work left off. "
-                "Do not start over."
-            )
-        elif has_unpushed:
-            continue_instruction = (
-                "\n\nNote: This branch already has previous work (commits exist but not pushed). "
-                "Please review the current state with git log and git diff, "
-                "push the existing commits, then continue from where the previous work left off. "
-                "Do not start over."
+            # Read project documentation files
+            doc_content = self._read_project_docs(project.path)
+
+            self.discord.send(
+                f"🤖 **Processing Comment** [{project.name}]\n"
+                f"[{mr.title}]({mr.web_url})\n\n"
+                f"Starting to work on: {comment}"
             )
 
-        prompt = f"""{self._get_instructions(continue_instruction, is_mr_comment=True)}
+            # Add eyes emoji to indicate processing has started
+            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "eyes", discussion_id=discussion_id)
 
-        === PROJECT DOCUMENTATION ===
-        {doc_content}
-
-        === TASK ===
-        You are working on a merge request titled: {mr.title}
-        Branch: {mr.source_branch}
-
-        A reviewer left this feedback:
-        {comment}"""
-
-        # Snapshot HEAD so we can detect whether the LLM made any new commits
-        pre_ai_commit = git.get_current_commit()
-
-        # Run AI tool
-        try:
-            self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
-            success, output = self._run_ai_tool_with_failover(prompt, project.path)
-            
-            if not success:
-                self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
+            # Switch to MR branch
+            try:
+                self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull/rebase)")
+                git.fetch()
+                git.checkout(mr.source_branch)
+                git.pull("origin", mr.source_branch)
+            except Exception as e:
+                self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
                 self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
                 self.discord.notify_error(
                     project.name,
-                    f"AI tool failed for merge request !{mr.iid}",
-                    details=output,
+                    f"Git preparation failed on branch `{mr.source_branch}` (fetch/checkout/pull)",
+                    details=str(e),
                 )
                 return False
 
-            self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
-
-            # Cleanup processing emoji if it was set
-            self.gitlab.delete_note_award_emoji(project.project_id, mr.iid, note_id, "eyes")
-
-            # Determine whether the LLM actually produced any work
-            post_ai_commit = git.get_current_commit()
-            has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
+            # Build prompt for Claude
+            continue_instruction = ""
+            has_unpushed = git.has_unpushed_commits(mr.source_branch)
             has_uncommitted = git.has_uncommitted_changes()
-            llm_made_changes = has_new_commits or has_uncommitted
-            is_finished = "/done" in output
+            if has_uncommitted:
+                continue_instruction = (
+                    "\n\nNote: This branch has uncommitted changes from a previous run. "
+                    "Please review them with git diff and git status, commit all changes, "
+                    "then push the branch and continue from where the previous work left off. "
+                    "Do not start over."
+                )
+            elif has_unpushed:
+                continue_instruction = (
+                    "\n\nNote: This branch already has previous work (commits exist but not pushed). "
+                    "Please review the current state with git log and git diff, "
+                    "push the existing commits, then continue from where the previous work left off. "
+                    "Do not start over."
+                )
 
-            if not llm_made_changes and not is_finished:
-                # Distinguish: intentional no-op vs silent failure
-                suspected_error_pattern = None
-                for hint in NO_CHANGES_ERROR_HINTS:
-                    if re.search(hint, output, re.IGNORECASE):
-                        suspected_error_pattern = hint
-                        break
+            prompt = f"""{self._get_instructions(continue_instruction, is_mr_comment=True)}
 
-                if suspected_error_pattern:
-                    self.logger.error(
-                        f"[{project.name}] AI tool made no changes for MR !{mr.iid} and output "
-                        f"contains a suspected error indicator ('{suspected_error_pattern}'). "
-                        "Treating as failure."
-                    )
-                    self.gitlab.create_note_award_emoji(
-                        project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id
-                    )
-                    # Include a short excerpt so the team can see what went wrong
-                    output_excerpt = output[-1000:] if len(output) > 1000 else output
+            === PROJECT DOCUMENTATION ===
+            {doc_content}
+
+            === TASK ===
+            You are working on a merge request titled: {mr.title}
+            Branch: {mr.source_branch}
+
+            A reviewer left this feedback:
+            {comment}"""
+
+            # Snapshot HEAD so we can detect whether the LLM made any new commits
+            pre_ai_commit = git.get_current_commit()
+
+            # Run AI tool
+            try:
+                self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
+                success, output = self._run_ai_tool_with_failover(prompt, project.path)
+                
+                if not success:
+                    self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
+                    self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
                     self.discord.notify_error(
                         project.name,
-                        f"AI tool made no changes for MR !{mr.iid} — possible silent failure",
-                        details=output_excerpt,
+                        f"AI tool failed for merge request !{mr.iid}",
+                        details=output,
                     )
                     return False
 
-                # Clean output, no error hints → LLM reviewed and found nothing to do
-                self.logger.info(
-                    f"[{project.name}] AI tool made no changes for MR !{mr.iid} "
-                    "and output contains no error indicators — treating as no-op review."
+                self.logger.info(f"[{project.name}] AI tool completed successfully for MR !{mr.iid}")
+
+                # Cleanup processing emoji if it was set
+                self.gitlab.delete_note_award_emoji(project.project_id, mr.iid, note_id, "eyes")
+
+                # Determine whether the LLM actually produced any work
+                post_ai_commit = git.get_current_commit()
+                has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
+                has_uncommitted = git.has_uncommitted_changes()
+                llm_made_changes = has_new_commits or has_uncommitted
+                is_finished = "/done" in output
+
+                if not llm_made_changes and not is_finished:
+                    # Distinguish: intentional no-op vs silent failure
+                    suspected_error_pattern = None
+                    for hint in NO_CHANGES_ERROR_HINTS:
+                        if re.search(hint, output, re.IGNORECASE):
+                            suspected_error_pattern = hint
+                            break
+
+                    if suspected_error_pattern:
+                        self.logger.error(
+                            f"[{project.name}] AI tool made no changes for MR !{mr.iid} and output "
+                            f"contains a suspected error indicator ('{suspected_error_pattern}'). "
+                            "Treating as failure."
+                        )
+                        self.gitlab.create_note_award_emoji(
+                            project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id
+                        )
+                        # Include a short excerpt so the team can see what went wrong
+                        output_excerpt = output[-1000:] if len(output) > 1000 else output
+                        self.discord.notify_error(
+                            project.name,
+                            f"AI tool made no changes for MR !{mr.iid} — possible silent failure",
+                            details=output_excerpt,
+                        )
+                        return False
+
+                    # Clean output, no error hints → LLM reviewed and found nothing to do
+                    self.logger.info(
+                        f"[{project.name}] AI tool made no changes for MR !{mr.iid} "
+                        "and output contains no error indicators — treating as no-op review."
+                    )
+                    # The 'eyes' emoji added at the start of processing remains as the marker.
+                    # If the comment is part of a discussion thread, reply to explain.
+                    if discussion_id:
+                        self.gitlab.create_note_reply(
+                            project.project_id,
+                            mr.iid,
+                            discussion_id,
+                            "\u2705 Reviewed. No code changes were necessary to address this feedback.",
+                        )
+                    self.discord.notify_no_changes_needed(
+                        project.name,
+                        mr.title,
+                        mr.web_url,
+                    )
+                    return True
+
+                # If LLM says it's done but left uncommitted changes, try a mop-up run
+                if is_finished and has_uncommitted:
+                    self.logger.info(f"[{project.name}] AI tool claims it is done but left uncommitted changes for MR !{mr.iid}. Attempting mop-up.")
+                    mop_up_prompt = (
+                        "It looks like you completed the task but forgot to commit and push your changes. "
+                        "Please review your changes with `git status` and `git diff`, run tests to be sure, "
+                        "then commit with a descriptive message and push the branch."
+                    )
+                    success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
+                    if success_mop:
+                        has_uncommitted = git.has_uncommitted_changes()
+                        output = output_mop
+
+                # Safety check: if there are still uncommitted changes, the LLM failed its task
+                if has_uncommitted:
+                    self.logger.error(f"[{project.name}] AI tool left uncommitted changes for MR !{mr.iid}")
+                    self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
+                    self.discord.notify_error(
+                        project.name,
+                        f"AI tool failed to commit changes for MR !{mr.iid}",
+                        details="The AI tool made changes but did not commit them. The watcher will not commit on its behalf to avoid poor commit messages."
+                    )
+                    return False
+
+                # If the LLM already pushed, we skip git.push
+                if not git.has_unpushed_commits(mr.source_branch):
+                    self.logger.info(f"[{project.name}] No unpushed work found for MR !{mr.iid} - assuming already pushed by AI tool.")
+                else:
+                    # Push changes (safety net)
+                    if not git.push("origin", mr.source_branch):
+                        self.logger.error(f"[{project.name}] Failed to push changes for MR !{mr.iid}")
+                        self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
+                        self.discord.notify_error(
+                            project.name,
+                            f"Failed to push changes for MR !{mr.iid}",
+                        )
+                        return False
+
+                success = self.gitlab.create_note_award_emoji(
+                    project.project_id, 
+                    mr.iid,
+                    note_id, 
+                    "white_check_mark",
+                    discussion_id=discussion_id
                 )
-                # The 'eyes' emoji added at the start of processing remains as the marker.
-                # If the comment is part of a discussion thread, reply to explain.
-                if discussion_id:
+                
+                if not success and discussion_id:
+                    self.logger.warning(f"Failed to add emoji to note {note_id}, using fallback reply to discussion {discussion_id}.")
                     self.gitlab.create_note_reply(
                         project.project_id,
                         mr.iid,
                         discussion_id,
-                        "\u2705 Reviewed. No code changes were necessary to address this feedback.",
+                        "Handled by AI bot ✅"
                     )
-                self.discord.notify_no_changes_needed(
+                self.discord.notify_changes_applied(
                     project.name,
                     mr.title,
                     mr.web_url,
                 )
                 return True
-
-            # If LLM says it's done but left uncommitted changes, try a mop-up run
-            if is_finished and has_uncommitted:
-                self.logger.info(f"[{project.name}] AI tool claims it is done but left uncommitted changes for MR !{mr.iid}. Attempting mop-up.")
-                mop_up_prompt = (
-                    "It looks like you completed the task but forgot to commit and push your changes. "
-                    "Please review your changes with `git status` and `git diff`, run tests to be sure, "
-                    "then commit with a descriptive message and push the branch."
-                )
-                success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
-                if success_mop:
-                    has_uncommitted = git.has_uncommitted_changes()
-                    output = output_mop
-
-            # Safety check: if there are still uncommitted changes, the LLM failed its task
-            if has_uncommitted:
-                self.logger.error(f"[{project.name}] AI tool left uncommitted changes for MR !{mr.iid}")
-                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
+            except Exception as e:
+                self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
                 self.discord.notify_error(
                     project.name,
-                    f"AI tool failed to commit changes for MR !{mr.iid}",
-                    details="The AI tool made changes but did not commit them. The watcher will not commit on its behalf to avoid poor commit messages."
+                    f"Unexpected error during AI tool execution (MR !{mr.iid})",
+                    details=str(e),
                 )
                 return False
-
-            # If the LLM already pushed, we skip git.push
-            if not git.has_unpushed_commits(mr.source_branch):
-                self.logger.info(f"[{project.name}] No unpushed work found for MR !{mr.iid} - assuming already pushed by AI tool.")
-            else:
-                # Push changes (safety net)
-                if not git.push("origin", mr.source_branch):
-                    self.logger.error(f"[{project.name}] Failed to push changes for MR !{mr.iid}")
-                    self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
-                    self.discord.notify_error(
-                        project.name,
-                        f"Failed to push changes for MR !{mr.iid}",
-                    )
-                    return False
-
-            success = self.gitlab.create_note_award_emoji(
-                project.project_id, 
-                mr.iid,
-                note_id, 
-                "white_check_mark",
-                discussion_id=discussion_id
-            )
-            
-            if not success and discussion_id:
-                self.logger.warning(f"Failed to add emoji to note {note_id}, using fallback reply to discussion {discussion_id}.")
-                self.gitlab.create_note_reply(
-                    project.project_id,
-                    mr.iid,
-                    discussion_id,
-                    "Handled by AI bot ✅"
-                )
-            self.discord.notify_changes_applied(
-                project.name,
-                mr.title,
-                mr.web_url,
-            )
-            return True
-        except GitLabAPIError as api_err:
-            self.logger.error(f"[{project.name}] GitLab API Error during comment processing: {api_err}")
-            self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
-            self.discord.notify_error(
-                project.name,
-                f"GitLab API Error during comment processing (MR !{mr.iid})",
-                details=f"Status Code: {api_err.status_code}\nMessage: {api_err.message}",
-            )
-            return False
         except Exception as e:
-            self.logger.error(f"[{project.name}] Unexpected error during AI tool execution: {str(e)}")
+            self.logger.error(f"[{project.name}] Critical error in process_comment: {str(e)}")
             self.discord.notify_error(
                 project.name,
-                f"Unexpected error during AI tool execution (MR !{mr.iid})",
+                f"Critical error in process_comment (MR !{mr.iid})",
                 details=str(e),
             )
             return False
@@ -1251,4 +1257,5 @@ __all__ = [
     "CLAUDE_CLI_TIMEOUT_SECONDS",
     "AI_TOOL_ERROR_PATTERNS",
     "SILENCE_TIMEOUT",
+    "MAX_ERROR_SNIPPET_LENGTH",
 ]
