@@ -414,6 +414,10 @@ class Processor:
                         os.killpg(pgid, signal.SIGKILL)
                     else:
                         process.kill()
+                    try:
+                        process.wait(timeout=1)
+                    except Exception:
+                        pass
             except ProcessLookupError:
                 pass
             except OSError as e:

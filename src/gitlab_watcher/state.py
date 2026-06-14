@@ -150,10 +150,22 @@ class StateManager:
     def _flush_dirty(self) -> None:
         """Save all dirty states."""
         with self._lock:
-            for project_id in self._dirty:
+            if not self._dirty:
+                return
+            
+            # Capture what we are about to save
+            to_save = list(self._dirty)
+            for project_id in to_save:
                 self._save_sync(project_id)
-            self._dirty.clear()
-            self._save_timer = None
+            
+            # Remove only what we saved
+            self._dirty.difference_update(to_save)
+            
+            # CONC-01 fix: Only reset the timer reference if no more dirty items remain
+            # AND it's still the same timer that started this flush. 
+            # In Python, the Timer object is the thread that runs the target.
+            if not self._dirty and self._save_timer is threading.current_thread():
+                self._save_timer = None
 
     def _save_sync(self, project_id: int) -> None:
         """Synchronous save to file with atomic replacement and restricted permissions."""

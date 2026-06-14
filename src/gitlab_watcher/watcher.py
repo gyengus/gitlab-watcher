@@ -438,15 +438,6 @@ class Watcher:
             if any(mr.source_branch.startswith(f"{iid}-") for iid in issue_iids)
         ]
 
-        # Pre-fetch commits for only relevant open MRs to avoid N+1 queries
-        mr_commits_cache = {}
-        for mr in relevant_mrs:
-            try:
-                mr_commits_cache[mr.iid] = self.gitlab.get_merge_request_commits(project.project_id, mr.iid)
-            except Exception as e:
-                self._log_warning(project.project_id, "Could not pre-fetch commits for MR !%s: %s", mr.iid, e)
-                mr_commits_cache[mr.iid] = []
-
         # MR-01 fix: Prioritize already "In progress" issues to avoid concurrent processing
         # on the same repository. If any issue is already being worked on, only consider
         # those for potential retry; do not pick up new backlog issues.
@@ -470,9 +461,14 @@ class Watcher:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but no MR found)", issue.iid)
                     return issue, True
                 
-                # Check if MR has commits from cache
+                # Check if MR has commits
                 mr = matching_mrs[0]
-                mr_commits = mr_commits_cache.get(mr.iid, [])
+                try:
+                    mr_commits = self.gitlab.get_merge_request_commits(project.project_id, mr.iid)
+                except Exception as e:
+                    self._log_warning(project.project_id, "Could not fetch commits for MR !%s: %s", mr.iid, e)
+                    mr_commits = []
+
                 if not mr_commits:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but MR has no commits)", issue.iid)
                     return issue, True
@@ -719,6 +715,12 @@ class Watcher:
         if hasattr(self, "_log_handlers"):
             for handler in self._log_handlers:
                 self.logger.removeHandler(handler)
+                # RES-01 fix: Explicitly close the underlying stream for StreamHandler
+                if hasattr(handler, "stream") and handler.stream:
+                    try:
+                        handler.stream.close()
+                    except Exception:
+                        pass
                 handler.close()
             self._log_handlers.clear()
         
