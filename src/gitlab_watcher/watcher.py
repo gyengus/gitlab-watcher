@@ -88,8 +88,8 @@ class Watcher:
                 if os.name != 'nt' and st.st_uid != os.getuid():
                      self.logger.warning(f"Log directory {log_path.parent} is not owned by current user! This might be a security risk.")
 
-                # Always attempt to restrict permissions if they are too broad
-                if os.name != 'nt' and (st.st_mode & 0o022):
+                # SEC-02 fix: Always attempt to restrict permissions if they are too broad (readable/writable by others)
+                if os.name != 'nt' and (st.st_mode & 0o077):
                     self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
                     os.chmod(log_path.parent, 0o700)
             except OSError as e:
@@ -97,11 +97,7 @@ class Watcher:
                 pass
 
             # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
-            # Explicitly check for symlink to handle cases where the directory is not fully trusted.
-            if log_path.is_symlink():
-                 raise PermissionError(f"Security risk: {log_path} is a symbolic link and will not be opened.")
-
-            # Create file with restricted permissions (0600) if it doesn't exist.
+            # SEC-01 fix: Open and hold the file descriptor to avoid TOCTOU bypass.
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
@@ -111,13 +107,14 @@ class Watcher:
                 # Ensure permissions are restricted even if file already existed
                 if hasattr(os, "fchmod"):
                     os.fchmod(fd, 0o600)
-            except OSError:
-                # Might fail on some filesystems, but we tried
-                pass
-            finally:
+                
+                # Wrap fd with os.fdopen to use with FileHandler/StreamHandler
+                f = os.fdopen(fd, 'a', encoding='utf-8')
+                handler_path = f # Store file object for handler
+            except Exception:
                 os.close(fd)
+                raise
             
-            handler_path = log_path
         except (PermissionError, OSError) as e:
             # Fallback to work directory in /tmp
             fallback_dir = Path("/tmp/gitlab-watcher")
@@ -125,7 +122,7 @@ class Watcher:
             
             try:
                 st = fallback_dir.stat()
-                if os.name != 'nt' and (st.st_mode & 0o022):
+                if os.name != 'nt' and (st.st_mode & 0o077):
                     if st.st_uid == os.getuid():
                         os.chmod(fallback_dir, 0o700)
                     else:
@@ -147,12 +144,13 @@ class Watcher:
                 try:
                     if hasattr(os, "fchmod"):
                         os.fchmod(fd, 0o600)
-                except OSError:
-                    pass
-                finally:
+                    
+                    f = os.fdopen(fd, 'a', encoding='utf-8')
+                    handler_path = f
+                except Exception:
                     os.close(fd)
+                    raise
                 
-                handler_path = fallback_path
                 self.logger.warning(
                     f"Could not use log file {log_path} ({e}). "
                     f"Falling back to {fallback_path}"
@@ -161,7 +159,8 @@ class Watcher:
                 self.logger.error(f"Failed to setup file logging: {e2}")
 
         if handler_path:
-            file_handler = logging.FileHandler(handler_path)
+            # SEC-01: Pass file object to StreamHandler to use the secured fd
+            file_handler = logging.StreamHandler(handler_path)
             file_handler.setFormatter(logging.Formatter(log_format))
             # Add to our specific logger instead of root logger to avoid global leak in tests
             self.logger.addHandler(file_handler)
@@ -516,17 +515,21 @@ class Watcher:
             self.state.set_processing(project.project_id, True)
             self.processor.process_issue(project, issue, is_retry=is_retry)
 
-    def _handle_merge_cleanup(self, project: ProjectConfig, state: Any) -> bool:
+    def _handle_merge_cleanup(self, project: ProjectConfig, state: Any, open_mrs: list[MergeRequest]) -> bool:
         """Check all tracked MRs and cleanup those that are merged or closed."""
         tracked_iids = list(state.tracked_mrs.keys())
         if not tracked_iids:
             return False
 
-        # PERF-01 fix: Tracked MRs are typically few. Querying them individually via
-        # get_merge_request is more efficient than bulk-fetching ALL open MRs of the project
-        # which might involve pagination and high network overhead.
+        # PERF-01 fix: Use the already fetched list of open MRs to avoid redundant API calls.
+        open_iids = {mr.iid for mr in open_mrs}
+
         for iid_str in tracked_iids:
             iid = int(iid_str)
+            # If it's still in the open_mrs list, it's not merged or closed yet.
+            if iid in open_iids:
+                continue
+
             mr = self.gitlab.get_merge_request(project.project_id, iid)
 
             if mr is None:
@@ -639,14 +642,14 @@ class Watcher:
         self._log_debug(project.project_id, "Checking for open MRs and comments...")
         state = self.state.load(project.project_id)
 
-        if self._handle_merge_cleanup(project, state):
-            return
-
         mrs = self.gitlab.get_merge_requests(
             project_id=project.project_id,
             state="opened",
             author_username=self.gitlab_username,
         )
+
+        if self._handle_merge_cleanup(project, state, mrs):
+            return
 
         if not mrs:
             return
