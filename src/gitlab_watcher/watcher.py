@@ -241,10 +241,10 @@ class Watcher:
             for result in addr_info:
                 ip_addr = result[4][0]
                 ip = ipaddress.ip_address(ip_addr)
-                # BUG-01 fix: Allow private IPs by default, only blocking loopback and link-local.
-                # This ensures compatibility with self-hosted GitLab instances on intranets.
-                if ip.is_loopback or ip.is_link_local:
-                    raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr} (Loopback/Link-Local IPs are not allowed)")
+                # BUG-01 fix: Allow private IPs by default, only blocking loopback, link-local, unspecified, and reserved IPs.
+                # This ensures compatibility with self-hosted GitLab instances on intranets while preventing SSRF.
+                if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved:
+                    raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr}")
                 allowed_ips.append(ip_addr)
             
             if not allowed_ips:
@@ -572,7 +572,7 @@ class Watcher:
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
 
             # Skip already handled via persistent state
-            if note.id <= last_processed_id:
+            if note.id <= last_processed_id and not is_retry_request:
                 continue
 
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
