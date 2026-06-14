@@ -238,6 +238,7 @@ class Watcher:
         try:
             # Use socket.getaddrinfo to resolve both IPv4 and IPv6
             addr_info = socket.getaddrinfo(hostname, None)
+            allowed_ips = []
             for result in addr_info:
                 ip_addr = result[4][0]
                 ip = ipaddress.ip_address(ip_addr)
@@ -245,6 +246,15 @@ class Watcher:
                 # This ensures compatibility with self-hosted GitLab instances on intranets.
                 if ip.is_loopback or ip.is_link_local:
                     raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr} (Loopback/Link-Local IPs are not allowed)")
+                allowed_ips.append(ip_addr)
+            
+            if not allowed_ips:
+                 raise ValueError(f"Could not resolve GitLab hostname: {hostname}")
+            
+            # GW-02 fix: Pin the hostname resolution to the first safe IP found
+            # to prevent DNS rebinding attacks.
+            self._pin_hostname(hostname, allowed_ips[0])
+
         except (socket.gaierror, ValueError) as e:
             # If resolution fails, we don't necessarily block it if it's not a loopback IP
             # but we should be wary of names like 'metadata.google.internal'
@@ -366,6 +376,23 @@ class Watcher:
             if fd is not None and self._lock_file is None:
                 os.close(fd)
             raise
+
+    def _pin_hostname(self, hostname: str, ip: str) -> None:
+        """Pin a hostname to a specific IP address to prevent DNS rebinding."""
+        import socket
+        if not hasattr(socket, "_original_getaddrinfo"):
+            socket._original_getaddrinfo = socket.getaddrinfo
+            socket._pinned_hosts = {}
+
+            def pinned_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+                h = host.lower() if host else ""
+                if h in socket._pinned_hosts:
+                    return socket._original_getaddrinfo(socket._pinned_hosts[h], port, family, type, proto, flags)
+                return socket._original_getaddrinfo(host, port, family, type, proto, flags)
+
+            socket.getaddrinfo = pinned_getaddrinfo
+        
+        socket._pinned_hosts[hostname.lower()] = ip
 
     def _extract_from_remote(self, repo_path: Path) -> tuple[str | None, None]:
         """Extract GitLab URL from git remote.
@@ -555,8 +582,8 @@ class Watcher:
 
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
 
-            # Skip already handled via persistent state, unless it's an explicit retry request
-            if note.id <= last_processed_id and not is_retry_request:
+            # Skip already handled via persistent state
+            if note.id <= last_processed_id:
                 continue
 
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
