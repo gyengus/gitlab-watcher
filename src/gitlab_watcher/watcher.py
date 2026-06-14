@@ -566,16 +566,6 @@ class Watcher:
         state = self.state.load(project.project_id)
         last_processed_id = state.last_processed_note_id or 0
 
-        # PERF-01 fix: Fetch all MR award emojis in one call to avoid N+1 queries.
-        mr_award_emojis = self.gitlab.get_mr_award_emojis(project.project_id, mr.iid)
-        # Create a mapping of note_id -> list of emoji names
-        note_emojis_map: dict[int, list[str]] = {}
-        for emoji in mr_award_emojis:
-            if emoji.get("awardable_type") == "Note":
-                note_id = emoji.get("awardable_id")
-                if isinstance(note_id, int):
-                    note_emojis_map.setdefault(note_id, []).append(emoji.get("name", ""))
-
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:
                 continue
@@ -589,15 +579,14 @@ class Watcher:
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
             SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
             
-            # BUG-01 fix: Use pre-fetched emojis from map, but fall back to per-note API
-            # call because MR-level award emoji endpoint might not return note emojis.
-            note_emojis = note_emojis_map.get(note.id, [])
-            if not note_emojis:
+            # Use in-memory cache first
+            is_skipped = note.id in self._processed_notes
+            
+            if not is_skipped:
+                # Fetch award emojis for this specific note
                 note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
-            
-            has_emojis = any(e in note_emojis for e in SKIP_EMOJIS)
-            
-            is_skipped = has_emojis or note.id in self._processed_notes
+                has_emojis = any(e in note_emojis for e in SKIP_EMOJIS)
+                is_skipped = has_emojis
             
             if is_skipped and not is_retry_request:
                 # If it's effectively skipped but we haven't updated the persistent state, do it now

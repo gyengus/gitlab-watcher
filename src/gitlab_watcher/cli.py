@@ -99,13 +99,14 @@ def sync_state(project_name: str, config: str) -> None:
         git = GitOps(project.path)
         discord = DiscordWebhook(cfg.discord_webhook)
 
+        # Always clear processing flag to allow manual recovery from crashes
+        state.set_processing(project.project_id, False)
+
         # Determine current branch and push if there is unpushed work
         current_branch = git.get_current_branch()
         if current_branch and git.has_unpushed_commits(current_branch):
             pushed = git.push("origin", current_branch)
             if pushed:
-                # Reset processing flag – the watcher treats the repo as clean now
-                state.set_processing(project.project_id, False)
                 click.echo(f"Pushed unpushed work on branch '{current_branch}'.")
             else:
                 discord.notify_error(

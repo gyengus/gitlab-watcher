@@ -286,8 +286,8 @@ class Processor:
                 # If it's a flag (starts with -), check against whitelist
                 # Skip the first element (binary) as it is validated separately
                 if i > 0 and part.startswith("-") and part not in ALLOWED_AI_FLAGS:
-                    # Allow numeric flags like -n 100 or numeric values
-                    if not re.match(r"^-?\d+$", part):
+                    # Allow numeric flags like -n 100 or numeric values, and safe flag patterns
+                    if not re.match(r"^-?\d+$", part) and not re.match(r"^--?[a-zA-Z0-9\-]+$", part):
                         raise ValueError(f"Unauthorized AI tool flag: {part}")
 
             # Validate binary
