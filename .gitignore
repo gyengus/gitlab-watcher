@@ -33,14 +33,10 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
 .coverage
 .coverage.*
-.cache
-nosetests.xml
 coverage.xml
+coverage.lcov
 *.cover
 *.py,cover
 .hypothesis/
@@ -79,4 +75,5 @@ dmypy.json
 # Project specific
 .claude_session
 .worktrees/
+src/gitlab_watcher/_version.py
 

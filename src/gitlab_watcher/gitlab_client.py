@@ -1,6 +1,7 @@
-import logging
 """GitLab API client with retry logic."""
 
+import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -11,6 +12,15 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .cache import TimedCache
+from .logging_utils import sanitize_for_log
+from .constants import (
+    DEFAULT_CACHE_TTL,
+    DEFAULT_GITLAB_TIMEOUT as DEFAULT_TIMEOUT,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_POOL_CONNECTIONS,
+    DEFAULT_POOL_MAXSIZE,
+    DEFAULT_RETRY_DELAY,
+)
 from .exceptions import (
     GitLabAPIError,
     GitLabAuthenticationError,
@@ -19,15 +29,6 @@ from .exceptions import (
     GitLabNotFoundError,
     GitLabRateLimitError,
 )
-
-
-# Default configuration values
-DEFAULT_TIMEOUT = 30.0
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_DELAY = 1.0
-DEFAULT_POOL_CONNECTIONS = 10
-DEFAULT_POOL_MAXSIZE = 20
-DEFAULT_CACHE_TTL = 30.0
 
 
 @dataclass
@@ -67,6 +68,8 @@ class Note:
 
 
 class GitLabClient:
+
+
     """GitLab API client with automatic retries, connection pooling, and caching."""
 
     def __init__(
@@ -79,6 +82,7 @@ class GitLabClient:
         pool_connections: int = DEFAULT_POOL_CONNECTIONS,
         pool_maxsize: int = DEFAULT_POOL_MAXSIZE,
         cache_ttl: float = DEFAULT_CACHE_TTL,
+        ssl_verify: bool = True,
     ) -> None:
         """Initialize GitLab client.
 
@@ -94,10 +98,15 @@ class GitLabClient:
         """
         self.logger = logging.getLogger(__name__)
         self.base_url = url.rstrip("/")
+        
+        if not re.match(r"^[a-zA-Z0-9_\-\.]+$", token):
+            raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, hyphens, and dots are allowed.")
+            
         self._token = token  # Private to avoid accidental logging
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.timeout = timeout
+        self.ssl_verify = ssl_verify
         self._cache: TimedCache[dict[str, Any]] = TimedCache(ttl_seconds=cache_ttl)
 
         # Configure session with connection pooling and retry strategy
@@ -122,12 +131,13 @@ class GitLabClient:
 
     def __repr__(self) -> str:
         """Return string representation without sensitive data."""
-        from .logging_utils import sanitize_for_log
         return f"GitLabClient(url={sanitize_for_log(self.base_url)!r})"
 
     def _api_url(self, project_id: Optional[int], endpoint: str) -> str:
         """Build full API URL for a project endpoint or general endpoint."""
         if project_id is not None:
+            if not isinstance(project_id, int) or project_id <= 0:
+                raise ValueError(f"Invalid project_id: {project_id}. Must be a positive integer.")
             return f"{self.base_url}/api/v4/projects/{project_id}{endpoint}"
         return f"{self.base_url}/api/v4{endpoint}"
 
@@ -137,46 +147,33 @@ class GitLabClient:
         return response.json()
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
-        """Make HTTP request with timeout and retry logic for 5xx errors."""
+        """Make HTTP request with timeout and retry logic."""
+        # Enforce SSL verification based on client configuration
+        if "verify" not in kwargs:
+            kwargs["verify"] = self.ssl_verify
         # Set default timeout if not provided
         kwargs.setdefault("timeout", self.timeout)
 
-        last_error: Optional[Exception] = None
+        try:
+            response = self.session.request(method, url, **kwargs)
 
-        for attempt in range(self.max_retries):
-            try:
-                response = self.session.request(method, url, **kwargs)
+            if response.status_code == 401:
+                raise GitLabAuthenticationError()
+            elif response.status_code == 403:
+                raise GitLabForbiddenError(url)
+            elif response.status_code == 404:
+                raise GitLabNotFoundError("Resource", url)
+            elif response.status_code == 429:
+                retry_after_str = response.headers.get("Retry-After")
+                retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
+                raise GitLabRateLimitError(retry_after)
+            elif response.status_code >= 400:
+                raise GitLabAPIError(response.status_code, response.text)
 
-                # Retry on 5xx errors
-                if response.status_code >= 500:
-                    last_error = Exception(
-                        f"Server error {response.status_code}: {response.text}"
-                    )
-                    time.sleep(self.retry_delay * (attempt + 1))
-                    continue
+            return response
 
-                if response.status_code == 401:
-                    raise GitLabAuthenticationError()
-                elif response.status_code == 403:
-                    raise GitLabForbiddenError(url)
-                elif response.status_code == 404:
-                    raise GitLabNotFoundError("Resource", url)
-                elif response.status_code == 429:
-                    retry_after_str = response.headers.get("Retry-After")
-                    retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
-                    raise GitLabRateLimitError(retry_after)
-                elif response.status_code >= 400:
-                    raise GitLabAPIError(response.status_code, response.text)
-
-                return response
-
-            except requests.RequestException as e:
-                last_error = e
-                time.sleep(self.retry_delay * (attempt + 1))
-
-        raise GitLabConnectionError(
-            f"Request failed after {self.max_retries} retries. Last error: {last_error}"
-        )
+        except requests.RequestException as e:
+            raise GitLabConnectionError(f"Request failed: {e}")
     def _request_all(self, method: str, url: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Make HTTP request and follow pagination to fetch all items."""
         params = kwargs.get("params", {}).copy()
@@ -251,10 +248,20 @@ class GitLabClient:
                 web_url=item.get("web_url", ""),
                 source_branch=item.get("source_branch", ""),
                 state=item.get("state", ""),
-                author=item.get("author", {}).get("username", ""),
+                author=(item.get("author") or {}).get("username", ""),
             )
             for item in data
         ]
+
+    def get_merge_request_commits(self, project_id: int, mr_iid: int) -> list:
+        """Get commits for a merge request."""
+        endpoint = f"/merge_requests/{mr_iid}/commits"
+        try:
+            data = self._request_all("GET", self._api_url(project_id, endpoint))
+            return data
+        except Exception as e:
+            self.logger.warning(f"Could not fetch commits for MR !{mr_iid}: {e}")
+            return []
 
     def get_merge_request(self, project_id: int, mr_iid: int) -> Optional[MergeRequest]:
         """Get a specific merge request with caching."""
@@ -268,7 +275,7 @@ class GitLabClient:
                 web_url=cached.get("web_url", ""),
                 source_branch=cached.get("source_branch", ""),
                 state=cached.get("state", ""),
-                author=cached.get("author", {}).get("username", ""),
+                author=(cached.get("author") or {}).get("username", ""),
             )
 
         try:
@@ -290,7 +297,7 @@ class GitLabClient:
             web_url=data.get("web_url", ""),
             source_branch=data.get("source_branch", ""),
             state=data.get("state", ""),
-            author=data.get("author", {}).get("username", ""),
+            author=(data.get("author") or {}).get("username", ""),
         )
 
     def get_notes(
@@ -299,22 +306,23 @@ class GitLabClient:
         """Get notes for a merge request."""
         endpoint = f"/merge_requests/{mr_iid}/notes"
         try:
+            # Note: GitLab Notes API does not support 'include_award_emojis'.
+            # Emojis must be fetched per-note if needed.
             notes_data = self._request_all(
                 "GET", 
-                self._api_url(project_id, endpoint),
-                params={"include_award_emojis": "true"}
+                self._api_url(project_id, endpoint)
             )
             notes = []
             for note in notes_data:
-                self.logger.debug(f"Parsed emojis for note {note['id']}: {note.get('award_emojis', [])}")
-
+                author_data = note.get("author") or {}
+                author_username = author_data.get("username", "ghost")
                 notes.append(
                     Note(
                         id=note["id"],
                         body=note["body"],
-                        author_username=note["author"]["username"],
+                        author_username=author_username,
                         system=note["system"],
-                        award_emojis=[e["name"] for e in note.get("award_emojis", [])],
+                        award_emojis=[], # Emojis are fetched lazily in the watcher
                         discussion_id=note.get("discussion_id", ""),
                         noteable_type=note.get("noteable_type"),
                         noteable_iid=note.get("noteable_iid"),
@@ -423,9 +431,23 @@ class GitLabClient:
             return False
 
     def create_note_award_emoji(
-        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str, discussion_id: Optional[str] = None
     ) -> bool:
-        """Add an award emoji to a note using the documented MR-scoped API."""
+        """Add an award emoji to a note, trying discussion-scoped API if available."""
+        # Try discussion-scoped endpoint first if discussion_id is provided and not empty
+        if discussion_id:
+            endpoint = f"/merge_requests/{mr_iid}/discussions/{discussion_id}/notes/{note_id}/award_emoji"
+            try:
+                self._request(
+                    "POST", 
+                    self._api_url(project_id, endpoint), 
+                    json={"name": emoji_name}
+                )
+                return True
+            except Exception as e:
+                self.logger.debug(f"Failed discussion-scoped emoji for note {note_id}: {e}. Falling back to MR-scoped API.")
+        
+        # Fallback to MR-scoped endpoint
         endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
         try:
             self._request(
@@ -435,7 +457,69 @@ class GitLabClient:
             )
             return True
         except Exception as e:
-            self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {e.response.text})")
+            else:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            return False
+
+    def get_mr_award_emojis(self, project_id: int, mr_iid: int) -> list[dict[str, Any]]:
+        """Fetch all award emojis for a merge request."""
+        endpoint = f"/merge_requests/{mr_iid}/award_emoji"
+        try:
+            return self._request_all("GET", self._api_url(project_id, endpoint))
+        except Exception as e:
+            self.logger.debug(f"Could not fetch emojis for MR !{mr_iid}: {e}")
+            return []
+
+    def delete_note_award_emoji(
+        self, project_id: int, mr_iid: int, note_id: int, emoji_name: str
+    ) -> bool:
+        """Remove a single award emoji from a note."""
+        return self.delete_note_award_emojis(project_id, mr_iid, note_id, [emoji_name])
+
+    def delete_note_award_emojis(
+        self, project_id: int, mr_iid: int, note_id: int, emoji_names: list[str]
+    ) -> bool:
+        """Remove multiple award emojis from a note in a more efficient way.
+        
+        This fetches all emojis for the note once, then performs a DELETE for each
+        matching emoji name. This reduces the number of GET requests.
+        """
+        if not emoji_names:
+            return True
+
+        endpoint = f"/merge_requests/{mr_iid}/notes/{note_id}/award_emoji"
+        try:
+            # Fetch all emojis for this note once
+            response = self._request("GET", self._api_url(project_id, endpoint))
+            emojis_data = response.json()
+            
+            if not isinstance(emojis_data, list):
+                self.logger.warning(f"Unexpected response format from GitLab API when fetching emojis: {type(emojis_data)}")
+                return False
+            
+            # Create a mapping of name -> list of award_ids (one emoji name can be added multiple times by different users)
+            # However, our bot likely only cares about its own emojis or just any emoji with that name it has permission to delete.
+            # In GitLab, you can only delete emojis you created.
+            
+            success = True
+            names_to_delete = set(emoji_names)
+            
+            for e in emojis_data:
+                if isinstance(e, dict) and e.get("name") in names_to_delete:
+                    award_id = e.get("id")
+                    if award_id:
+                        try:
+                            delete_endpoint = f"{endpoint}/{award_id}"
+                            self._request("DELETE", self._api_url(project_id, delete_endpoint))
+                        except Exception as delete_err:
+                            self.logger.debug(f"Failed to delete award {award_id} ({e.get('name')}): {delete_err}")
+                            success = False
+            
+            return success
+        except Exception as e:
+            self.logger.warning(f"Failed to remove emojis {emoji_names} from note {note_id}: {e}")
             return False
 
 

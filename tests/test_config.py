@@ -147,6 +147,7 @@ PROJECT_DIRS=(
 
         assert config.gitlab_url == "https://git.example.com"
         assert config.gitlab_token == "secret"
+        assert config.gitlab_username == "claude"
         assert config.poll_interval == 30
         assert len(config.projects) == 1
         assert config.projects[0].project_id == 31
@@ -282,3 +283,38 @@ PROJECT_DIRS=(
 """)
     config = load_config(str(config_file))
     assert config.log_level == "INFO"
+
+
+def test_load_config_with_gitlab_username(tmp_path: Path) -> None:
+    """Test loading GITLAB_USERNAME from config file."""
+    config_file = tmp_path / "test_user.conf"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+    config_file.write_text(f"""
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="secret"
+GITLAB_USERNAME="OpenCode"
+PROJECT_DIRS=(
+  "{project_dir}"
+)
+""")
+    config = load_config(str(config_file))
+    assert config.gitlab_username == "OpenCode"
+
+
+def test_load_config_default_gitlab_username(tmp_path: Path) -> None:
+    """Test default GITLAB_USERNAME when not specified."""
+    config_file = tmp_path / "test_no_user.conf"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+    config_file.write_text(f"""
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="secret"
+PROJECT_DIRS=(
+  "{project_dir}"
+)
+""")
+    config = load_config(str(config_file))
+    assert config.gitlab_username == "OpenCode"

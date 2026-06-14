@@ -1,11 +1,15 @@
 """Configuration handling with bash config compatibility."""
 
+import logging
 import os
 import re
 import shlex
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Default configuration file path
 DEFAULT_CONFIG_PATH = os.path.expanduser("~/.config/gitlab-watcher/config.conf")
@@ -18,7 +22,6 @@ class ProjectConfig:
     project_id: int
     path: Path
     name: str
-    default_branch: str = "master"
 
 
 @dataclass
@@ -27,18 +30,28 @@ class Config:
 
     gitlab_url: str = ""
     gitlab_token: str = ""
+    gitlab_ssl_verify: bool = True
     discord_webhook: str = ""
     label_in_progress: str = "In progress"
     label_review: str = "Review"
     poll_interval: int = 30
     ai_tool_mode: str = "ollama"
-    ai_tool_custom_command: str = ""
+    ai_tool_custom_command: str | list[str] = ""
+    ai_tool_failover_model: str = ""
     ai_tool_timeout: int = 3600
     log_file: str = "/var/log/gitlab-watcher.log"
     log_level: str = "INFO"
+    gitlab_username: str = "OpenCode"
     default_branch: str = "master"
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
+
+    def get_project_by_name(self, name: str) -> Optional[ProjectConfig]:
+        """Find a project by its name."""
+        for project in self.projects:
+            if project.name == name:
+                return project
+        return None
 
 
 def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
@@ -51,7 +64,7 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
     - Quoted values
     """
     result: dict[str, str | list[str]] = {}
-    content = config_path.read_text()
+    content = config_path.read_text(encoding="utf-8")
 
     lines = content.splitlines()
     i = 0
@@ -87,7 +100,10 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
 
                 if array_line:
                     # Parse array values using shlex
-                    values.extend(shlex.split(array_line))
+                    try:
+                        values.extend(shlex.split(array_line))
+                    except ValueError:
+                        pass
 
                 i += 1
 
@@ -101,7 +117,10 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
             values_str = inline_array.group(2)
 
             # Parse array values using shlex
-            result[key] = shlex.split(values_str)
+            try:
+                result[key] = shlex.split(values_str)
+            except ValueError:
+                result[key] = []
             i += 1
             continue
 
@@ -112,7 +131,11 @@ def parse_bash_config(config_path: Path) -> dict[str, str | list[str]]:
             value_str = simple_match.group(2).strip()
 
             # Parse simple values using shlex
-            parts = shlex.split(value_str)
+            try:
+                parts = shlex.split(value_str)
+            except ValueError:
+                parts = []
+            
             if parts:
                 result[key] = parts[0]
             else:
@@ -139,11 +162,15 @@ def extract_project_id(project_file_path: Path) -> Optional[int]:
     if not project_file_path.exists():
         return None
 
-    content = project_file_path.read_text()
+    content = project_file_path.read_text(encoding="utf-8")
 
     match = re.search(r"(?i)(?:\*{1,3}|_{1,3}|`{1,2})?project[_\s]*id:?[*_`\s]*(\d+)(?:\*{1,3}|_{1,3}|`{1,2})?", content)
     if match:
-        return int(match.group(1))
+        project_id = int(match.group(1))
+        # Range check for project ID: must be a positive integer
+        if project_id <= 0:
+            return None
+        return project_id
 
     return None
 
@@ -155,34 +182,66 @@ def load_config(config_path: str) -> Config:
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file}")
 
+    # Security check: Ensure config file is not world-writable
+    mode = config_file.stat().st_mode
+    if mode & stat.S_IWOTH:
+        logger.warning(f"Config file {config_file} is world-writable! This is a security risk.")
+    if mode & stat.S_IWGRP:
+        logger.warning(f"Config file {config_file} is group-writable. Ensure this is intentional.")
+
     raw_config = parse_bash_config(config_file)
 
     # Helper function to safely convert config values
     def get_str(key: str, default: str = "") -> str:
         value = raw_config.get(key, default)
-        if isinstance(value, list) and value:
-            return str(value[0])
+        if isinstance(value, list):
+            if len(value) > 1:
+                logger.warning(f"Config key '{key}' expected a single string but found a list. Using the first element.")
+            return str(value[0]) if value else ""
         return str(value)
 
     def get_int(key: str, default: int = 0) -> int:
         value = raw_config.get(key, str(default))
-        if isinstance(value, list) and value:
-            return int(str(value[0]))
+        if isinstance(value, list):
+            if len(value) > 1:
+                logger.warning(f"Config key '{key}' expected a single int but found a list. Using the first element.")
+            return int(str(value[0])) if value else default
         return int(str(value))
 
-    config = Config(
-        gitlab_url=get_str("GITLAB_URL"),
-        gitlab_token=get_str("GITLAB_TOKEN"),
-        discord_webhook=get_str("DISCORD_WEBHOOK"),
-        label_in_progress=get_str("LABEL_IN_PROGRESS", "In progress"),
-        label_review=get_str("LABEL_REVIEW", "Review"),
-        poll_interval=get_int("POLL_INTERVAL", 30),
-        ai_tool_mode=get_str("AI_TOOL_MODE", "ollama"),
-        ai_tool_custom_command=get_str("AI_TOOL_CUSTOM_COMMAND"),
-        ai_tool_timeout=get_int("AI_TOOL_TIMEOUT", 3600),
-        log_file=get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
-        log_level=get_str("LOG_LEVEL", "INFO").upper(),
-    )
+    def get_bool(key: str, default: bool = False) -> bool:
+        value = raw_config.get(key, str(default))
+        if isinstance(value, list):
+            if len(value) > 1:
+                logger.warning(f"Config key '{key}' expected a single bool but found a list. Using the first element.")
+            val_str = str(value[0]) if value else ""
+        else:
+            val_str = str(value)
+        return val_str.lower() in ("true", "yes", "1", "t", "y")
+
+    # Collect all config values
+    config_args = {
+        "gitlab_url": get_str("GITLAB_URL"),
+        "gitlab_token": get_str("GITLAB_TOKEN"),
+        "gitlab_ssl_verify": get_bool("GITLAB_SSL_VERIFY", True),
+        "discord_webhook": get_str("DISCORD_WEBHOOK"),
+        "label_in_progress": get_str("LABEL_IN_PROGRESS", "In progress"),
+        "label_review": get_str("LABEL_REVIEW", "Review"),
+        "poll_interval": get_int("POLL_INTERVAL", 30),
+        "ai_tool_mode": get_str("AI_TOOL_MODE", "ollama"),
+        "ai_tool_custom_command": raw_config.get("AI_TOOL_CUSTOM_COMMAND", ""),
+        "ai_tool_failover_model": get_str("AI_TOOL_FAILOVER_MODEL"),
+        "ai_tool_timeout": get_int("AI_TOOL_TIMEOUT", 3600),
+        "log_file": get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
+        "log_level": get_str("LOG_LEVEL", "INFO").upper(),
+        "default_branch": get_str("DEFAULT_BRANCH", "master"),
+    }
+
+    # Only override gitlab_username if explicitly set in config
+    # This allows the dataclass default to take precedence
+    if "GITLAB_USERNAME" in raw_config:
+        config_args["gitlab_username"] = get_str("GITLAB_USERNAME")
+
+    config = Config(**config_args)
 
 
     # Get project directories
@@ -196,13 +255,62 @@ def load_config(config_path: str) -> Config:
     seen_ids: set[int] = set()
 
     for project_dir in project_dirs:
-        project_path = Path(project_dir).expanduser()
-
-        if project_dir.strip().startswith("#"):
+        if not project_dir or project_dir.strip().startswith("#"):
             continue
 
-        if not project_path.exists():
+        # Canonicalize path immediately after expansion to prevent traversal bypasses
+        try:
+            project_path = Path(project_dir).expanduser().resolve()
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"Could not resolve project directory {project_dir}: {e}")
             continue
+
+        if not project_path.exists() or not project_path.is_dir():
+            logger.warning(f"Project directory not found or not a directory: {project_path}")
+            continue
+        
+        # Hardened path traversal protection: reject system-level paths
+        # SEC-02 fix: use is_relative_to for robust path prefix checking
+        # GW-01 fix: Allow /var/tmp even though /var is sensitive
+        sensitive_bases = [
+            "/etc", "/root", "/var", "/bin", "/sbin", "/usr/bin", "/usr/sbin", 
+            "/proc", "/sys", "/dev", "/lib", "/lib64", "/usr/lib", "/usr/lib64"
+        ]
+        if any(project_path.is_relative_to(Path(base)) for base in sensitive_bases 
+               if base != "/var" or not project_path.is_relative_to(Path("/var/tmp"))):
+            logger.warning(f"Skipping potentially sensitive project directory: {project_path}")
+            continue
+            
+        # Security: Ensure the project directory itself is not world-writable
+        try:
+            if project_path.stat().st_mode & stat.S_IWOTH:
+                logger.warning(f"Skipping world-writable project directory for security: {project_path}")
+                continue
+        except Exception:
+            continue
+
+        # Hardened path validation: Ensure project is within a safe workspace
+        # Resolve all safe bases to real paths for robust comparison
+        safe_bases = [
+            Path.home().resolve(),
+            Path.cwd().resolve(),
+            Path("/tmp").resolve(),
+            Path("/var/tmp").resolve(),
+        ]
+        
+        is_safe = False
+        for base in safe_bases:
+            try:
+                # Use is_relative_to for strict prefix checking on canonical paths
+                if project_path.is_relative_to(base):
+                    is_safe = True
+                    break
+            except (ValueError, AttributeError):
+                continue
+        
+        if not is_safe:
+             logger.warning(f"Skipping project directory outside safe bases: {project_path}")
+             continue
 
         project_id = None
         for filename in ["PROJECT.md", "AGENTS.md", "CLAUDE.md"]:

@@ -23,6 +23,13 @@ class DiscordWebhook:
         if not self.webhook_url:
             return True  # No webhook configured, skip silently
 
+        # Discord has a 2000 character limit for message content.
+        # Truncate if necessary, leaving room for the truncation message.
+        max_length = 2000
+        if len(content) > max_length:
+            trunc_msg = "\n\n...(truncated due to length limit)"
+            content = content[: max_length - len(trunc_msg)] + trunc_msg
+
         try:
             response = requests.post(
                 self.webhook_url,
@@ -40,13 +47,29 @@ class DiscordWebhook:
         issue_title: str,
         issue_url: str,
         branch: str,
+        is_retry: bool = False,
     ) -> bool:
-        """Notify that issue processing has started."""
-        return self.send(
-            f"🚀 **Starting Issue** [{project_name}]\n"
-            f"[{issue_title}]({issue_url})\n\n"
-            f"Branch: `{branch}`"
-        )
+        """Notify that issue processing has started.
+        
+        Args:
+            project_name: Name of the project
+            issue_title: Title of the issue
+            issue_url: URL of the issue
+            branch: Branch name
+            is_retry: True if this is a retry after a failed MR creation
+        """
+        if is_retry:
+            return self.send(
+                f"🔄 **Retrying Issue** [{project_name}]\n"
+                f"[{issue_title}]({issue_url})\n\n"
+                f"Branch: `{branch}` (continuing after failed MR creation)"
+            )
+        else:
+            return self.send(
+                f"🚀 **Starting Issue** [{project_name}]\n"
+                f"[{issue_title}]({issue_url})\n\n"
+                f"Branch: `{branch}`"
+            )
 
     def notify_mr_created(
         self,
@@ -60,6 +83,19 @@ class DiscordWebhook:
             f"✅ **MR Created** [{project_name}]\n"
             f"[{issue_title}]({mr_url})\n\n"
             f"Issue #{issue_iid} completed. Waiting for review."
+        )
+
+    def notify_no_changes_needed(
+        self,
+        project_name: str,
+        title: str,
+        url: str,
+    ) -> bool:
+        """Notify that no changes were required after review."""
+        return self.send(
+            f"👀 **No Changes Needed** [{project_name}]\n"
+            f"[{title}]({url})\n\n"
+            f"The AI reviewed the task/feedback but found no necessary code changes."
         )
 
     def notify_changes_applied(
@@ -108,5 +144,18 @@ class DiscordWebhook:
         """Notify about an error."""
         content = f"❌ **Error** [{project_name}]\n{message}"
         if details:
-            content += f"\n\nError: {details}"
+            # Format details with code block for better readability
+            content += f"\n\n```{details}```"
+        return self.send(content)
+
+    def notify_ai_tool_crash(
+        self,
+        project_name: str,
+        message: str,
+        details: str | None = None,
+    ) -> bool:
+        """Notify about an AI tool crash or unexpected failure."""
+        content = f"⚠️ **AI Tool Crash** [{project_name}]\n{message}"
+        if details:
+            content += f"\n\n```{details}```"
         return self.send(content)

@@ -55,7 +55,7 @@ discord.py      → Discord webhook notifications
 
 ### Configuration Discovery
 
-Projects are discovered by scanning `PROJECT_DIRS` from the config file. Each project directory must contain a `CLAUDE.md` file with a `Project ID: <number>` entry. The watcher extracts GitLab credentials from git remote URLs if not explicitly configured.
+Projects are discovered by scanning `PROJECT_DIRS` from the config file. Each project directory must contain a `CLAUDE.md` file with a `Project ID: <number>` entry. The watcher extracts the GitLab server URL from git remote URLs if not explicitly configured, but for security reasons, the `GITLAB_TOKEN` must always be provided in the configuration file.
 
 ### State Management
 
@@ -73,4 +73,12 @@ The `_run_claude()` method in `processor.py` supports multiple AI tools:
 - **custom**: Configurable command with `{prompt}` and `{cwd}` placeholders
 - **opencode-custom**: Configurable opencode command with `{prompt}` and `{cwd}` placeholders
 
-All modes use a 10-minute timeout and `CLAUDECODE=""` environment variable to avoid conflicts.
+All modes use a 1-hour overall timeout and a 30-minute silence timeout, and `CLAUDECODE=""` environment variable to avoid conflicts.
+
+### Development Guidelines
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for comprehensive development guidelines including:
+- Testing requirements (run all tests after each task, maintain 85%+ coverage)
+- Commit message guidelines (avoid conventional prefixes, use English)
+- Code quality standards
+- Troubleshooting tips

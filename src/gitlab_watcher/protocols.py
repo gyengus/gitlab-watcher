@@ -103,5 +103,34 @@ class GitOperations(Protocol):
         """
         ...
 
+    def has_unpushed_to_remote(self) -> bool:
+        """Check if the current branch has commits not yet pushed to its upstream.
+
+        Returns:
+            True if there are commits ahead of the remote-tracking branch, False otherwise
+        """
+        ...
+
+    def get_current_commit(self) -> str:
+        """Return the current HEAD commit hash.
+
+        Returns:
+            Full SHA-1 hash of HEAD, or empty string on failure.
+        """
+        ...
+
+    @staticmethod
+    def generate_slug(title: str, max_length: int = 30) -> str:
+        """Generate a URL-safe slug from a title.
+
+        Args:
+            title: The title to slugify
+            max_length: Maximum length of the slug
+
+        Returns:
+            A URL-safe slug
+        """
+        ...
+
 
 __all__ = ["GitOperations"]

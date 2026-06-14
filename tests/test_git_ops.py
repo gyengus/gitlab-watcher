@@ -176,8 +176,9 @@ class TestGitOps:
         args = mock_run.call_args[0][0]
         assert "-u" in args
 
+    @patch("time.sleep")
     @patch("subprocess.run")
-    def test_push_failure(self, mock_run: Mock, git_ops: GitOps) -> None:
+    def test_push_failure(self, mock_run: Mock, mock_sleep: Mock, git_ops: GitOps) -> None:
         """Test failed push."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "git")
 
@@ -308,6 +309,67 @@ class TestGitOps:
         assert result is False
 
     @patch("subprocess.run")
+    def test_has_unpushed_to_remote_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_to_remote returns True when commits exist ahead of upstream."""
+        # First call: rev-parse to check upstream
+        # Second call: log to check diff
+        mock_run.side_effect = [
+            Mock(stdout="origin/feature\n", returncode=0),
+            Mock(stdout="abc1234 Some commit\n", returncode=0),
+        ]
+
+        result = git_ops.has_unpushed_to_remote()
+
+        assert result is True
+        assert mock_run.call_count == 2
+        assert "@{u}" in mock_run.call_args_list[0][0][0]
+        assert "@{u}..HEAD" in mock_run.call_args_list[1][0][0]
+
+    @patch("subprocess.run")
+    def test_has_unpushed_to_remote_false_no_upstream(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_to_remote returns False when no upstream exists."""
+        mock_run.return_value = Mock(stdout="", returncode=128)
+
+        result = git_ops.has_unpushed_to_remote()
+
+        assert result is False
+
+    @patch("subprocess.run")
+    def test_has_unpushed_commits_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_commits returns True when commits exist ahead of remote."""
+        # First call: rev-parse to verify local branch
+        # Second call: rev-parse to verify remote branch
+        # Third call: log to check diff
+        mock_run.side_effect = [
+            Mock(stdout="feature\n", returncode=0),
+            Mock(stdout="origin/feature\n", returncode=0),
+            Mock(stdout="abc1234 Some commit\n", returncode=0),
+        ]
+
+        result = git_ops.has_unpushed_commits("feature")
+
+        assert result is True
+        assert mock_run.call_count == 3
+        assert "origin/feature..feature" in mock_run.call_args_list[2][0][0]
+
+    @patch("subprocess.run")
+    def test_has_unpushed_commits_false_no_local(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_commits returns False when local branch doesn't exist."""
+        mock_run.return_value = Mock(stdout="", returncode=128)
+        result = git_ops.has_unpushed_commits("nonexistent")
+        assert result is False
+
+    @patch("subprocess.run")
+    def test_has_unpushed_commits_true_no_remote(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_unpushed_commits returns True when remote branch doesn't exist."""
+        mock_run.side_effect = [
+            Mock(stdout="feature\n", returncode=0), # Local exists
+            Mock(stdout="", returncode=128),        # Remote doesn't exist
+        ]
+        result = git_ops.has_unpushed_commits("feature")
+        assert result is True
+
+    @patch("subprocess.run")
     def test_checkout_already_on_branch(self, mock_run: Mock, git_ops: GitOps) -> None:
         """Test checkout when already on the target branch."""
         mock_run.return_value = Mock(stdout="feature\n", returncode=0)
@@ -319,3 +381,46 @@ class TestGitOps:
         # Only rev-parse called, no checkout
         assert mock_run.call_count == 1
         assert "rev-parse" in mock_run.call_args[0][0]
+
+    @patch("subprocess.run")
+    def test_has_uncommitted_changes_true(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_uncommitted_changes returns True when changes exist."""
+        mock_run.return_value = Mock(stdout="M  file.txt\n", returncode=0)
+        assert git_ops.has_uncommitted_changes() is True
+
+    @patch("subprocess.run")
+    def test_has_uncommitted_changes_false(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test has_uncommitted_changes returns False when clean."""
+        mock_run.return_value = Mock(stdout="", returncode=0)
+        assert git_ops.has_uncommitted_changes() is False
+
+    @patch("subprocess.run")
+    def test_add_success(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test successful git add."""
+        mock_run.return_value = Mock(returncode=0)
+        assert git_ops.add("path") is True
+        mock_run.assert_called_once()
+        assert "add" in mock_run.call_args[0][0]
+
+    @patch("subprocess.run")
+    def test_commit_success(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test successful git commit."""
+        mock_run.return_value = Mock(returncode=0)
+        assert git_ops.commit("message") is True
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert "commit" in args
+        assert "-m" in args
+        assert "message" in args
+
+    @patch("subprocess.run")
+    def test_get_current_commit_success(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test successful get_current_commit."""
+        mock_run.return_value = Mock(stdout="abc123def\n", returncode=0)
+        assert git_ops.get_current_commit() == "abc123def"
+
+    @patch("subprocess.run")
+    def test_get_current_commit_failure(self, mock_run: Mock, git_ops: GitOps) -> None:
+        """Test failed get_current_commit."""
+        mock_run.return_value = Mock(returncode=1)
+        assert git_ops.get_current_commit() == ""
