@@ -824,13 +824,18 @@ class Processor:
                     return False
 
                 self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
-                
                 # Determine whether the LLM actually produced any work
                 post_ai_commit = git.get_current_commit()
                 has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
                 has_uncommitted = git.has_uncommitted_changes()
-                llm_made_changes = has_new_commits or has_uncommitted
+                
+                # Check if branch has any commits compared to master.
+                # This is important for retries where work was done in a previous run.
+                has_any_commits = git.has_unpushed_work(self.default_branch)
+                
+                llm_made_changes = has_new_commits or has_uncommitted or has_any_commits
                 is_finished = "/done" in output
+
 
                 if not llm_made_changes:
                     self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid}")
