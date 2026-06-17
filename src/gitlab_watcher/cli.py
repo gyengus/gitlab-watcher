@@ -74,6 +74,16 @@ def _init_components(config_path: str) -> tuple[Config, StateManager]:
         work_dir = Path("/tmp/gitlab-watcher")
         
     os.makedirs(work_dir, mode=0o700, exist_ok=True)
+    
+    # Security: Verify ownership and restrict permissions if it already exists
+    if os.name != 'nt':
+        st = work_dir.stat()
+        if st.st_uid != os.getuid():
+            click.echo(f"Error: Directory {work_dir} is not owned by current user.", err=True)
+            sys.exit(1)
+        if st.st_mode & 0o077:
+            os.chmod(work_dir, 0o700)
+
     state = StateManager(work_dir)
     return cfg, state
 
