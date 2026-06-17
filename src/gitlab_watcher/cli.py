@@ -66,8 +66,13 @@ def run_command(config: str, verbose: bool) -> None:
 def _init_components(config_path: str) -> tuple[Config, StateManager]:
     """Helper to initialize shared components for CLI commands."""
     cfg = load_config(config_path)
-    # Ensure work directory exists with restricted permissions
-    work_dir = Path("/tmp/gitlab-watcher")
+    
+    # Determine work directory, using separate directory for tests
+    if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ:
+        work_dir = Path("/tmp/test-watcher")
+    else:
+        work_dir = Path("/tmp/gitlab-watcher")
+        
     os.makedirs(work_dir, mode=0o700, exist_ok=True)
     state = StateManager(work_dir)
     return cfg, state

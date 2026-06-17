@@ -41,6 +41,7 @@ class Watcher:
         processor: Optional[Processor] = None,
         state: Optional[StateManager] = None,
         disable_lock: bool = False,
+        work_dir: Optional[str | Path] = None,
     ) -> None:
         """Initialize watcher.
 
@@ -54,6 +55,18 @@ class Watcher:
         """
         self.config = load_config(config_path)
         self.verbose = verbose
+        
+        # Determine work_dir
+        if work_dir:
+            self.work_dir = Path(work_dir)
+        elif state and hasattr(state, "work_dir"):
+            self.work_dir = state.work_dir
+        else:
+            # Use a separate directory for tests to avoid interfering with production logs/state
+            if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ:
+                self.work_dir = Path("/tmp/test-watcher")
+            else:
+                self.work_dir = Path("/tmp/gitlab-watcher")
 
         # Setup logging
         if verbose:
@@ -116,8 +129,8 @@ class Watcher:
                 raise
             
         except (PermissionError, OSError) as e:
-            # Fallback to work directory in /tmp
-            fallback_dir = Path("/tmp/gitlab-watcher")
+            # Fallback to work directory
+            fallback_dir = self.work_dir
             os.makedirs(fallback_dir, mode=0o700, exist_ok=True)
             
             try:
@@ -174,8 +187,7 @@ class Watcher:
         # but for now let's keep it to our logger to fix the memory leak.
         # If the user really wants root coverage, they can add it once in cli.py.
 
-        # Create work directory (for state files)
-        self.work_dir = Path("/tmp/gitlab-watcher")
+        # Ensure work directory exists and has restricted permissions (0700)
         try:
             if not self.work_dir.exists():
                 # Security: Atomic creation with restricted permissions (0700)
