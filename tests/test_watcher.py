@@ -1010,6 +1010,7 @@ class TestWatcherCheckMRStatus:
         # Should NOT call cleanup_after_merge
         mock_processor.cleanup_after_merge.assert_not_called()
         # Should still remove from tracked MRs
+        state = state_manager.load(project.project_id)
         assert "6" not in state.tracked_mrs
 
     def test_check_mr_status_merged_created_by_watcher(
