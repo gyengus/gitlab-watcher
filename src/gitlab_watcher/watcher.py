@@ -544,7 +544,7 @@ class Watcher:
                 if not branch:
                     self._log_info(project.project_id, "MR !%s merged/closed but no branch info found — skipping cleanup", iid)
                     self.state.remove_tracked_mr(project.project_id, iid)
-                    return True
+                    continue
 
                 self.processor.cleanup_after_merge(
                     project=project,
