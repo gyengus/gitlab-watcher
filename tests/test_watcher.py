@@ -1014,7 +1014,6 @@ class TestWatcherCheckMRStatus:
         assert "6" not in state.tracked_mrs
 
     def test_check_mr_status_merged_created_by_watcher(
-
         self,
         config_file: Path,
         mock_gitlab: MagicMock,

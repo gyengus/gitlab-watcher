@@ -539,7 +539,6 @@ class Watcher:
 
                 mr_data = state.tracked_mrs.get(iid_str, {})
                 branch = mr_data.get("branch") or ""
-                created_by_watcher = mr_data.get("created_by_watcher", False)
 
                 # Cleanup if we have a known branch for this MR
                 if not branch:
