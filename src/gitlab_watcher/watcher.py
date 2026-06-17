@@ -558,14 +558,18 @@ class Watcher:
                     self.state.remove_tracked_mr(project.project_id, iid)
                     continue
 
-                self.processor.cleanup_after_merge(
-                    project=project,
-                    branch=branch,
-                    mr_title=mr.title,
-                    mr_url=mr.web_url,
-                    mr_iid=iid,
-                )
-                self.state.remove_tracked_mr(project.project_id, iid)
+                try:
+                    self.processor.cleanup_after_merge(
+                        project=project,
+                        branch=branch,
+                        mr_title=mr.title,
+                        mr_url=mr.web_url,
+                        mr_iid=iid,
+                    )
+                except Exception as e:
+                    self._log_error(project.project_id, f"Cleanup failed: {e}")
+                finally:
+                    self.state.remove_tracked_mr(project.project_id, iid)
                 return True
         return False
 

@@ -77,6 +77,10 @@ def _init_components(config_path: str) -> tuple[Config, StateManager]:
     
     # Security: Verify ownership and restrict permissions if it already exists
     if os.name != 'nt':
+        if work_dir.is_symlink():
+            click.echo(f"Error: {work_dir} is a symbolic link.", err=True)
+            sys.exit(1)
+            
         st = work_dir.stat()
         if st.st_uid != os.getuid():
             click.echo(f"Error: Directory {work_dir} is not owned by current user.", err=True)
