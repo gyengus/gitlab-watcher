@@ -50,8 +50,9 @@ discord.py      → Discord webhook notifications
 2. **MR Comment Processing**: When a new comment appears on an open MR (not from bot user):
    - Checks out MR's source branch → Runs Claude CLI with comment as feedback → Pushes changes
 
-3. **Post-Merge Cleanup**: When MR is detected as merged:
+3. **Post-Merge Cleanup**: When MR is detected as merged or closed:
    - Switches to master → Pulls → Deletes feature branch → Resets state
+   - Cleanup is performed if the MR was created by the watcher OR if the branch name is known to the watcher.
 
 ### Configuration Discovery
 

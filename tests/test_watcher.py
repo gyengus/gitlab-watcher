@@ -934,7 +934,7 @@ class TestWatcherCheckMRStatus:
         )
 
 
-    def test_check_mr_status_merged_not_created_by_watcher(
+    def test_check_mr_status_merged_not_created_by_watcher_with_branch(
         self,
         config_file: Path,
         mock_gitlab: MagicMock,
@@ -942,7 +942,7 @@ class TestWatcherCheckMRStatus:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test that MR merged/closed but not created by watcher skips cleanup."""
+        """Test that MR merged but not created by watcher DOES cleanup if branch info exists."""
         merged_mr = MergeRequest(
             iid=5,
             title="External MR",
@@ -951,7 +951,7 @@ class TestWatcherCheckMRStatus:
             state="merged",
         )
         mock_gitlab.get_merge_request.return_value = merged_mr
-
+    
         watcher = Watcher(disable_lock=True,
             config_path=str(config_file),
             gitlab=mock_gitlab,
@@ -960,19 +960,60 @@ class TestWatcherCheckMRStatus:
             state=state_manager,
         )
         project = watcher.config.projects[0]
-
-        # Set up state tracking MR NOT created by watcher
+    
+        # Set up state tracking MR NOT created by watcher but WITH branch info
         state_manager.add_tracked_mr(project.project_id, 5, "5-external-branch", created_by_watcher=False)
-
+    
         watcher.check_mr_status(project)
-
-        # Should NOT call cleanup_after_merge
-        mock_processor.cleanup_after_merge.assert_not_called()
-        # Should remove from tracked MRs since it's no longer relevant
+    
+        # Should call cleanup_after_merge because branch info exists
+        mock_processor.cleanup_after_merge.assert_called_once()
+        # Should remove from tracked MRs
         state = state_manager.load(project.project_id)
         assert "5" not in state.tracked_mrs
 
+    def test_check_mr_status_merged_no_branch_info(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that MR merged with no branch info and not created by watcher skips cleanup."""
+        merged_mr = MergeRequest(
+            iid=6,
+            title="No Branch MR",
+            web_url="https://git.example.com/merge_requests/6",
+            source_branch="6-some-branch",
+            state="merged",
+        )
+        mock_gitlab.get_merge_request.return_value = merged_mr
+    
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+    
+        # Manually add to state without branch info (e.g. legacy state)
+        state = state_manager.load(project.project_id)
+        state.tracked_mrs["6"] = {"branch": "", "created_by_watcher": False}
+        state_manager.save(project.project_id)
+        state_manager.force_save_all()
+    
+        watcher.check_mr_status(project)
+    
+        # Should NOT call cleanup_after_merge
+        mock_processor.cleanup_after_merge.assert_not_called()
+        # Should still remove from tracked MRs
+        assert "6" not in state.tracked_mrs
+
     def test_check_mr_status_merged_created_by_watcher(
+
         self,
         config_file: Path,
         mock_gitlab: MagicMock,
@@ -1007,7 +1048,7 @@ class TestWatcherCheckMRStatus:
         # Should call cleanup_after_merge since created_by_watcher=True
         mock_processor.cleanup_after_merge.assert_called_once()
 
-    def test_check_mr_status_closed_not_created_by_watcher(
+    def test_check_mr_status_closed_not_created_by_watcher_with_branch(
         self,
         config_file: Path,
         mock_gitlab: MagicMock,
@@ -1015,7 +1056,7 @@ class TestWatcherCheckMRStatus:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test that closed MR not created by watcher skips cleanup."""
+        """Test that closed MR not created by watcher DOES cleanup if branch info exists."""
         closed_mr = MergeRequest(
             iid=7,
             title="Closed external MR",
@@ -1024,7 +1065,7 @@ class TestWatcherCheckMRStatus:
             state="closed",
         )
         mock_gitlab.get_merge_request.return_value = closed_mr
-
+    
         watcher = Watcher(disable_lock=True,
             config_path=str(config_file),
             gitlab=mock_gitlab,
@@ -1033,14 +1074,15 @@ class TestWatcherCheckMRStatus:
             state=state_manager,
         )
         project = watcher.config.projects[0]
-
-        # Set up state tracking MR NOT created by watcher
+    
+        # Set up state tracking MR NOT created by watcher but WITH branch
         state_manager.add_tracked_mr(project.project_id, 7, "7-closed-branch", created_by_watcher=False)
-
+    
         watcher.check_mr_status(project)
+    
+        # Should call cleanup_after_merge
+        mock_processor.cleanup_after_merge.assert_called_once()
 
-        # Should NOT call cleanup_after_merge
-        mock_processor.cleanup_after_merge.assert_not_called()
         # Should remove from tracked MRs
         state = state_manager.load(project.project_id)
         assert "7" not in state.tracked_mrs

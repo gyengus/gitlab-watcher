@@ -541,8 +541,9 @@ class Watcher:
                 branch = mr_data.get("branch") or ""
                 created_by_watcher = mr_data.get("created_by_watcher", False)
 
-                if not created_by_watcher:
-                    self._log_info(project.project_id, "MR !%s merged/closed but not created by watcher — skipping cleanup", iid)
+                # Cleanup if created by watcher OR if we have a known branch for this MR
+                if not created_by_watcher and not branch:
+                    self._log_info(project.project_id, "MR !%s merged/closed but no branch info found — skipping cleanup", iid)
                     self.state.remove_tracked_mr(project.project_id, iid)
                     return True
 
