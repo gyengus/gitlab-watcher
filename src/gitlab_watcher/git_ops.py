@@ -145,15 +145,15 @@ class GitOps:
                 return True, ""
 
             if create:
-                # Try checking out normally first (if it exists)
+                # Try checking out normally first (it exists locally or on remote)
                 try:
-                    self._run("checkout", "--", branch)
+                    self._run("checkout", branch)
                     return True, ""
                 except subprocess.CalledProcessError:
                     # If normal checkout fails, try creating it
-                    self._run("checkout", "-b", branch, "--")
+                    self._run("checkout", "-b", branch)
             else:
-                self._run("checkout", "--", branch)
+                self._run("checkout", branch)
             return True, ""
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.strip() if e.stderr else str(e)
@@ -163,7 +163,7 @@ class GitOps:
         """Pull from remote."""
         try:
             if branch:
-                self._run("pull", remote, "--", branch)
+                self._run("pull", remote, branch)
             else:
                 self._run("pull")
             return True

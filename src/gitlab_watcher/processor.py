@@ -756,7 +756,11 @@ class Processor:
                 )
                 return False
 
-            self.logger.info(f"[{project.name}] Creating branch: {branch}")
+            if git.branch_exists(branch):
+                self.logger.info(f"[{project.name}] Switching to existing branch: {branch}")
+            else:
+                self.logger.info(f"[{project.name}] Creating branch: {branch}")
+            
             success, error = git.checkout(branch, create=True)
             if not success:
                 self.logger.error(f"[{project.name}] Could not create branch {branch}: {error}")
