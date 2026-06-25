@@ -504,7 +504,9 @@ class Watcher:
     def check_issues(self, project: ProjectConfig) -> None:
         """Check for new issues to process."""
         if not self.gitlab_username:
-            self._log_warning(project.project_id, "Skipping issue check: gitlab_username is not set.")
+            if not getattr(self, "_warned_username", False):
+                self._log_warning(project.project_id, "Skipping issue check: gitlab_username is not set.")
+                self._warned_username = True
             return
 
         if self.state.is_processing(project.project_id):
@@ -657,7 +659,9 @@ class Watcher:
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
         if not self.gitlab_username:
-            self._log_warning(project.project_id, "Skipping MR check: gitlab_username is not set.")
+            if not getattr(self, "_warned_username", False):
+                self._log_warning(project.project_id, "Skipping MR check: gitlab_username is not set.")
+                self._warned_username = True
             return
 
         if self.state.is_processing(project.project_id):
@@ -735,11 +739,10 @@ class Watcher:
         """Stop the watcher and cleanup resources."""
         # Restore original getaddrinfo to prevent global test pollution
         import socket
-        if hasattr(socket, "_original_getaddrinfo"):
+        if hasattr(socket, "_pinned_hosts") and hasattr(socket, "_original_getaddrinfo"):
+            socket._pinned_hosts.clear()
             socket.getaddrinfo = socket._original_getaddrinfo
-            del socket._original_getaddrinfo
-            if hasattr(socket, "_pinned_hosts"):
-                del socket._pinned_hosts
+            del socket._original_getaddrinfo, socket._pinned_hosts
 
         # Release lock file
         if self._lock_file and fcntl:

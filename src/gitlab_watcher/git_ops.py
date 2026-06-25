@@ -57,7 +57,7 @@ class GitOps:
             
             # Special case for --oneline or -n followed by a number which are in SAFE_COMMANDS
             # but might be passed as part of a list
-            if command == "log" and arg.startswith("-n"):
+            if command == "log" and re.match(r"^-n\d+$", arg):
                  return arg
                  
             raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
