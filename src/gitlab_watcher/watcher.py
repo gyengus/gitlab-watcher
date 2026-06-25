@@ -548,6 +548,7 @@ class Watcher:
             if iid in open_iids:
                 continue
 
+            self.gitlab.invalidate_cache(f"mr_{project.project_id}_{iid}")
             mr = self.gitlab.get_merge_request(project.project_id, iid)
 
             if mr is None:
@@ -595,7 +596,7 @@ class Watcher:
         mr_state = state.tracked_mrs.get(mr_id_str, {}) if hasattr(state, "tracked_mrs") and hasattr(state.tracked_mrs, "get") else {}
         last_processed_id = mr_state.get("last_processed_note_id") if isinstance(mr_state, dict) else None
         if last_processed_id is None:
-            last_processed_id = getattr(state, "last_processed_note_id", 0) or 0
+            last_processed_id = 0
 
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:

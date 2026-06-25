@@ -1479,3 +1479,90 @@ def test_check_mr_status_ignores_external_mr(
     mock_gitlab.get_notes.assert_called()
 
 
+def test_newly_tracked_mr_note_id_defaults_to_zero(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that a newly tracked MR defaults its last_processed_note_id to 0 rather than falling back to the global state."""
+    project_id = 42
+    state = state_manager.load(project_id)
+    state.last_processed_note_id = 500
+    state_manager.force_save(project_id)
+
+    state_manager.add_tracked_mr(project_id, 5, "5-branch", created_by_watcher=True)
+
+    mr = MergeRequest(
+        iid=5,
+        title="Newly tracked MR",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="opened",
+        author="claude-bot",
+    )
+    mock_gitlab.get_merge_requests.return_value = [mr]
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
+
+    notes = [
+        Note(id=100, body="Comment 1", author_username="user", system=False, award_emojis=[], discussion_id="disc1"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_processor.process_comment.assert_called_once_with(
+        project, mr, 100, "Comment 1", discussion_id="disc1"
+    )
+
+
+def test_invalidate_cache_before_get_merge_request(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that invalidate_cache is called before get_merge_request in _handle_merge_cleanup."""
+    project_id = 42
+    state_manager.add_tracked_mr(project_id, 5, "5-branch", created_by_watcher=True)
+
+    mock_gitlab.get_merge_requests.return_value = []
+    
+    merged_mr = MergeRequest(
+        iid=5,
+        title="Merged MR",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="merged",
+    )
+    mock_gitlab.get_merge_request.return_value = merged_mr
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_gitlab.invalidate_cache.assert_called_once_with("mr_42_5")
+    mock_gitlab.get_merge_request.assert_called_with(42, 5)
+
+
+
