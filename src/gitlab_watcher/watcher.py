@@ -94,6 +94,8 @@ class Watcher:
 
         try:
             # Ensure the directory exists and has restricted permissions (0700)
+            if os.name != 'nt' and log_path.parent.is_symlink():
+                raise RuntimeError(f"Security risk: {log_path.parent} is a symbolic link.")
             os.makedirs(log_path.parent, mode=0o700, exist_ok=True)
             try:
                 st = log_path.parent.stat()
@@ -131,6 +133,8 @@ class Watcher:
         except (PermissionError, OSError) as e:
             # Fallback to work directory
             fallback_dir = self.work_dir
+            if os.name != 'nt' and fallback_dir.is_symlink():
+                 raise RuntimeError(f"Security risk: {fallback_dir} is a symbolic link.")
             os.makedirs(fallback_dir, mode=0o700, exist_ok=True)
             
             try:
@@ -189,6 +193,8 @@ class Watcher:
 
         # Ensure work directory exists and has restricted permissions (0700)
         try:
+            if os.name != 'nt' and self.work_dir.is_symlink():
+                raise RuntimeError(f"Security risk: {self.work_dir} is a symbolic link and will not be used.")
             if not self.work_dir.exists():
                 # Security: Atomic creation with restricted permissions (0700)
                 os.makedirs(self.work_dir, mode=0o700, exist_ok=True)
