@@ -89,6 +89,7 @@ class Processor:
         self.default_branch = default_branch
         self.git_factory = git_factory
         self.logger = logging.getLogger(__name__)
+        self.current_branches: dict[str, str] = {}
 
     def _sanitize_prompt(self, prompt: str) -> str:
         """Sanitize prompt to prevent command injection.
@@ -1019,20 +1020,22 @@ class Processor:
             self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "eyes", discussion_id=discussion_id)
 
             # Switch to MR branch
-            try:
-                self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull/rebase)")
-                git.fetch()
-                git.checkout(mr.source_branch)
-                git.pull("origin", mr.source_branch)
-            except Exception as e:
-                self.logger.error(f"[{project.name}] Git preparation failed: {str(e)}")
-                self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
-                self.discord.notify_error(
-                    project.name,
-                    f"Git preparation failed on branch `{mr.source_branch}` (fetch/checkout/pull)",
-                    details=str(e),
-                )
-                return False
+            if self.current_branches.get(project.name) != mr.source_branch:
+                try:
+                    self.logger.info(f"[{project.name}] Switching to branch {mr.source_branch}")
+                    git.checkout(mr.source_branch)
+                    self.current_branches[project.name] = mr.source_branch
+                except Exception as e:
+                    self.logger.error(f"[{project.name}] Git checkout failed: {str(e)}")
+                    self.gitlab.create_note_award_emoji(project.project_id, mr.iid, note_id, "x", discussion_id=discussion_id)
+                    self.discord.notify_error(
+                        project.name,
+                        f"Git checkout failed on branch `{mr.source_branch}`",
+                        details=str(e),
+                    )
+                    return False
+            else:
+                self.logger.info(f"[{project.name}] Already on branch {mr.source_branch}, skipping git setup.")
 
             # Build prompt for Claude
             continue_instruction = ""

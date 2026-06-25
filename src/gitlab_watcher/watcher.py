@@ -588,11 +588,12 @@ class Watcher:
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
 
             # Skip already handled via persistent state
-            if note.id <= last_processed_id and not is_retry_request:
+            if note.id <= last_processed_id:
                 continue
 
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
-            SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
+            # Remove "eyes" from skip list so we can recover interrupted processes
+            SKIP_EMOJIS = ["x", "no_entry"] + SUCCESS_EMOJIS
             
             # Use in-memory cache first
             is_skipped = note.id in self._processed_notes

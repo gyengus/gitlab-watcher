@@ -162,7 +162,9 @@ class GitLabClient:
             elif response.status_code == 403:
                 raise GitLabForbiddenError(url)
             elif response.status_code == 404:
-                raise GitLabNotFoundError("Resource", url)
+                err = GitLabNotFoundError("Resource", url)
+                err.response = response
+                raise err
             elif response.status_code == 429:
                 retry_after_str = response.headers.get("Retry-After")
                 retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
@@ -444,6 +446,11 @@ class GitLabClient:
                     json={"name": emoji_name}
                 )
                 return True
+            except GitLabNotFoundError as e:
+                if hasattr(e, 'response') and e.response is not None and "already been taken" in e.response.text:
+                    self.logger.debug(f"Emoji {emoji_name} already exists on note {note_id} in discussion {discussion_id}")
+                    return True
+                self.logger.debug(f"Failed discussion-scoped emoji for note {note_id}: {e}. Falling back to MR-scoped API.")
             except Exception as e:
                 self.logger.debug(f"Failed discussion-scoped emoji for note {note_id}: {e}. Falling back to MR-scoped API.")
         
@@ -456,6 +463,15 @@ class GitLabClient:
                 json={"name": emoji_name}
             )
             return True
+        except GitLabNotFoundError as e:
+            if hasattr(e, 'response') and e.response is not None and "already been taken" in e.response.text:
+                self.logger.debug(f"Emoji {emoji_name} already exists on note {note_id}")
+                return True
+            if hasattr(e, 'response') and e.response is not None:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {e.response.text})")
+            else:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            return False
         except Exception as e:
             if hasattr(e, 'response') and e.response is not None:
                 self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {e.response.text})")

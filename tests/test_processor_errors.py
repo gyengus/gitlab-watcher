@@ -225,7 +225,7 @@ class TestProcessorErrorPaths:
     def test_process_comment_git_prep_failure(self, processor: Processor, project_config: ProjectConfig) -> None:
         """Test process_comment with git preparation failure (line 721)."""
         mock_git = MagicMock()
-        mock_git.pull.side_effect = Exception("Network error")
+        mock_git.checkout.side_effect = Exception("Checkout error")
         mock_gitlab = MagicMock()
         p = Processor(
             gitlab=mock_gitlab, discord=processor.discord, state=processor.state,
@@ -236,7 +236,7 @@ class TestProcessorErrorPaths:
         p.discord.notify_error = Mock()
         result = p.process_comment(project_config, mr, 123, "comment")
         assert result is False
-        assert "Git preparation failed" in p.discord.notify_error.call_args[0][1]
+        assert "Git checkout failed" in p.discord.notify_error.call_args[0][1]
 
     @patch.object(Processor, "_run_ai_tool")
     def test_process_comment_unexpected_exception(self, mock_run_ai: Mock, processor: Processor, project_config: ProjectConfig) -> None:
