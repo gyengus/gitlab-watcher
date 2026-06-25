@@ -158,9 +158,13 @@ class GitLabClient:
             response = self.session.request(method, url, **kwargs)
 
             if response.status_code == 401:
-                raise GitLabAuthenticationError()
+                err = GitLabAuthenticationError()
+                err.response = response
+                raise err
             elif response.status_code == 403:
-                raise GitLabForbiddenError(url)
+                err = GitLabForbiddenError(url)
+                err.response = response
+                raise err
             elif response.status_code == 404:
                 err = GitLabNotFoundError("Resource", url)
                 err.response = response
@@ -168,9 +172,13 @@ class GitLabClient:
             elif response.status_code == 429:
                 retry_after_str = response.headers.get("Retry-After")
                 retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
-                raise GitLabRateLimitError(retry_after)
+                err = GitLabRateLimitError(retry_after)
+                err.response = response
+                raise err
             elif response.status_code >= 400:
-                raise GitLabAPIError(response.status_code, response.text)
+                err = GitLabAPIError(response.status_code, response.text)
+                err.response = response
+                raise err
 
             return response
 
@@ -320,10 +328,10 @@ class GitLabClient:
                 author_username = author_data.get("username", "ghost")
                 notes.append(
                     Note(
-                        id=note["id"],
-                        body=note["body"],
+                        id=note.get("id", 0),
+                        body=note.get("body", ""),
                         author_username=author_username,
-                        system=note["system"],
+                        system=note.get("system", False),
                         award_emojis=[], # Emojis are fetched lazily in the watcher
                         discussion_id=note.get("discussion_id", ""),
                         noteable_type=note.get("noteable_type"),
