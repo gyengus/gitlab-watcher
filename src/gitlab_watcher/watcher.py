@@ -503,8 +503,11 @@ class Watcher:
         return None
 
     def check_issues(self, project: ProjectConfig) -> None:
-
         """Check for new issues to process."""
+        if not self.gitlab_username:
+            self._log_warning(project.project_id, "Skipping issue check: gitlab_username is not set.")
+            return
+
         if self.state.is_processing(project.project_id):
             return
 
@@ -585,7 +588,13 @@ class Watcher:
         notes = sorted(notes, key=lambda n: n.id)
         
         state = self.state.load(project.project_id)
-        last_processed_id = state.last_processed_note_id or 0
+        
+        # Track last_processed_note_id per-MR to avoid comments on one MR skipping comments on another
+        mr_id_str = str(mr.iid)
+        mr_state = state.tracked_mrs.get(mr_id_str, {}) if hasattr(state, "tracked_mrs") and hasattr(state.tracked_mrs, "get") else {}
+        last_processed_id = mr_state.get("last_processed_note_id") if isinstance(mr_state, dict) else None
+        if last_processed_id is None:
+            last_processed_id = getattr(state, "last_processed_note_id", 0) or 0
 
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:
@@ -613,7 +622,7 @@ class Watcher:
             if is_skipped and not is_retry_request:
                 # If it's effectively skipped but we haven't updated the persistent state, do it now
                 if note.id > last_processed_id:
-                    self.state.update_last_processed_note(project.project_id, note.id)
+                    self.state.update_mr_last_processed_note(project.project_id, mr.iid, note.id)
                 continue
             
             if is_retry_request and is_skipped:
@@ -633,7 +642,7 @@ class Watcher:
                     project.project_id, mr.iid, note.id, "white_check_mark", 
                     discussion_id=note.discussion_id
                 )
-                self.state.update_last_processed_note(project.project_id, note.id)
+                self.state.update_mr_last_processed_note(project.project_id, mr.iid, note.id)
                 continue
 
 
@@ -642,12 +651,16 @@ class Watcher:
             self._processed_notes.add(note.id)
             self.processor.process_comment(project, mr, note.id, note.body, discussion_id=note.discussion_id)
             self.state.update_mr_state(project.project_id, mr.iid, mr.state, mr.source_branch)
-            self.state.update_last_processed_note(project.project_id, note.id)
+            self.state.update_mr_last_processed_note(project.project_id, mr.iid, note.id)
             return True
         return False
 
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
+        if not self.gitlab_username:
+            self._log_warning(project.project_id, "Skipping MR check: gitlab_username is not set.")
+            return
+
         if self.state.is_processing(project.project_id):
             self._log_debug(project.project_id, "Project is currently processing, skipping MR check.")
             return

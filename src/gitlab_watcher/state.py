@@ -14,10 +14,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_SAVE_DELAY = 1.0
 
 
-class TrackedMRInfo(TypedDict):
+class TrackedMRInfo(TypedDict, total=False):
     """Information about a tracked merge request."""
     branch: str
     created_by_watcher: bool
+    last_processed_note_id: int
 
 
 @dataclass
@@ -333,6 +334,22 @@ class StateManager:
             current = self.get(project_id, "last_processed_note_id")
             if current is None or not isinstance(current, int) or note_id > current:
                 self.set(project_id, "last_processed_note_id", note_id)
+                self.force_save(project_id)
+
+    def update_mr_last_processed_note(self, project_id: int, mr_iid: int, note_id: int) -> None:
+        """Update the last processed note ID for a specific MR and force an immediate save."""
+        with self._lock:
+            state = self.load(project_id)
+            mr_id_str = str(mr_iid)
+            if mr_id_str not in state.tracked_mrs:
+                state.tracked_mrs[mr_id_str] = {
+                    "branch": "",
+                    "created_by_watcher": False,
+                }
+            mr_state = state.tracked_mrs[mr_id_str]
+            current = mr_state.get("last_processed_note_id")
+            if current is None or not isinstance(current, int) or note_id > current:
+                mr_state["last_processed_note_id"] = note_id
                 self.force_save(project_id)
 
     def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str, created_by_watcher: bool = False) -> None:
