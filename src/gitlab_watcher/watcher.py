@@ -94,8 +94,6 @@ class Watcher:
 
         try:
             # Ensure the directory exists and has restricted permissions (0700)
-            if os.name != 'nt' and log_path.parent.is_symlink():
-                raise RuntimeError(f"Security risk: {log_path.parent} is a symbolic link.")
             os.makedirs(log_path.parent, mode=0o700, exist_ok=True)
             try:
                 st = log_path.parent.stat()
@@ -404,7 +402,8 @@ class Watcher:
             def pinned_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
                 h = host.lower() if host else ""
                 if h in socket._pinned_hosts:
-                    return socket._original_getaddrinfo(socket._pinned_hosts[h], port, family, type, proto, flags)
+                    res = socket._original_getaddrinfo(socket._pinned_hosts[h], port, 0, type, proto, flags)
+                    return [r for r in res if family == 0 or r[0] == family]
                 return socket._original_getaddrinfo(host, port, family, type, proto, flags)
 
             socket.getaddrinfo = pinned_getaddrinfo
