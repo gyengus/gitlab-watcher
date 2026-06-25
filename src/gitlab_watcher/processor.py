@@ -1042,7 +1042,7 @@ class Processor:
 
             # Build prompt for Claude
             continue_instruction = ""
-            has_unpushed = git.has_unpushed_commits(mr.source_branch)
+            has_unpushed = git.has_unpushed_work(self.default_branch) and git.has_unpushed_commits(mr.source_branch)
             has_uncommitted = git.has_uncommitted_changes()
             if has_uncommitted:
                 continue_instruction = (

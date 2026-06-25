@@ -446,8 +446,10 @@ class GitLabClient:
                     json={"name": emoji_name}
                 )
                 return True
-            except GitLabNotFoundError as e:
-                if hasattr(e, 'response') and e.response is not None and "already been taken" in e.response.text:
+            except GitLabAPIError as e:
+                msg = getattr(e, "message", "")
+                resp_text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+                if "already been taken" in msg or "already been taken" in resp_text:
                     self.logger.debug(f"Emoji {emoji_name} already exists on note {note_id} in discussion {discussion_id}")
                     return True
                 self.logger.debug(f"Failed discussion-scoped emoji for note {note_id}: {e}. Falling back to MR-scoped API.")
@@ -463,12 +465,14 @@ class GitLabClient:
                 json={"name": emoji_name}
             )
             return True
-        except GitLabNotFoundError as e:
-            if hasattr(e, 'response') and e.response is not None and "already been taken" in e.response.text:
+        except GitLabAPIError as e:
+            msg = getattr(e, "message", "")
+            resp_text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+            if "already been taken" in msg or "already been taken" in resp_text:
                 self.logger.debug(f"Emoji {emoji_name} already exists on note {note_id}")
                 return True
-            if hasattr(e, 'response') and e.response is not None:
-                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {e.response.text})")
+            if resp_text:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {resp_text})")
             else:
                 self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
             return False
