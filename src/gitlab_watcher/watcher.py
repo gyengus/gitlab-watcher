@@ -594,7 +594,7 @@ class Watcher:
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
 
             # Skip already handled via persistent state
-            if note.id <= last_processed_id:
+            if note.id <= last_processed_id and not is_retry_request:
                 continue
 
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]

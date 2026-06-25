@@ -331,6 +331,7 @@ class Processor:
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "LANG": "en_US.UTF-8",
             "TERM": "xterm-256color",
+            "CLAUDECODE": "",
         }
         
         # SEC-01 fix: Pass HOME and other essential environment variables
@@ -405,22 +406,27 @@ class Processor:
             try:
                 if pgid and hasattr(os, "killpg"):
                     os.killpg(pgid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+            try:
                 wait_start = time.time()
                 while time.time() - wait_start < 2:
                     if process.poll() is not None:
                         break
                     time.sleep(0.1)
                 if process.poll() is None:
-                    if pgid and hasattr(os, "killpg"):
-                        os.killpg(pgid, signal.SIGKILL)
-                    else:
-                        process.kill()
+                    try:
+                        if pgid and hasattr(os, "killpg"):
+                            os.killpg(pgid, signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except ProcessLookupError:
+                        pass
                     try:
                         process.wait(timeout=1)
                     except Exception:
                         pass
-            except ProcessLookupError:
-                pass
             except OSError as e:
                 self.logger.error(f"Error cleaning up process group {pgid}: {e}")
 
