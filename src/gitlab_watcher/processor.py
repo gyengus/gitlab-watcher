@@ -405,7 +405,7 @@ class Processor:
             try:
                 if pgid and hasattr(os, "killpg"):
                     os.killpg(pgid, signal.SIGTERM)
-            except ProcessLookupError:
+            except OSError:
                 pass
 
             try:
@@ -420,7 +420,7 @@ class Processor:
                             os.killpg(pgid, signal.SIGKILL)
                         else:
                             process.kill()
-                    except ProcessLookupError:
+                    except OSError:
                         pass
                     try:
                         process.wait(timeout=1)

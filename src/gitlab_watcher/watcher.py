@@ -733,6 +733,14 @@ class Watcher:
 
     def stop(self) -> None:
         """Stop the watcher and cleanup resources."""
+        # Restore original getaddrinfo to prevent global test pollution
+        import socket
+        if hasattr(socket, "_original_getaddrinfo"):
+            socket.getaddrinfo = socket._original_getaddrinfo
+            del socket._original_getaddrinfo
+            if hasattr(socket, "_pinned_hosts"):
+                del socket._pinned_hosts
+
         # Release lock file
         if self._lock_file and fcntl:
             try:
