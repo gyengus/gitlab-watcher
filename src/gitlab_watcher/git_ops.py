@@ -46,7 +46,8 @@ class GitOps:
             "status": {"--porcelain", "--"},
             "add": {"--"},
             "commit": {"-m", "--"},
-            "config": {"--get"}
+            "config": {"--get"},
+            "rev-list": {"--count", "--"}
         }
         
         # Structural arguments (branches, remotes, paths)
@@ -59,6 +60,10 @@ class GitOps:
             # but might be passed as part of a list
             if command == "log" and re.match(r"^-n\d+$", arg):
                  return arg
+                 
+            # Explicitly allow the standard git argument separator "--"
+            if arg == "--":
+                return arg
                  
             raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
             
@@ -89,7 +94,7 @@ class GitOps:
         # Strict allowlist of git subcommands used by this class
         ALLOWED_SUBCOMMANDS = {
             "fetch", "checkout", "pull", "push", "branch", 
-            "log", "rev-parse", "status", "add", "commit", "config"
+            "log", "rev-parse", "status", "add", "commit", "config", "rev-list"
         }
         
         if main_command not in ALLOWED_SUBCOMMANDS:
@@ -244,9 +249,9 @@ class GitOps:
         try:
             # Validate branch name
             self._validate_arg(default_branch)
-            # Limit log to avoid large memory buffering
-            result = self._run("log", f"{default_branch}..HEAD", "--oneline", "-n", "100", "--", check=False)
-            return bool(result.stdout.strip())
+            # Use rev-list --count for efficiency
+            result = self._run("rev-list", "--count", f"{default_branch}..HEAD", "--", check=False)
+            return int(result.stdout.strip()) > 0
         except (subprocess.CalledProcessError, ValueError, Exception):
             return False
 

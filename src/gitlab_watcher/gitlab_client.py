@@ -99,6 +99,10 @@ class GitLabClient:
         self.logger = logging.getLogger(__name__)
         self.base_url = url.rstrip("/")
         
+        # Add URL validation
+        if not re.match(r"^https?://[a-zA-Z0-9\-_./:]+$", self.base_url):
+            raise ValueError(f"Invalid characters or format in GitLab URL: {self.base_url}")
+            
         if not re.match(r"^[a-zA-Z0-9_\-\.]+$", token):
             raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, hyphens, and dots are allowed.")
             
@@ -183,7 +187,10 @@ class GitLabClient:
             return response
 
         except requests.RequestException as e:
-            raise GitLabConnectionError(f"Request failed: {e}")
+            err = GitLabConnectionError(f"Request failed: {e}")
+            if hasattr(e, "response") and e.response is not None:
+                err.response = e.response
+            raise err
     def _request_all(self, method: str, url: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Make HTTP request and follow pagination to fetch all items."""
         params = kwargs.get("params", {}).copy()

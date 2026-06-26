@@ -279,8 +279,8 @@ class Processor:
                 # Remove placeholders before validation
                 cleaned_part = re.sub(placeholder_pattern, "", part)
                 # Tightened regex: no spaces in general arguments. 
-                # Allowed characters include alphanumeric, hyphens, underscores, dots, forward slashes, colons, and equals signs.
-                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./+:=]+$", cleaned_part):
+                # Allowed characters include alphanumeric, hyphens, underscores, dots, forward slashes, and colons.
+                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./+:]+$", cleaned_part):
                     raise ValueError(f"Invalid character in AI tool command part: {part}. Shell metacharacters and spaces are forbidden in general arguments.")
                 
                 # If it's a flag (starts with -), check against whitelist
@@ -470,12 +470,14 @@ class Processor:
                  raise RuntimeError(f"Security risk: {ai_log_dir} is a symbolic link.")
             
             # Ensure permissions are correct even if it already existed
-            st = ai_log_dir.stat()
-            if os.name != 'nt' and st.st_uid == os.getuid():
-                os.chmod(ai_log_dir, 0o700)
-            elif os.name != 'nt':
-                self.logger.warning(f"AI log directory {ai_log_dir} is not owned by current user!")
-        except OSError as e:
+            try:
+                st = ai_log_dir.stat()
+                if os.name != 'nt' and (st.st_mode & 0o077): # Check if group/other have permissions
+                    self.logger.warning(f"AI log directory {ai_log_dir} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                    os.chmod(ai_log_dir, 0o700)
+            except OSError as e:
+                self.logger.warning(f"Failed to restrict permissions for AI log directory {ai_log_dir}: {e}")
+        except Exception as e:
             self.logger.error(f"Failed to secure AI log directory: {e}")
             # Fallback to system temp if needed, but we prefer the configured state dir
             pass
@@ -1042,7 +1044,7 @@ class Processor:
 
             # Build prompt for Claude
             continue_instruction = ""
-            has_unpushed = git.has_unpushed_work(self.default_branch) and git.has_unpushed_commits(mr.source_branch)
+            has_unpushed = git.has_unpushed_commits(mr.source_branch)
             has_uncommitted = git.has_uncommitted_changes()
             if has_uncommitted:
                 continue_instruction = (

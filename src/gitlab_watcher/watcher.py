@@ -141,9 +141,9 @@ class Watcher:
                     if st.st_uid == os.getuid():
                         os.chmod(fallback_dir, 0o700)
                     else:
-                        self.logger.warning(f"Fallback log directory {fallback_dir} has insecure permissions but is not owned by current user. Cannot fix.")
-            except OSError:
-                pass
+                        self.logger.warning(f"Fallback log directory {fallback_dir} has insecure permissions ({oct(st.st_mode)}) and is not owned by current user. Cannot restrict permissions.")
+            except OSError as e:
+                self.logger.warning(f"Failed to restrict permissions for fallback log directory {fallback_dir}: {e}")
 
             fallback_path = fallback_dir / "watcher.log"
             try:
@@ -478,8 +478,15 @@ class Watcher:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but no MR found)", issue.iid)
                     return issue, True
                 
-                # Check if MR has commits
                 mr = matching_mrs[0]
+                git = GitOps(project.path)
+                
+                # Prioritize checking for unpushed local commits first
+                if git.has_unpushed_commits(mr.source_branch):
+                    self._log_info(project.project_id, "Retrying stuck issue #%s (In progress with unpushed commits on branch %s)", issue.iid, mr.source_branch)
+                    return issue, True
+
+                # Only fetch commits if no unpushed local work is detected
                 try:
                     mr_commits = self.gitlab.get_merge_request_commits(project.project_id, mr.iid)
                 except Exception as e:
@@ -488,14 +495,6 @@ class Watcher:
 
                 if not mr_commits:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but MR has no commits)", issue.iid)
-                    return issue, True
-                
-                # If MR has commits but we are still "In progress", it might be because 
-                # of unpushed local work or failed label update.
-                mr = matching_mrs[0]
-                git = GitOps(project.path)
-                if git.has_unpushed_commits(mr.source_branch):
-                    self._log_info(project.project_id, "Retrying stuck issue #%s (In progress with unpushed commits on branch %s)", issue.iid, mr.source_branch)
                     return issue, True
 
                 continue
@@ -607,12 +606,13 @@ class Watcher:
             FAILURE_EMOJIS = ["x", "no_entry"]
             STOP_EMOJIS = SUCCESS_EMOJIS + FAILURE_EMOJIS
 
-            note_emojis = None
+            # Fetch emojis once if needed
+            note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id) if is_retry_request or note.id > last_processed_id else []
+
             if is_retry_request:
                 # If a success or failure emoji is already present on this note, do not retry it.
                 # This prevents infinite loops where a "retry" comment is processed,
                 # gets a success or failure emoji, and is repeatedly processed in subsequent cycles.
-                note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
                 if any(e in note_emojis for e in STOP_EMOJIS):
                     is_retry_request = False
 
@@ -627,9 +627,6 @@ class Watcher:
             is_skipped = note.id in self._processed_notes
             
             if not is_skipped:
-                # Fetch award emojis for this specific note if not already fetched
-                if note_emojis is None:
-                    note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
                 has_emojis = any(e in note_emojis for e in SKIP_EMOJIS)
                 is_skipped = has_emojis
             

@@ -200,17 +200,9 @@ class StateManager:
                     flags, 
                     0o600
                 )
-                try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
                     if hasattr(os, "fchmod"):
                         os.fchmod(fd, 0o600)
-                except Exception:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-                    raise
-
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
                     json.dump(state_dict, f, indent=2)
                 
                 # Rename atomically
