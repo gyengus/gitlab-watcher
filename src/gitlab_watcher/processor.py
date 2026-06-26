@@ -339,6 +339,11 @@ class Processor:
         if "HOME" in os.environ:
             env["HOME"] = os.environ["HOME"]
         
+        # Pass build-related environment variables safely without leaking secrets
+        for var in ["JAVA_HOME", "MAVEN_HOME", "M2_HOME", "GRAALVM_HOME"]:
+            if var in os.environ:
+                env[var] = os.environ[var]
+        
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
 
         process = subprocess.Popen(

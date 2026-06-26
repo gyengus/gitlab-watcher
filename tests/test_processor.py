@@ -337,6 +337,36 @@ class TestProcessorRunClaude:
         # This is a unit test for the logic, not the actual method execution
         assert True  # Placeholder assertion - the real test is above
 
+    @patch("os.getpgid", return_value=1234)
+    @patch("subprocess.Popen")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    @patch.dict("os.environ", {"JAVA_HOME": "/opt/graalvm", "MAVEN_HOME": "/usr/share/maven", "HOME": "/home/dev"})
+    def test_run_ai_tool_propagates_build_env(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_popen: Mock,
+        mock_getpgid: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that build-related environment variables are propagated to the subprocess."""
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Done\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+    
+        success, output = processor._run_ai_tool("Fix the bug", project_config.path)
+    
+        assert success is True
+        mock_popen.assert_called_once()
+        called_env = mock_popen.call_args[1]["env"]
+        assert called_env["JAVA_HOME"] == "/opt/graalvm"
+        assert called_env["MAVEN_HOME"] == "/usr/share/maven"
+
 
 class TestProcessorAIToolModes:
     """Tests for different Claude CLI modes."""
@@ -1365,7 +1395,7 @@ class TestProcessorCommentNoChanges:
         p.state.init_state(project_config.project_id)
 
         result = p.process_comment(project_config, sample_mr, 999, "Fix typo")
-
+ 
         assert result is False
         emoji_calls = [c[0] for c in p.gitlab.create_note_award_emoji.call_args_list]
         emojis_used = [c[3] for c in emoji_calls]
@@ -1374,5 +1404,6 @@ class TestProcessorCommentNoChanges:
         p.discord.notify_error.assert_called_once()
         p.discord.notify_no_changes_needed.assert_not_called()
         p.discord.notify_changes_applied.assert_not_called()
+
 
 
