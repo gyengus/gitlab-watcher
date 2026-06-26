@@ -1653,5 +1653,49 @@ def test_retry_comment_without_success_emoji_processed(
     )
 
 
+def test_retry_comment_with_failure_emoji_ignored(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that a 'retry' comment with a failure emoji (x) is ignored and not re-processed."""
+    project_id = 42
+    state_manager.update_mr_last_processed_note(project_id, 5, 100)
+
+    mr = MergeRequest(
+        iid=5,
+        title="MR with retry comment",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="opened",
+        author="claude-bot",
+    )
+    mock_gitlab.get_merge_requests.return_value = [mr]
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
+
+    notes = [
+        Note(id=100, body="retry", author_username="user", system=False, award_emojis=["x"], discussion_id="disc1"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+    mock_gitlab.get_note_emojis.return_value = ["x"]
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_processor.process_comment.assert_not_called()
+
+
+
 
 

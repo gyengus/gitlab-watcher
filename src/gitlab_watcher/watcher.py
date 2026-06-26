@@ -604,14 +604,16 @@ class Watcher:
 
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
             SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
+            FAILURE_EMOJIS = ["x", "no_entry"]
+            STOP_EMOJIS = SUCCESS_EMOJIS + FAILURE_EMOJIS
 
             note_emojis = None
             if is_retry_request:
-                # If a success emoji is already present on this note, do not retry it.
+                # If a success or failure emoji is already present on this note, do not retry it.
                 # This prevents infinite loops where a "retry" comment is processed,
-                # gets a success emoji, and is repeatedly processed in subsequent cycles.
+                # gets a success or failure emoji, and is repeatedly processed in subsequent cycles.
                 note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
-                if any(e in note_emojis for e in SUCCESS_EMOJIS):
+                if any(e in note_emojis for e in STOP_EMOJIS):
                     is_retry_request = False
 
             # Skip already handled via persistent state
