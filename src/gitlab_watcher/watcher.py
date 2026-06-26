@@ -603,12 +603,21 @@ class Watcher:
                 continue
 
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
+            SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
+
+            note_emojis = None
+            if is_retry_request:
+                # If a success emoji is already present on this note, do not retry it.
+                # This prevents infinite loops where a "retry" comment is processed,
+                # gets a success emoji, and is repeatedly processed in subsequent cycles.
+                note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
+                if any(e in note_emojis for e in SUCCESS_EMOJIS):
+                    is_retry_request = False
 
             # Skip already handled via persistent state
             if note.id <= last_processed_id and not is_retry_request:
                 continue
 
-            SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
             # Remove "eyes" from skip list so we can recover interrupted processes
             SKIP_EMOJIS = ["x", "no_entry"] + SUCCESS_EMOJIS
             
@@ -616,8 +625,9 @@ class Watcher:
             is_skipped = note.id in self._processed_notes
             
             if not is_skipped:
-                # Fetch award emojis for this specific note
-                note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
+                # Fetch award emojis for this specific note if not already fetched
+                if note_emojis is None:
+                    note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
                 has_emojis = any(e in note_emojis for e in SKIP_EMOJIS)
                 is_skipped = has_emojis
             
