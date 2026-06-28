@@ -73,10 +73,8 @@ class GitOps:
         if "=" in arg and command == "config":
              raise ValueError(f"Potential config injection in git argument: {arg}")
 
-        if not re.match(r"^[a-zA-Z0-9\-_./@{}:]+$", arg):
-            # Allow @{u}..HEAD which is used in has_unpushed_work
-            if not re.match(r"^[a-zA-Z0-9\-_./@{}:.]+$", arg):
-                raise ValueError(f"Invalid characters in git argument: {arg}")
+        if not re.match(r"^[a-zA-Z0-9\-_./@{}:.]+$", arg):
+            raise ValueError(f"Invalid characters in git argument: {arg}")
         return arg
 
     def _run(
