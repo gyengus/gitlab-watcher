@@ -281,6 +281,24 @@ class TestStateManagerDebounced:
         loaded = new_manager.load(42)
         assert loaded.last_mr_iid == 3
 
+    def test_save_failure_retains_dirty_state(self, temp_work_dir: Path) -> None:
+        """Test that a save failure keeps the project in the dirty set."""
+        from unittest.mock import patch
+        import time
+
+        state_manager = StateManager(temp_work_dir, save_delay=0.1)
+        state = state_manager.load(42)
+        state.last_mr_iid = 5
+        state_manager.save(42)
+
+        with patch.object(state_manager, "_save_sync", return_value=False):
+            time.sleep(0.3)
+            assert 42 in state_manager._dirty
+
+        state_manager.save(42)
+        time.sleep(0.3)
+        assert 42 not in state_manager._dirty
+
 
 class TestGitOps:
     """Tests for Git operations."""

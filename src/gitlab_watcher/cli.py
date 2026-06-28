@@ -150,5 +150,8 @@ def main():
     cli()
 
 
+__all__ = ["cli", "run_command", "sync_state", "main"]
+
+
 if __name__ == "__main__":
     main()

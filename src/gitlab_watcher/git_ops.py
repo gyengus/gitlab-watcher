@@ -426,3 +426,6 @@ class GitOps:
         slug = slug.strip("-")
         # Truncate
         return slug[:max_length]
+
+
+__all__ = ["GitOps"]

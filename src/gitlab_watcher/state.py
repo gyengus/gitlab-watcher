@@ -156,11 +156,13 @@ class StateManager:
             
             # Capture what we are about to save
             to_save = list(self._dirty)
+            saved_successfully = []
             for project_id in to_save:
-                self._save_sync(project_id)
+                if self._save_sync(project_id):
+                    saved_successfully.append(project_id)
             
             # Remove only what we saved
-            self._dirty.difference_update(to_save)
+            self._dirty.difference_update(saved_successfully)
             
             # CONC-01 fix: Only reset the timer reference if no more dirty items remain
             # AND it's still the same timer that started this flush. 
@@ -168,11 +170,11 @@ class StateManager:
             if not self._dirty and self._save_timer is threading.current_thread():
                 self._save_timer = None
 
-    def _save_sync(self, project_id: int) -> None:
+    def _save_sync(self, project_id: int) -> bool:
         """Synchronous save to file with atomic replacement and restricted permissions."""
         with self._lock:
             if project_id not in self._states:
-                return
+                return False
             state_file = self._state_file(project_id)
             temp_file = state_file.with_suffix(".tmp")
             try:
@@ -207,6 +209,7 @@ class StateManager:
                 
                 # Rename atomically
                 temp_file.replace(state_file)
+                return True
             except Exception as e:
                 logger.error(f"Failed to save state for project {project_id}: {e}")
                 if temp_file.exists():
@@ -214,6 +217,7 @@ class StateManager:
                         temp_file.unlink()
                     except Exception:
                         pass
+                return False
 
     def load(self, project_id: int) -> ProjectState:
         """Load state for a project, returning cached state if available.
@@ -260,10 +264,13 @@ class StateManager:
         with self._lock:
             if self._save_timer is not None:
                 self._save_timer.cancel()
+            saved_successfully = []
             for project_id in self._dirty:
-                self._save_sync(project_id)
-            self._dirty.clear()
-            self._save_timer = None
+                if self._save_sync(project_id):
+                    saved_successfully.append(project_id)
+            self._dirty.difference_update(saved_successfully)
+            if not self._dirty:
+                self._save_timer = None
 
     def get(self, project_id: int, key: str) -> Optional[str | int | bool]:
         """Get a state value."""
