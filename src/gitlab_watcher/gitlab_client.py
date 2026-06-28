@@ -230,8 +230,7 @@ class GitLabClient:
             params["assignee_username"] = assignee_username
 
         endpoint = "/issues"
-        response = self._request("GET", self._api_url(project_id, endpoint), params=params)
-        data = response.json()
+        data = self._request_all("GET", self._api_url(project_id, endpoint), params=params)
 
         return [
             Issue(

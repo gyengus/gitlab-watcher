@@ -211,7 +211,7 @@ class Watcher:
                 os.chmod(self.work_dir, 0o700)
             
             # Always attempt to restrict permissions if they are too broad
-            if os.name != 'nt' and (st.st_mode & 0o022):
+            if os.name != 'nt' and (st.st_mode & 0o077):
                 self.logger.warning(f"Work directory {self.work_dir} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
                 os.chmod(self.work_dir, 0o700)
         except (OSError, PermissionError) as e:

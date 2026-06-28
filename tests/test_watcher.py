@@ -228,6 +228,31 @@ class TestStateManager:
         assert new_manager.load(1).last_mr_iid == 10
         assert new_manager.load(2).last_mr_iid == 20
 
+    def test_state_migration_legacy_note_id(self, temp_work_dir: Path) -> None:
+        """Test that legacy state migration copies last_processed_note_id to tracked_mrs."""
+        import json
+        
+        # Ensure directory exists (StateManager init does this)
+        state_manager = StateManager(temp_work_dir)
+        
+        # Write legacy state JSON manually
+        legacy_data = {
+            "last_mr_iid": 12,
+            "last_branch": "12-legacy-branch",
+            "last_processed_note_id": 987,
+        }
+        state_file = temp_work_dir / "state_42.json"
+        state_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+
+        # Load it through StateManager
+        loaded = state_manager.load(42)
+
+        # Check migration
+        assert "12" in loaded.tracked_mrs
+        mr_info = loaded.tracked_mrs["12"]
+        assert mr_info["branch"] == "12-legacy-branch"
+        assert mr_info["last_processed_note_id"] == 987
+
 
 class TestStateManagerDebounced:
     """Tests for debounced state saving."""

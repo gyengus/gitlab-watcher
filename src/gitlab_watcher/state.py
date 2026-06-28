@@ -97,6 +97,7 @@ class StateManager:
                 if last_iid and str(last_iid) not in data["tracked_mrs"]:
                     data["tracked_mrs"][str(last_iid)] = {
                         "branch": data.get("last_branch"),
+                        "last_processed_note_id": data.get("last_processed_note_id", 0),
                     }
                 
                 # Filter data to only include valid ProjectState fields
