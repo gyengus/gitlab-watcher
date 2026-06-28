@@ -1,50 +1,50 @@
-# GitLab Watcher - Javítási Terv
+# GitLab Watcher - Fix Plan
 
-**Készült:** 2026-03-11
-**Alapul szolgáló dokumentum:** code-review-report.md
-**Összes probléma:** 15 (Critical: 1, High: 2, Medium: 5, Low: 7)
-
----
-
-## 1. Áttekintés
-
-Ez a dokumentum a GitLab Watcher kód review során azonosított problémák javítási tervét tartalmazza. A javításokat logikus fázisokra bontottam, figyelembe véve a prioritást, a függőségeket és a kockázatokat.
+**Prepared:** 2026-03-11
+**Based on document:** code-review-report.md
+**Total issues:** 15 (Critical: 1, High: 2, Medium: 5, Low: 7)
 
 ---
 
-## 2. Fázisok összefoglalása
+## 1. Overview
 
-| Fázis | Név | Prioritás | Problémák száma | Becsült idő |
+This document contains the fix plan for the issues identified during the GitLab Watcher code review. The fixes are divided into logical phases, taking into account priority, dependencies, and risks.
+
+---
+
+## 2. Phase Summary
+
+| Phase | Name | Priority | Number of Issues | Estimated Time |
 |-------|-----|-----------|-----------------|-------------|
-| 1 | Kritikus biztonsági javítások | Critical/High | 3 | 4-6 óra |
-| 2 | Teljesítmény-optimalizálás | Medium | 4 | 3-4 óra |
-| 3 | Architekturális javítások | Medium | 1 | 2-3 óra |
-| 4 | Kódminőség javítások | Low | 7 | 3-4 óra |
+| 1 | Critical Security Fixes | Critical/High | 3 | 4-6 hours |
+| 2 | Performance Optimization | Medium | 4 | 3-4 hours |
+| 3 | Architectural Fixes | Medium | 1 | 2-3 hours |
+| 4 | Code Quality Improvements | Low | 7 | 3-4 hours |
 
 ---
 
-## 3. Részletes Fázisok
+## 3. Detailed Phases
 
 ---
 
-## 3.1. Fázis 1: Kritikus biztonsági javítások
+## 3.1. Phase 1: Critical Security Fixes
 
-**Prioritás:** Critical/High
-**Kockázat:** Magas - A biztonsági javítások alapos tesztelést igényelnek
-**Függőségek:** Nincs
+**Priority:** Critical/High
+**Risk:** High - Security fixes require thorough testing
+**Dependencies:** None
 
 ### 3.1.1. Command Injection Vulnerability (CRITICAL)
 
-**Hely:** `processor.py:49-88` - `_run_claude()` metódus
+**Location:** `processor.py:49-88` - `_run_claude()` method
 
-**Probléma leírása:**
-A `_run_claude()` metódus a prompt argumentumot közvetve használja shell parancs összeállítására. A prompt tartalmazza az issue címét és leírást, amelyek felhasználói bemenetek. Ha az `shlex.split()` nem működik helyesen, vagy a custom command template sebezhető, akkor ez command injection-hez vezethet.
+**Problem Description:**
+The `_run_claude()` method uses the prompt argument indirectly to assemble a shell command. The prompt contains the issue title and description, which are user inputs. If `shlex.split()` does not work correctly, or if the custom command template is vulnerable, this could lead to command injection.
 
-**Javítási lépések:**
+**Fix Steps:**
 
-1. **Prompt validálás és sanitizálás:**
+1. **Prompt validation and sanitization:**
    ```python
-   # Új konstansok a processor.py elejére
+   # New constants at the beginning of processor.py
    MAX_PROMPT_LENGTH = 10000
    FORBIDDEN_PATTERNS = [
        r'\$\([^)]+\)',   # Command substitution $(...)
@@ -58,7 +58,7 @@ A `_run_claude()` metódus a prompt argumentumot közvetve használja shell para
    ]
    ```
 
-2. **Új `_sanitize_prompt()` metódus:**
+2. **New `_sanitize_prompt()` method:**
    ```python
    import re
 
@@ -84,42 +84,42 @@ A `_run_claude()` metódus a prompt argumentumot közvetve használja shell para
        return prompt
    ```
 
-3. **A `_run_claude()` metódus módosítása:**
-   - A prompt sanitizálása a parancs összeállítása előtt
-   - A custom command validálása (csak engedélyezett placeholder-ek)
-   - A `subprocess.run()` hívásnál a `shell=False` biztosítása (már igaz ez)
+3. **Modifying the `_run_claude()` method:**
+   - Sanitize the prompt before assembling the command
+   - Validate custom command (only allowed placeholders)
+   - Ensure `shell=False` in the `subprocess.run()` call (already true)
 
-4. **Tesztelés:**
-   - Egységtesztek a `_sanitize_prompt()` metódushoz
-   - Integrációs tesztek különböző rosszindulatú bemenetekkel
-   - Fuzzing tesztek a prompt bemenethez
+4. **Testing:**
+   - Unit tests for the `_sanitize_prompt()` method
+   - Integration tests with various malicious inputs
+   - Fuzzing tests for the prompt input
 
-**Érintett fájlok:**
+**Affected Files:**
 - `src/gitlab_watcher/processor.py`
 - `tests/test_processor.py`
 
-**Kockázatok:**
-- A túl szigorú szűrés törheti a legitimate use case-eket
-- A valid issue leírások tartalmazhatnak code snippet-eket, amik tévesen triggerelik a szűrést
+**Risks:**
+- Excessively strict filtering may break legitimate use cases
+- Valid issue descriptions may contain code snippets that falsely trigger the filtering
 
-**Enyhítés:**
-- A tesztekben kiterjedt legitimate use case-eket kell lefedni
-- A hibaüzeneteknek tisztázniuk kell, miért utasították el a bemenetet
+**Mitigation:**
+- Cover extensive legitimate use cases in tests
+- Error messages must clarify why the input was rejected
 
 ---
 
 ### 3.1.2. Sensitive Token Exposure in Logs (HIGH)
 
-**Hely:** `watcher.py:84-119` - `_extract_from_remote()` metódus és `watcher.py:240` - hibanaplózás
+**Location:** `watcher.py:84-119` - `_extract_from_remote()` method and `watcher.py:240` - error logging
 
-**Probléma leírása:**
-A GitLab token kinyerése a remote URL-ből és a következő sorokban történő használata naplózást eredményezhet, amelyek a tokent tartalmazhatják. A token a `GitLabClient` konstruktorában tárolódik és továbbítható logba hiba esetén.
+**Problem Description:**
+Extracting the GitLab token from the remote URL and using it in subsequent lines can result in logs containing the token. The token is stored in the `GitLabClient` constructor and can be forwarded to the log in case of errors.
 
-**Javítási lépések:**
+**Fix Steps:**
 
-1. **Új `SensitiveDataFilter` osztály létrehozása:**
+1. **Creating a new `SensitiveDataFilter` class:**
    ```python
-   # Új fájl: src/gitlab_watcher/logging_utils.py
+   # New file: src/gitlab_watcher/logging_utils.py
    import logging
    import re
 
@@ -153,52 +153,52 @@ A GitLab token kinyerése a remote URL-ből és a következő sorokban történ�
            return True
    ```
 
-2. **A `Watcher` osztály módosítása:**
-   - A filter alkalmazása a logger-re az inicializáció során
-   - A token maszkolása a debug kimenetekben
+2. **Modifying the `Watcher` class:**
+   - Apply the filter to the logger during initialization
+   - Mask the token in debug outputs
 
-3. **A `GitLabClient` osztály módosítása:**
-   - A token ne szerepeljen a `__repr__` kimenetben
-   - A debug naplózásból legyen kihagyva a token
+3. **Modifying the `GitLabClient` class:**
+   - Do not include the token in the `__repr__` output
+   - Omit the token from debug logging
 
-4. **Tesztelés:**
-   - Egységtesztek a `SensitiveDataFilter` osztályhoz
-   - Integrációs tesztek a naplózás ellenőrzésére
+4. **Testing:**
+   - Unit tests for the `SensitiveDataFilter` class
+   - Integration tests to check logging
 
-**Érintett fájlok:**
-- `src/gitlab_watcher/logging_utils.py` (új)
+**Affected Files:**
+- `src/gitlab_watcher/logging_utils.py` (new)
 - `src/gitlab_watcher/watcher.py`
 - `src/gitlab_watcher/gitlab_client.py`
-- `tests/test_logging_utils.py` (új)
+- `tests/test_logging_utils.py` (new)
 
-**Kockázatok:**
-- A túl agresszív maszkolás elrejtheti a hibakereséshez szükséges információkat
-- A teljesítményre gyakorolt hatás a regex minták miatt
+**Risks:**
+- Aggressive masking may hide information required for debugging
+- Performance impact due to regex patterns
 
-**Enyhítés:**
-- A filter csak a production környezetben legyen aktív, vagy konfigurálható legyen
-- A minták pontosítása a valós GitLab token formátumokra
+**Mitigation:**
+- Filter should only be active in production, or be configurable
+- Refine patterns to match actual GitLab token formats
 
 ---
 
 ### 3.1.3. Missing Input Validation on Issue Content (HIGH)
 
-**Hely:** `processor.py:89-189` - `process_issue()` metódus
+**Location:** `processor.py:89-189` - `process_issue()` method
 
-**Probléma leírása:**
-Az issue címe és leírása validálás nélkül kerül átadásra a Claude CLI-nek és használatra a branchnév generálásában. Nincs ellenőrzés a maximális hosszra vagy a veszélyes karakterekre.
+**Problem Description:**
+The title and description of the issue are passed to the Claude CLI without validation and used in branch name generation. There is no check on maximum length or dangerous characters.
 
-**Javítási lépések:**
+**Fix Steps:**
 
-1. **Új konstansok és validációs függvények:**
+1. **New constants and validation functions:**
    ```python
-   # Konstansok
+   # Constants
    MAX_TITLE_LENGTH = 255
    MAX_DESCRIPTION_LENGTH = 50000
    MAX_SLUG_LENGTH = 50
    MAX_BRANCH_LENGTH = 100
 
-   # Új metódusok a Processor osztályban
+   # New methods in the Processor class
    def _validate_issue_title(self, title: str) -> str:
        """Validate and sanitize issue title.
 
@@ -252,11 +252,11 @@ Az issue címe és leírása validálás nélkül kerül átadásra a Claude CLI
        return branch or "auto-branch"
    ```
 
-2. **A `GitOps.generate_slug()` metódus bővítése:**
-   - A `max_length` paraméter kezelése már megvan
-   - A speciális karakterek kezelése javítása
+2. **Extending the `GitOps.generate_slug()` method:**
+   - Fixing the handling of the `max_length` parameter (already present)
+   - Improving the handling of special characters
 
-3. **A `process_issue()` metódus módosítása:**
+3. **Modifying the `process_issue()` method:**
    ```python
    def process_issue(self, project: ProjectConfig, issue: Issue) -> bool:
        # Validate issue title
@@ -269,68 +269,68 @@ Az issue címe és leírása validálás nélkül kerül átadásra a Claude CLI
        # Generate and validate branch name
        slug = GitOps.generate_slug(validated_title, max_length=MAX_SLUG_LENGTH)
        branch = self._validate_branch_name(f"{issue.iid}-{slug}")
-       # ... folytatás
+       # ... continue
    ```
 
-4. **Tesztelés:**
-   - Egységtesztek a validációs függvényekhez
-   - Edge case tesztek: üres cím, túl hosszú cím, speciális karakterek
-   - Integrációs tesztek a teljes folyamat ellenőrzésére
+4. **Testing:**
+   - Unit tests for validation functions
+   - Edge case tests: empty title, excessively long title, special characters
+   - Integration tests to check the entire process
 
-**Érintett fájlok:**
+**Affected Files:**
 - `src/gitlab_watcher/processor.py`
 - `src/gitlab_watcher/git_ops.py`
 - `tests/test_processor.py`
 - `tests/test_git_ops.py`
 
-**Kockázatok:**
-- A túl szigorú validáció elutasíthatja legitimate issue-kat
-- A branch név generálás változása meglévő branch-okkal inkompatibilissá teheti a rendszert
+**Risks:**
+- Overly strict validation may reject legitimate issues
+- Changes in branch name generation may make the system incompatible with existing branches
 
-**Enyhítés:**
-- A validációs hibák naplózása és a felhasználó értesítése (Discord webhook)
-- A fallback megoldások biztosítása (pl. "auto-branch" név)
-
----
-
-### 3.1.4. Fázis 1 Tesztelési Stratégia
-
-**Egységtesztek:**
-1. `test_sanitize_prompt()` - különböző rosszindulatú bemenetek tesztelése
-2. `test_validate_issue_title()` - cím validálás tesztelése
-3. `test_validate_branch_name()` - branch név validálás tesztelése
-4. `test_sensitive_data_filter()` - token maszkolás tesztelése
-
-**Integrációs tesztek:**
-1. Teljes issue feldolgozás tesztelése rosszindulatú bemenettel
-2. Naplózás ellenőrzése, hogy nincs-e benne token
-3. Branch létrehozás tesztelése különböző címekkel
-
-**Biztonsági tesztek:**
-1. Command injection próbálkozások tesztelése
-2. Token exposure tesztek a naplókban
-3. Fuzzing tesztek a bemeneti validációhoz
+**Mitigation:**
+- Logging validation errors and notifying the user (Discord webhook)
+- Ensuring fallback solutions (e.g., "auto-branch" name)
 
 ---
 
-## 3.2. Fázis 2: Teljesítmény-optimalizálás
+### 3.1.4. Phase 1 Testing Strategy
 
-**Prioritás:** Medium
-**Kockázat:** Közepes - A teljesítmény javítások befolyásolhatják a meglévő működést
-**Függőségek:** Fázis 1 befejezése ajánlott (de nem kötelező)
+**Unit Tests:**
+1. `test_sanitize_prompt()` - testing different malicious inputs
+2. `test_validate_issue_title()` - testing title validation
+3. `test_validate_branch_name()` - testing branch name validation
+4. `test_sensitive_data_filter()` - testing token masking
 
-### 3.2.1. Missing Request Timeout + Missing Connection Pooling (EGYÜTT MEGOLDVA)
+**Integration Tests:**
+1. Testing complete issue processing with malicious input
+2. Checking logs to ensure no token is present
+3. Testing branch creation with different titles
 
-**Hely:** `gitlab_client.py:45-65` és `gitlab_client.py:77`
+**Security Tests:**
+1. Testing command injection attempts
+2. Token exposure tests in logs
+3. Fuzzing tests for input validation
 
-**Probléma leírása:**
-A `_request()` metódus nem ad meg timeout-ot a HTTP kéréshez, és a `requests.Session` nincs konfigurálva connection pooling-gal.
+---
 
-**Javítási lépések:**
+## 3.2. Phase 2: Performance Optimization
 
-Ez a két probléma együtt megoldható a `GitLabClient` osztály átalakításával:
+**Priority:** Medium
+**Risk:** Medium - Performance improvements may affect existing operations
+**Dependencies:** Phase 1 completion recommended (but not required)
 
-1. **Új importok és konstansok:**
+### 3.2.1. Missing Request Timeout + Missing Connection Pooling (SOLVED TOGETHER)
+
+**Location:** `gitlab_client.py:45-65` and `gitlab_client.py:77`
+
+**Problem Description:**
+The `_request()` method does not specify a timeout for HTTP requests, and the `requests.Session` is not configured with connection pooling.
+
+**Fix Steps:**
+
+These two issues can be solved together by restructuring the `GitLabClient` class:
+
+1. **New imports and constants:**
    ```python
    from requests.adapters import HTTPAdapter
    from urllib3.util.retry import Retry
@@ -342,7 +342,7 @@ Ez a két probléma együtt megoldható a `GitLabClient` osztály átalakítás�
    DEFAULT_POOL_MAXSIZE = 20
    ```
 
-2. **A `GitLabClient.__init__()` módosítása:**
+2. **Modifying `GitLabClient.__init__()`:**
    ```python
    def __init__(
        self,
@@ -393,43 +393,43 @@ Ez a két probléma együtt megoldható a `GitLabClient` osztály átalakítás�
        self.session.mount("http://", adapter)
    ```
 
-3. **A `_request()` metódus módosítása:**
+3. **Modifying the `_request()` method:**
    ```python
    def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
        """Make HTTP request with timeout and retry logic."""
        # Set default timeout if not provided
        kwargs.setdefault("timeout", self.timeout)
 
-       # ... meglévő retry logika ...
+       # ... existing retry logic ...
    ```
 
-4. **Tesztelés:**
-   - Egységtesztek a timeout kezeléshez
-   - Integrációs tesztek a connection pooling-gal
-   - Terheléses tesztek
+4. **Testing:**
+   - Unit tests for timeout handling
+   - Integration tests with connection pooling
+   - Load tests
 
-**Érintett fájlok:**
+**Affected Files:**
 - `src/gitlab_watcher/gitlab_client.py`
 - `tests/test_gitlab_client.py`
 
-**Kockázatok:**
-- A connection pooling változhat a viselkedés hosszú futású folyamatoknál
-- A timeout túl rövid időtúllépést okozhat lassú hálózatokon
+**Risks:**
+- Connection pooling behavior may change for long-running processes
+- Timeout may cause timeouts on slow networks
 
 ---
 
 ### 3.2.2. Repeated GitLab API Calls Without Caching
 
-**Hely:** `watcher.py:154-212` - `check_mr_status()` metódus
+**Location:** `watcher.py:154-212` - `check_mr_status()` method
 
-**Probléma leírása:**
-A `check_mr_status()` metódus minden poll ciklusban meghívja a `get_merge_requests()`, `get_merge_request()`, és `get_notes()` API-kat. Nincs semmilyen caching.
+**Problem Description:**
+The `check_mr_status()` method calls the `get_merge_requests()`, `get_merge_request()`, and `get_notes()` APIs in every poll cycle. There is no caching or rate limiting.
 
-**Javítási lépések:**
+**Fix Steps:**
 
-1. **Cache osztály létrehozása:**
+1. **Creating a Cache class:**
    ```python
-   # Új fájl: src/gitlab_watcher/cache.py
+   # New file: src/gitlab_watcher/cache.py
    from datetime import datetime, timedelta
    from typing import Any, Optional, Generic, TypeVar
 
@@ -460,11 +460,11 @@ A `check_mr_status()` metódus minden poll ciklusban meghívja a `get_merge_requ
            self._cache.clear()
    ```
 
-2. **A `GitLabClient` osztály kiegészítése cache-szel:**
+2. **Supplementing `GitLabClient` with cache:**
    ```python
    class GitLabClient:
        def __init__(self, ..., cache_ttl: float = 30.0) -> None:
-           # ... meglévő inicializáció ...
+           # ... existing initialization ...
            self._cache = TimedCache[dict](ttl_seconds=cache_ttl)
 
        def _get_cached(self, key: str) -> Optional[dict]:
@@ -479,40 +479,40 @@ A `check_mr_status()` metódus minden poll ciklusban meghívja a `get_merge_requ
            if cached is not None:
                return MergeRequest(**cached)
 
-           # ... API hívás ...
+           # ... API call ...
            result = MergeRequest(...)
            self._set_cached(cache_key, {...})
            return result
    ```
 
-3. **A `Watcher.check_mr_status()` optimalizálása:**
-   - A cache használatával csökkenteni az API hívásokat
-   - Az ETag header használata, ha a GitLab API támogatja
+3. **Optimizing `Watcher.check_mr_status()`:**
+   - Use cache to reduce API calls
+   - Use ETag header if supported by the GitLab API
 
-4. **Tesztelés:**
-   - Egységtesztek a `TimedCache` osztályhoz
-   - Integrációs tesztek a cache-elés ellenőrzésére
-   - API hívás számolás a tesztekben
+4. **Testing:**
+   - Unit tests for the `TimedCache` class
+   - Integration tests to check caching
+   - API call counting in tests
 
-**Érintett fájlok:**
-- `src/gitlab_watcher/cache.py` (új)
+**Affected Files:**
+- `src/gitlab_watcher/cache.py` (new)
 - `src/gitlab_watcher/gitlab_client.py`
 - `src/gitlab_watcher/watcher.py`
-- `tests/test_cache.py` (új)
+- `tests/test_cache.py` (new)
 - `tests/test_gitlab_client.py`
 
 ---
 
 ### 3.2.3. Inefficient State File I/O
 
-**Hely:** `state.py:88-94` - `save()` metódus
+**Location:** `state.py:88-94` - `save()` method
 
-**Probléma leírása:**
-A `save()` metódus minden alkalommal fájlba ír, amikor a state változik. A `_load_from_file()` pedig mindig fájlból olvas, ha nincs a cache-ben.
+**Problem Description:**
+The `save()` method writes to a file every time the state changes. The `_load_from_file()` always reads from a file if not in cache. The main loop performs multiple file operations in each iteration.
 
-**Javítási lépések:**
+**Fix Steps:**
 
-1. **Debounced mentés implementálása:**
+1. **Implementing debounced saving:**
    ```python
    import threading
    from typing import Optional
@@ -581,59 +581,59 @@ A `save()` metódus minden alkalommal fájlba ír, amikor a state változik. A `
                self._save_timer = None
    ```
 
-2. **A `Watcher` osztály kiegészítése:**
-   - A `force_save_all()` hívása a shutdown során
+2. **Modifying the `Watcher` class:**
+   - Call `force_save_all()` during shutdown
 
-3. **Tesztelés:**
-   - Egységtesztek a debounced mentéshez
-   - Integrációs tesztek a state kezeléshez
-   - Versenyhelyzet tesztek (concurrent access)
+3. **Testing:**
+   - Unit tests for debounced saving
+   - Integration tests for state management
+   - Race condition tests (concurrent access)
 
-**Érintett fájlok:**
+**Affected Files:**
 - `src/gitlab_watcher/state.py`
 - `src/gitlab_watcher/watcher.py`
 - `tests/test_state.py`
 
 ---
 
-### 3.2.4. Fázis 2 Tesztelési Stratégia
+### 3.2.4. Phase 2 Testing Strategy
 
-**Egységtesztek:**
-1. `test_timed_cache()` - cache viselkedés tesztelése
-2. `test_debounced_save()` - debounced mentés tesztelése
-3. `test_connection_pooling()` - connection pooling tesztelése
-4. `test_timeout_handling()` - timeout kezelés tesztelése
+**Unit Tests:**
+1. `test_timed_cache()` - testing cache behavior
+2. `test_debounced_save()` - testing debounced saving
+3. `test_connection_pooling()` - testing connection pooling
+4. `test_timeout_handling()` - testing timeout handling
 
-**Integrációs tesztek:**
-1. Teljes API hívás folyamat tesztelése cache-szel
-2. State mentés és betöltés tesztelése
-3. Hosszú futású tesztek a connection pooling-gal
+**Integration Tests:**
+1. Testing complete API call flow with cache
+2. Testing state saving and loading
+3. Long-running tests with connection pooling
 
-**Teljesítmény tesztek:**
-1. API hívás számának mérése cache előtt és után
-2. I/O műveletek számának mérése debounced mentés előtt és után
-3. Terheléses tesztek a connection pooling-gal
+**Performance Tests:**
+1. Measuring number of API calls before and after cache
+2. Measuring number of I/O operations before and after debounced saving
+3. Load tests with connection pooling
 
 ---
 
-## 3.3. Fázis 3: Architekturális javítások
+## 3.3. Phase 3: Architectural Fixes
 
-**Prioritás:** Medium
-**Kockázat:** Közepes - Az architektúra változás nagyobb refaktorálást igényelhet
-**Függőségek:** Fázis 1 és 2 ajánlott
+**Priority:** Medium
+**Risk:** Medium - Architectural changes may require larger refactoring
+**Dependencies:** Phase 1 and 2 completion recommended
 
 ### 3.3.1. Tight Coupling Between Components
 
-**Hely:** `processor.py` - `Processor` osztály
+**Location:** `processor.py` - `Processor` class
 
-**Probléma leírása:**
-A `Processor` osztály közvetlenül hoz létre `GitOps` példányokat minden metódushívásnál. Ez szoros csatolást okoz és nehezíti a tesztelést.
+**Problem Description:**
+The `Processor` class directly instantiates `GitOps` objects in every method call (`process_issue`, `process_comment`, `cleanup_after_merge`). This causes tight coupling and complicates testing.
 
-**Javítási lépések:**
+**Fix Steps:**
 
-1. **Protocol osztály definiálása:**
+1. **Defining a Protocol class:**
    ```python
-   # Új fájl: src/gitlab_watcher/protocols.py
+   # New file: src/gitlab_watcher/protocols.py
    from pathlib import Path
    from typing import Protocol
 
@@ -653,7 +653,7 @@ A `Processor` osztály közvetlenül hoz létre `GitOps` példányokat minden me
        def get_current_branch(self) -> str | None: ...
    ```
 
-2. **A `Processor` osztály módosítása:**
+2. **Modifying the `Processor` class:**
    ```python
    from typing import Callable
    from .protocols import GitOperations
@@ -672,75 +672,75 @@ A `Processor` osztály közvetlenül hoz létre `GitOps` példányokat minden me
            git_factory: Callable[[Path], GitOperations] = GitOps,
            default_branch: str = "master",
        ) -> None:
-           # ... meglévő attribútumok ...
+           # ... existing attributes ...
            self.git_factory = git_factory
            self.default_branch = default_branch
 
        def process_issue(self, project: ProjectConfig, issue: Issue) -> bool:
            git = self.git_factory(project.path)  # Use factory
-           # ... a metódus többi része változatlan ...
+           # ... rest of the method remains unchanged ...
            git.checkout(self.default_branch)  # Use configurable branch
            # ...
    ```
 
-3. **A konfiguráció kiegészítése:**
+3. **Supplementing configuration:**
    ```python
    # config.py
    @dataclass
    class Config:
-       # ... meglévő mezők ...
+       # ... existing fields ...
        default_branch: str = "master"
    ```
 
-4. **Tesztelés:**
-   - Egységtesztek mockolt `GitOperations` implementációval
-   - Integrációs tesztek a valós `GitOps` osztállyal
+4. **Testing:**
+   - Unit tests with mocked `GitOperations` implementation
+   - Integration tests with real `GitOps` class
 
-**Érintett fájlok:**
-- `src/gitlab_watcher/protocols.py` (új)
+**Affected Files:**
+- `src/gitlab_watcher/protocols.py` (new)
 - `src/gitlab_watcher/processor.py`
 - `src/gitlab_watcher/config.py`
 - `src/gitlab_watcher/watcher.py`
 - `tests/test_processor.py`
 
-**Megjegyzés:** Ez a javítás egyben megoldja a **Hardcoded Branch Name "master"** problémát is (Low priority).
+**Note:** This fix also resolves the **Hardcoded Branch Name "master"** issue (Low priority).
 
 ---
 
-### 3.3.2. Fázis 3 Tesztelési Stratégia
+### 3.3.2. Phase 3 Testing Strategy
 
-**Egységtesztek:**
-1. `test_processor_with_mock_git()` - Processor tesztelése mock GitOperations-szel
-2. `test_git_factory_injection()` - Git factory injektálás tesztelése
-3. `test_default_branch_configuration()` - default branch konfiguráció tesztelése
+**Unit Tests:**
+1. `test_processor_with_mock_git()` - testing Processor with mock GitOperations
+2. `test_git_factory_injection()` - testing Git factory injection
+3. `test_default_branch_configuration()` - testing default branch configuration
 
-**Integrációs tesztek:**
-1. Teljes folyamat tesztelése a valós GitOps implementációval
-2. Konfigurációs tesztek a default branch-sel
+**Integration Tests:**
+1. Testing complete process with the real GitOps implementation
+2. Configuration tests with default branch
 
 ---
 
-## 3.4. Fázis 4: Kódminőség javítások
+## 3.4. Phase 4: Code Quality Improvements
 
-**Prioritás:** Low
-**Kockázat:** Alacsony - Ezek a javítások alacsony kockázatúak
-**Függőségek:** Nincs, de ajánlott a korábbi fázisok befejezése
+**Priority:** Low
+**Risk:** Low - These improvements are low risk
+**Dependencies:** None, but previous phases are recommended to be completed
 
 ### 3.4.1. Missing Type Annotations
 
-**Hely:** Több fájl, különösen `gitlab_client.py`
+**Location:** Multiple files, especially `gitlab_client.py`
 
-**Javítási lépések:**
-1. Minden publikus metódushoz return type annotation hozzáadása
-2. A paraméterek type annotation-jeinek ellenőrzése
-3. A `typing` modul használatának egységesítése
+**Fix Steps:**
+1. Add return type annotations to all public methods
+2. Verify type annotations of parameters
+3. Unify the usage of the `typing` module
 
-**Példa:**
+**Example:**
 ```python
-# Előtte
+# Before
 def _request(self, method: str, url: str, **kwargs) -> requests.Response:
 
-# Utána
+# After
 def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
 ```
 
@@ -748,13 +748,13 @@ def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
 
 ### 3.4.2. Inconsistent Error Handling Patterns
 
-**Hely:** `gitlab_client.py`
+**Location:** `gitlab_client.py`
 
-**Javítási lépések:**
+**Fix Steps:**
 
-1. **Egyedi exception osztályok definiálása:**
+1. **Defining custom exception classes:**
    ```python
-   # Új fájl: src/gitlab_watcher/exceptions.py
+   # New file: src/gitlab_watcher/exceptions.py
    class GitLabError(Exception):
        """Base exception for GitLab client errors."""
        pass
@@ -778,38 +778,38 @@ def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
        pass
    ```
 
-2. **A `GitLabClient` metódusainak egységesítése:**
-   - A metódusok dobják a megfelelő exception-t
-   - A hívó kód egységesen kezelje az exceptionöket
+2. **Unifying `GitLabClient` methods:**
+   - Methods should raise appropriate exceptions
+   - Calling code should handle exceptions consistently
 
 ---
 
 ### 3.4.3. Missing Docstrings for Public Methods
 
-**Hely:** Több fájl
+**Location:** Multiple files
 
-**Javítási lépések:**
-1. Minden publikus metódushoz docstring hozzáadása
-2. A docstring-ek formátumának egységesítése (Google style)
-3. A Args, Returns, Raises szekciók kitöltése
+**Fix Steps:**
+1. Add docstrings to all public methods
+2. Unify docstring format (Google style)
+3. Fill in Args, Returns, and Raises sections
 
 ---
 
 ### 3.4.4. Magic Numbers Without Constants
 
-**Hely:** `processor.py:81` és `git_ops.py:119`
+**Location:** `processor.py:81` and `git_ops.py:119`
 
-**Javítási lépések:**
-1. Konstansok definiálása a modul elején
-2. A magic számok helyettesítése konstansokkal
+**Fix Steps:**
+1. Define constants at the beginning of the module
+2. Replace magic numbers with constants
 
-**Példa:**
+**Example:**
 ```python
-# processor.py elejére
+# Beginning of processor.py
 CLAUDE_CLI_TIMEOUT_SECONDS = 600
 MAX_PROMPT_LENGTH = 10000
 
-# git_ops.py elejére
+# Beginning of git_ops.py
 DEFAULT_SLUG_MAX_LENGTH = 30
 MAX_BRANCH_NAME_LENGTH = 100
 ```
@@ -818,19 +818,19 @@ MAX_BRANCH_NAME_LENGTH = 100
 
 ### 3.4.5. No Logging for Critical Operations
 
-**Hely:** `processor.py`
+**Location:** `processor.py`
 
-**Javítási lépések:**
-1. Logger hozzáadása a `Processor` osztályhoz
-2. A kritikus műveletek naplózása (branch létrehozás, push, MR létrehozás)
+**Fix Steps:**
+1. Add logger to `Processor` class
+2. Log critical operations (branch creation, push, MR creation)
 
-**Példa:**
+**Example:**
 ```python
 import logging
 
 class Processor:
     def __init__(self, ...):
-        # ... meglévő inicializáció ...
+        # ... existing initialization ...
         self.logger = logging.getLogger(__name__)
 
     def process_issue(self, ...):
@@ -843,40 +843,40 @@ class Processor:
 
 ### 3.4.6. Missing `__all__` in Module Files
 
-**Hely:** Minden forrásfájl
+**Location:** All source files
 
-**Javítási lépések:**
-1. `__all__` lista definiálása minden modulban
-2. Csak a publikus API exportálása
+**Fix Steps:**
+1. Define `__all__` list in all modules
+2. Export only the public API
 
-**Példa:**
+**Example:**
 ```python
-# processor.py végére
+# End of processor.py
 __all__ = ["Processor"]
 
-# gitlab_client.py végére
+# End of gitlab_client.py
 __all__ = ["GitLabClient", "Issue", "MergeRequest", "Note"]
 ```
 
 ---
 
-### 3.4.7. Fázis 4 Tesztelési Stratégia
+### 3.4.7. Phase 4 Testing Strategy
 
-**Egységtesztek:**
-1. Type annotation ellenőrzés `mypy`-val
-2. Exception handling tesztek
-3. Docstring formátum ellenőrzés
+**Unit Tests:**
+1. Type annotation checks using `mypy`
+2. Exception handling tests
+3. Docstring format checks
 
-**Statikus analízis:**
-1. `mypy` futtatása a type annotation-ök ellenőrzésére
-2. `pylint` futtatása a kódminőség ellenőrzésére
-3. `black` és `isort` futtatása a formázás ellenőrzésére
+**Static Analysis:**
+1. Run `mypy` to check type annotations
+2. Run `pylint` to check code quality
+3. Run `black` and `isort` to check formatting
 
 ---
 
-## 4. Függőségi Mátrix
+## 4. Dependency Matrix
 
-| Javítás | Függ tőle | Függ ettől |
+| Fix | Depends On | Dependent |
 |---------|-----------|------------|
 | Command Injection | - | Input Validation |
 | Sensitive Token Exposure | - | - |
@@ -896,95 +896,95 @@ __all__ = ["GitLabClient", "Issue", "MergeRequest", "Note"]
 
 ---
 
-## 5. Kombinált Javítások
+## 5. Combined Fixes
 
-A következő javítások együtt kezelhetők, ami hatékonyabb implementációt tesz lehetővé:
+The following fixes can be handled together, allowing for a more efficient implementation:
 
-### 5.1. Biztonsági javítások együtt
-- **Command Injection + Input Validation**: Mindkettő a bemenet validálásával kapcsolatos, ugyanazt a validációs infrastruktúrát használhatják.
+### 5.1. Security Fixes Together
+- **Command Injection + Input Validation**: Both are related to input validation and can use the same validation infrastructure.
 
-### 5.2. HTTP javítások együtt
-- **Request Timeout + Connection Pooling**: Mindkettő a `GitLabClient.__init__()` módosítását igényli, egyszerre implementálható.
+### 5.2. HTTP Fixes Together
+- **Request Timeout + Connection Pooling**: Both require modifying `GitLabClient.__init__()` and can be implemented at the same time.
 
-### 5.3. Architektúra és konfiguráció együtt
-- **Tight Coupling + Hardcoded Branch**: A dependency injection bevezetése lehetőséget ad a default branch konfigurálására.
+### 5.3. Architecture and Configuration Together
+- **Tight Coupling + Hardcoded Branch**: Introducing dependency injection allows config-driven default branch selection.
 
 ---
 
-## 6. Implementációs Sorrend
+## 6. Implementation Sequence
 
-### 6.1. Ajánlott implementációs sorrend
+### 6.1. Recommended Implementation Sequence
 
-1. **Fázis 1.1: Command Injection** (Critical) - Azonnali biztonsági javítás
-2. **Fázis 1.3: Input Validation** (High) - Kapcsolódik a Command Injection-höz
-3. **Fázis 1.2: Sensitive Token Exposure** (High) - Önálló biztonsági javítás
-4. **Fázis 2.1: Request Timeout + Connection Pooling** (Medium) - Együtt implementálható
-5. **Fázis 2.2: API Caching** (Medium) - Önálló teljesítmény javítás
-6. **Fázis 2.3: State File I/O** (Medium) - Önálló teljesítmény javítás
-7. **Fázis 3.1: Tight Coupling + Hardcoded Branch** (Medium) - Együtt implementálható
-8. **Fázis 4: Kódminőség javítások** (Low) - Bármilyen sorrendben
+1. **Phase 1.1: Command Injection** (Critical) - Immediate security fix
+2. **Phase 1.3: Input Validation** (High) - Related to Command Injection
+3. **Phase 1.2: Sensitive Token Exposure** (High) - Independent security fix
+4. **Phase 2.1: Request Timeout + Connection Pooling** (Medium) - Can be implemented together
+5. **Phase 2.2: API Caching** (Medium) - Independent performance improvement
+6. **Phase 2.3: State File I/O** (Medium) - Independent performance improvement
+7. **Phase 3.1: Tight Coupling + Hardcoded Branch** (Medium) - Can be implemented together
+8. **Phase 4: Code Quality Improvements** (Low) - Any order
 
-### 6.2. Sprint javaslat
+### 6.2. Sprint Proposal
 
-| Sprint | Javítások | Becsült idő |
+| Sprint | Fixes | Estimated Time |
 |--------|-----------|-------------|
-| Sprint 1 | Command Injection, Input Validation, Sensitive Token Exposure | 4-6 óra |
-| Sprint 2 | Request Timeout, Connection Pooling, API Caching | 3-4 óra |
-| Sprint 3 | State File I/O, Tight Coupling, Hardcoded Branch | 3-4 óra |
-| Sprint 4 | Type Annotations, Error Handling, Docstrings | 2-3 óra |
-| Sprint 5 | Magic Numbers, Logging, `__all__` | 1-2 óra |
+| Sprint 1 | Command Injection, Input Validation, Sensitive Token Exposure | 4-6 hours |
+| Sprint 2 | Request Timeout, Connection Pooling, API Caching | 3-4 hours |
+| Sprint 3 | State File I/O, Tight Coupling, Hardcoded Branch | 3-4 hours |
+| Sprint 4 | Type Annotations, Error Handling, Docstrings | 2-3 hours |
+| Sprint 5 | Magic Numbers, Logging, `__all__` | 1-2 hours |
 
 ---
 
-## 7. Kockázatok és Enyhítések
+## 7. Risks and Mitigations
 
-### 7.1. Fázis 1 kockázatok
+### 7.1. Phase 1 Risks
 
-| Kockázat | Valószínűség | Hatás | Enyhítés |
+| Risk | Probability | Impact | Mitigation |
 |----------|--------------|-------|----------|
-| Túl szigorú validáció törli a legitimate használatot | Közepes | Magas | Kiterjedt tesztelés legitimate case-ekkel |
-| Biztonsági rés marad a javítás után | Alacsony | Magas | Biztonsági audit, penetration testing |
-| Regressziós hibák a validáció miatt | Közepes | Közepes | Automatikus tesztek, code review |
+| Overly strict validation breaks legitimate usage | Medium | High | Extensive testing with legitimate cases |
+| Vulnerability remains after fix | Low | High | Security audit, penetration testing |
+| Regression errors due to validation | Medium | Medium | Automated tests, code review |
 
-### 7.2. Fázis 2 kockázatok
+### 7.2. Phase 2 Risks
 
-| Kockázat | Valószínűség | Hatás | Enyhítés |
+| Risk | Probability | Impact | Mitigation |
 |----------|--------------|-------|----------|
-| Cache inkonzisztencia | Közepes | Közepes | Cache invalidáció implementálása |
-| Debounced mentés adatvesztése crash esetén | Alacsony | Magas | Force save shutdownkor |
-| Connection pooling hibák hosszú futásnál | Alacsony | Közepes | Connection timeout és cleanup |
+| Cache inconsistency | Medium | Medium | Implement cache invalidation |
+| Debounced saving data loss in case of crash | Low | High | Force save during shutdown |
+| Connection pooling issues on long runs | Low | Medium | Connection timeout and cleanup |
 
-### 7.3. Fázis 3 kockázatok
+### 7.3. Phase 3 Risks
 
-| Kockázat | Valószínűség | Hatás | Enyhítés |
+| Risk | Probability | Impact | Mitigation |
 |----------|--------------|-------|----------|
-| Refaktorálás megtöri a teszteket | Magas | Közepes | Tesztek frissítése a refaktorálás során |
-| Inkompatibilitás a meglévő konfigurációval | Alacsony | Közepes | Backward compatibility biztosítása |
+| Refactoring breaks tests | High | Medium | Update tests during refactoring |
+| Incompatibility with existing configuration | Low | Medium | Ensure backward compatibility |
 
-### 7.4. Fázis 4 kockázatok
+### 7.4. Phase 4 Risks
 
-| Kockázat | Valószínűség | Hatás | Enyhítés |
+| Risk | Probability | Impact | Mitigation |
 |----------|--------------|-------|----------|
-| Type annotation hibák | Alacsony | Alacsony | mypy futtatása |
-| Docstring inkonzisztencia | Alacsony | Alacsony | Docstring linting |
+| Type annotation errors | Low | Low | Run mypy |
+| Docstring inconsistency | Low | Low | Docstring linting |
 
 ---
 
-## 8. Tesztelési Terv
+## 8. Testing Plan
 
-### 8.1. Teszt kategóriák
+### 8.1. Test Categories
 
-| Kategória | Cél | Eszközök |
+| Category | Goal | Tools |
 |-----------|-----|----------|
-| Egységtesztek | Egyes komponensek tesztelése | pytest, unittest.mock |
-| Integrációs tesztek | Komponensek együttműködése | pytest, requests-mock |
-| Biztonsági tesztek | Sebezhetőségek ellenőrzése | Custom scripts, bandit |
-| Teljesítmény tesztek | Optimalizációk mérése | pytest-benchmark, time profiling |
-| Statikus analízis | Kódminőség ellenőrzése | mypy, pylint, black, isort |
+| Unit Tests | Testing individual components | pytest, unittest.mock |
+| Integration Tests | Component interoperability | pytest, requests-mock |
+| Security Tests | Checking vulnerabilities | Custom scripts, bandit |
+| Performance Tests | Measuring optimizations | pytest-benchmark, time profiling |
+| Static Analysis | Checking code quality | mypy, pylint, black, isort |
 
-### 8.2. Coverage célok
+### 8.2. Coverage Targets
 
-| Modul | Jelenlegi | Cél |
+| Module | Current | Target |
 |-------|-----------|-----|
 | processor.py | ~80% | 90%+ |
 | watcher.py | ~75% | 85%+ |
@@ -992,48 +992,48 @@ A következő javítások együtt kezelhetők, ami hatékonyabb implementációt
 | state.py | ~90% | 95%+ |
 | git_ops.py | ~85% | 90%+ |
 
-### 8.3. CI/CD integráció
+### 8.3. CI/CD Integration
 
-A javítások után a következő CI/CD lépések javasoltak:
+After fixes, the following CI/CD steps are recommended:
 
 1. **Pre-commit hooks:**
-   - black formázás ellenőrzése
-   - isort import rendezés ellenőrzése
+   - black formatting check
+   - isort import sorting check
    - mypy type checking
 
-2. **Pipeline lépések:**
-   - Egységtesztek futtatása
-   - Coverage report generálása
-   - Statikus analízis (pylint, bandit)
-   - Biztonsági ellenőrzés (safety, pip-audit)
+2. **Pipeline Steps:**
+   - Run unit tests
+   - Generate coverage report
+   - Static analysis (pylint, bandit)
+   - Security scanning (safety, pip-audit)
 
 ---
 
-## 9. Összefoglalás
+## 9. Summary
 
-Ez a javítási terv 15 azonosított problémát kezel 4 fázisban, 5 sprintre osztva. A javítások teljes becsült ideje 13-19 óra.
+This fix plan addresses 15 identified issues in 4 phases, divided into 5 sprints. Total estimated time for fixes is 13-19 hours.
 
-**Kulcsfontosságú javítások:**
-1. **Command Injection (Critical)** - Azonnali beavatkozást igényel
-2. **Sensitive Token Exposure (High)** - Fontos biztonsági javítás
-3. **Input Validation (High)** - A Command Injection-nel együtt kezelendő
+**Key Fixes:**
+1. **Command Injection (Critical)** - Requires immediate action
+2. **Sensitive Token Exposure (High)** - Important security fix
+3. **Input Validation (High)** - To be handled alongside Command Injection
 
-**Teljesítmény-optimalizálás:**
-- Connection pooling és timeout beállítása
+**Performance Optimization:**
+- Connection pooling and timeout configuration
 - API response caching
-- Debounced state mentés
+- Debounced state saving
 
-**Architektúra javítások:**
-- Dependency injection bevezetése
-- Default branch konfigurálhatósága
+**Architectural Fixes:**
+- Introduction of dependency injection
+- Configurable default branch name
 
-**Kódminőség javítások:**
-- Type annotations, docstrings, konstansok
-- Egységes hibakezelés, naplózás
+**Code Quality Improvements:**
+- Type annotations, docstrings, constants
+- Unified error handling, logging
 
-A terv végrehajtása után a kódbázis biztonságosabb, hatékonyabb és karbantarthatóbb lesz.
+After executing the plan, the codebase will be more secure, efficient, and maintainable.
 
 ---
 
-*Készítette: Senior Business Analyst Agent*
-*Dátum: 2026-03-11*
+*Prepared by: Senior Business Analyst Agent*
+*Date: 2026-03-11*
