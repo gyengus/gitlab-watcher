@@ -33,7 +33,7 @@ from .discord import DiscordWebhook
 from .exceptions import GitLabAPIError
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient, Issue, MergeRequest, Note
-from .logging_utils import SensitiveDataFilter, sanitize_for_log
+from .logging_utils import sanitize_for_log
 from .protocols import GitOperations
 from .state import StateManager
 
