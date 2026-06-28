@@ -94,20 +94,21 @@ class Watcher:
 
         try:
             # Ensure the directory exists and has restricted permissions (0700)
-            os.makedirs(log_path.parent, mode=0o700, exist_ok=True)
-            try:
-                st = log_path.parent.stat()
-                # Security: Verify directory is owned by current user
-                if os.name != 'nt' and st.st_uid != os.getuid():
-                     self.logger.warning(f"Log directory {log_path.parent} is not owned by current user! This might be a security risk.")
+            if log_path.parent not in (Path("."), Path("")):
+                os.makedirs(log_path.parent, mode=0o700, exist_ok=True)
+                try:
+                    st = log_path.parent.stat()
+                    # Security: Verify directory is owned by current user
+                    if os.name != 'nt' and st.st_uid != os.getuid():
+                         self.logger.warning(f"Log directory {log_path.parent} is not owned by current user! This might be a security risk.")
 
-                # SEC-02 fix: Always attempt to restrict permissions if they are too broad (readable/writable by others)
-                if os.name != 'nt' and (st.st_mode & 0o077):
-                    self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
-                    os.chmod(log_path.parent, 0o700)
-            except OSError as e:
-                self.logger.error(f"Failed to secure log directory permissions for {log_path.parent}: {e}")
-                pass
+                    # SEC-02 fix: Always attempt to restrict permissions if they are too broad (readable/writable by others)
+                    if os.name != 'nt' and (st.st_mode & 0o077):
+                        self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                        os.chmod(log_path.parent, 0o700)
+                except OSError as e:
+                    self.logger.error(f"Failed to secure log directory permissions for {log_path.parent}: {e}")
+                    pass
 
             # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
             # SEC-01 fix: Open and hold the file descriptor to avoid TOCTOU bypass.
@@ -446,14 +447,6 @@ class Watcher:
     def _get_stuck_issue(self, project: ProjectConfig, issues: list[Issue], open_mrs: list[MergeRequest]) -> Optional[tuple[Issue, bool]]:
         """Identify issues that are either in backlog or stuck 'In progress'."""
         project_name = project.name
-
-        # Identify which MRs are actually relevant to the issues we're looking at
-        # (branch name matches "{issue_iid}-*")
-        issue_iids = {issue.iid for issue in issues}
-        relevant_mrs = [
-            mr for mr in open_mrs 
-            if any(mr.source_branch.startswith(f"{iid}-") for iid in issue_iids)
-        ]
 
         # MR-01 fix: Prioritize already "In progress" issues to avoid concurrent processing
         # on the same repository. If any issue is already being worked on, only consider
