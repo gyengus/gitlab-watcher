@@ -46,7 +46,8 @@ class GitOps:
             "status": {"--porcelain", "--"},
             "add": {"--"},
             "commit": {"-m", "--"},
-            "config": {"--get"}
+            "config": {"--get"},
+            "rev-list": {"--count", "--"}
         }
         
         # Structural arguments (branches, remotes, paths)
@@ -57,8 +58,12 @@ class GitOps:
             
             # Special case for --oneline or -n followed by a number which are in SAFE_COMMANDS
             # but might be passed as part of a list
-            if command == "log" and arg.startswith("-n"):
+            if command == "log" and re.match(r"^-n\d+$", arg):
                  return arg
+                 
+            # Explicitly allow the standard git argument separator "--"
+            if arg == "--":
+                return arg
                  
             raise ValueError(f"Git argument cannot start with a hyphen: {arg}")
             
@@ -68,10 +73,8 @@ class GitOps:
         if "=" in arg and command == "config":
              raise ValueError(f"Potential config injection in git argument: {arg}")
 
-        if not re.match(r"^[a-zA-Z0-9\-_./@{}:]+$", arg):
-            # Allow @{u}..HEAD which is used in has_unpushed_work
-            if not re.match(r"^[a-zA-Z0-9\-_./@{}:.]+$", arg):
-                raise ValueError(f"Invalid characters in git argument: {arg}")
+        if not re.match(r"^[a-zA-Z0-9\-_./@{}:.]+$", arg):
+            raise ValueError(f"Invalid characters in git argument: {arg}")
         return arg
 
     def _run(
@@ -89,7 +92,7 @@ class GitOps:
         # Strict allowlist of git subcommands used by this class
         ALLOWED_SUBCOMMANDS = {
             "fetch", "checkout", "pull", "push", "branch", 
-            "log", "rev-parse", "status", "add", "commit", "config"
+            "log", "rev-parse", "status", "add", "commit", "config", "rev-list"
         }
         
         if main_command not in ALLOWED_SUBCOMMANDS:
@@ -145,15 +148,15 @@ class GitOps:
                 return True, ""
 
             if create:
-                # Try checking out normally first (if it exists)
+                # Try checking out normally first (it exists locally or on remote)
                 try:
-                    self._run("checkout", "--", branch)
+                    self._run("checkout", branch, "--")
                     return True, ""
                 except subprocess.CalledProcessError:
                     # If normal checkout fails, try creating it
                     self._run("checkout", "-b", branch, "--")
             else:
-                self._run("checkout", "--", branch)
+                self._run("checkout", branch, "--")
             return True, ""
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.strip() if e.stderr else str(e)
@@ -163,7 +166,7 @@ class GitOps:
         """Pull from remote."""
         try:
             if branch:
-                self._run("pull", remote, "--", branch)
+                self._run("pull", remote, branch)
             else:
                 self._run("pull")
             return True
@@ -244,9 +247,9 @@ class GitOps:
         try:
             # Validate branch name
             self._validate_arg(default_branch)
-            # Limit log to avoid large memory buffering
-            result = self._run("log", f"{default_branch}..HEAD", "--oneline", "-n", "100", "--", check=False)
-            return bool(result.stdout.strip())
+            # Use rev-list --count for efficiency
+            result = self._run("rev-list", "--count", f"{default_branch}..HEAD", "--", check=False)
+            return int(result.stdout.strip()) > 0
         except (subprocess.CalledProcessError, ValueError, Exception):
             return False
 
@@ -423,3 +426,6 @@ class GitOps:
         slug = slug.strip("-")
         # Truncate
         return slug[:max_length]
+
+
+__all__ = ["GitOps"]

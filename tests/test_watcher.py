@@ -228,6 +228,31 @@ class TestStateManager:
         assert new_manager.load(1).last_mr_iid == 10
         assert new_manager.load(2).last_mr_iid == 20
 
+    def test_state_migration_legacy_note_id(self, temp_work_dir: Path) -> None:
+        """Test that legacy state migration copies last_processed_note_id to tracked_mrs."""
+        import json
+        
+        # Ensure directory exists (StateManager init does this)
+        state_manager = StateManager(temp_work_dir)
+        
+        # Write legacy state JSON manually
+        legacy_data = {
+            "last_mr_iid": 12,
+            "last_branch": "12-legacy-branch",
+            "last_processed_note_id": 987,
+        }
+        state_file = temp_work_dir / "state_42.json"
+        state_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+
+        # Load it through StateManager
+        loaded = state_manager.load(42)
+
+        # Check migration
+        assert "12" in loaded.tracked_mrs
+        mr_info = loaded.tracked_mrs["12"]
+        assert mr_info["branch"] == "12-legacy-branch"
+        assert mr_info["last_processed_note_id"] == 987
+
 
 class TestStateManagerDebounced:
     """Tests for debounced state saving."""
@@ -280,6 +305,24 @@ class TestStateManagerDebounced:
         new_manager = StateManager(temp_work_dir)
         loaded = new_manager.load(42)
         assert loaded.last_mr_iid == 3
+
+    def test_save_failure_retains_dirty_state(self, temp_work_dir: Path) -> None:
+        """Test that a save failure keeps the project in the dirty set."""
+        from unittest.mock import patch
+        import time
+
+        state_manager = StateManager(temp_work_dir, save_delay=0.1)
+        state = state_manager.load(42)
+        state.last_mr_iid = 5
+        state_manager.save(42)
+
+        with patch.object(state_manager, "_save_sync", return_value=False):
+            time.sleep(0.3)
+            assert 42 in state_manager._dirty
+
+        state_manager.save(42)
+        time.sleep(0.3)
+        assert 42 not in state_manager._dirty
 
 
 class TestGitOps:
@@ -934,7 +977,7 @@ class TestWatcherCheckMRStatus:
         )
 
 
-    def test_check_mr_status_merged_not_created_by_watcher(
+    def test_check_mr_status_merged_not_created_by_watcher_with_branch(
         self,
         config_file: Path,
         mock_gitlab: MagicMock,
@@ -942,7 +985,7 @@ class TestWatcherCheckMRStatus:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test that MR merged/closed but not created by watcher skips cleanup."""
+        """Test that MR merged but not created by watcher DOES cleanup if branch info exists."""
         merged_mr = MergeRequest(
             iid=5,
             title="External MR",
@@ -951,7 +994,7 @@ class TestWatcherCheckMRStatus:
             state="merged",
         )
         mock_gitlab.get_merge_request.return_value = merged_mr
-
+    
         watcher = Watcher(disable_lock=True,
             config_path=str(config_file),
             gitlab=mock_gitlab,
@@ -960,17 +1003,58 @@ class TestWatcherCheckMRStatus:
             state=state_manager,
         )
         project = watcher.config.projects[0]
-
-        # Set up state tracking MR NOT created by watcher
+    
+        # Set up state tracking MR NOT created by watcher but WITH branch info
         state_manager.add_tracked_mr(project.project_id, 5, "5-external-branch", created_by_watcher=False)
-
+    
         watcher.check_mr_status(project)
-
-        # Should NOT call cleanup_after_merge
-        mock_processor.cleanup_after_merge.assert_not_called()
-        # Should remove from tracked MRs since it's no longer relevant
+    
+        # Should call cleanup_after_merge because branch info exists
+        mock_processor.cleanup_after_merge.assert_called_once()
+        # Should remove from tracked MRs
         state = state_manager.load(project.project_id)
         assert "5" not in state.tracked_mrs
+
+    def test_check_mr_status_merged_no_branch_info(
+        self,
+        config_file: Path,
+        mock_gitlab: MagicMock,
+        mock_discord: MagicMock,
+        mock_processor: MagicMock,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that MR merged with no branch info and not created by watcher skips cleanup."""
+        merged_mr = MergeRequest(
+            iid=6,
+            title="No Branch MR",
+            web_url="https://git.example.com/merge_requests/6",
+            source_branch="6-some-branch",
+            state="merged",
+        )
+        mock_gitlab.get_merge_request.return_value = merged_mr
+    
+        watcher = Watcher(disable_lock=True,
+            config_path=str(config_file),
+            gitlab=mock_gitlab,
+            discord=mock_discord,
+            processor=mock_processor,
+            state=state_manager,
+        )
+        project = watcher.config.projects[0]
+    
+        # Manually add to state without branch info (e.g. legacy state)
+        state = state_manager.load(project.project_id)
+        state.tracked_mrs["6"] = {"branch": "", "created_by_watcher": False}
+        state_manager.save(project.project_id)
+        state_manager.force_save_all()
+    
+        watcher.check_mr_status(project)
+    
+        # Should NOT call cleanup_after_merge
+        mock_processor.cleanup_after_merge.assert_not_called()
+        # Should still remove from tracked MRs
+        state = state_manager.load(project.project_id)
+        assert "6" not in state.tracked_mrs
 
     def test_check_mr_status_merged_created_by_watcher(
         self,
@@ -1007,7 +1091,7 @@ class TestWatcherCheckMRStatus:
         # Should call cleanup_after_merge since created_by_watcher=True
         mock_processor.cleanup_after_merge.assert_called_once()
 
-    def test_check_mr_status_closed_not_created_by_watcher(
+    def test_check_mr_status_closed_not_created_by_watcher_with_branch(
         self,
         config_file: Path,
         mock_gitlab: MagicMock,
@@ -1015,7 +1099,7 @@ class TestWatcherCheckMRStatus:
         mock_processor: MagicMock,
         state_manager: StateManager,
     ) -> None:
-        """Test that closed MR not created by watcher skips cleanup."""
+        """Test that closed MR not created by watcher DOES cleanup if branch info exists."""
         closed_mr = MergeRequest(
             iid=7,
             title="Closed external MR",
@@ -1024,7 +1108,7 @@ class TestWatcherCheckMRStatus:
             state="closed",
         )
         mock_gitlab.get_merge_request.return_value = closed_mr
-
+    
         watcher = Watcher(disable_lock=True,
             config_path=str(config_file),
             gitlab=mock_gitlab,
@@ -1033,14 +1117,15 @@ class TestWatcherCheckMRStatus:
             state=state_manager,
         )
         project = watcher.config.projects[0]
-
-        # Set up state tracking MR NOT created by watcher
+    
+        # Set up state tracking MR NOT created by watcher but WITH branch
         state_manager.add_tracked_mr(project.project_id, 7, "7-closed-branch", created_by_watcher=False)
-
+    
         watcher.check_mr_status(project)
+    
+        # Should call cleanup_after_merge
+        mock_processor.cleanup_after_merge.assert_called_once()
 
-        # Should NOT call cleanup_after_merge
-        mock_processor.cleanup_after_merge.assert_not_called()
         # Should remove from tracked MRs
         state = state_manager.load(project.project_id)
         assert "7" not in state.tracked_mrs
@@ -1435,5 +1520,225 @@ def test_check_mr_status_ignores_external_mr(
     
     # Verify it DID fetch notes for the external MR (since it was filtered out)
     mock_gitlab.get_notes.assert_called()
+
+
+def test_newly_tracked_mr_note_id_defaults_to_zero(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that a newly tracked MR defaults its last_processed_note_id to 0 rather than falling back to the global state."""
+    project_id = 42
+    state = state_manager.load(project_id)
+    state.last_processed_note_id = 500
+    state_manager.force_save(project_id)
+
+    state_manager.add_tracked_mr(project_id, 5, "5-branch", created_by_watcher=True)
+
+    mr = MergeRequest(
+        iid=5,
+        title="Newly tracked MR",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="opened",
+        author="claude-bot",
+    )
+    mock_gitlab.get_merge_requests.return_value = [mr]
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
+
+    notes = [
+        Note(id=100, body="Comment 1", author_username="user", system=False, award_emojis=[], discussion_id="disc1"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_processor.process_comment.assert_called_once_with(
+        project, mr, 100, "Comment 1", discussion_id="disc1"
+    )
+
+
+def test_invalidate_cache_before_get_merge_request(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that invalidate_cache is called before get_merge_request in _handle_merge_cleanup."""
+    project_id = 42
+    state_manager.add_tracked_mr(project_id, 5, "5-branch", created_by_watcher=True)
+
+    mock_gitlab.get_merge_requests.return_value = []
+    
+    merged_mr = MergeRequest(
+        iid=5,
+        title="Merged MR",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="merged",
+    )
+    mock_gitlab.get_merge_request.return_value = merged_mr
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_gitlab.invalidate_cache.assert_called_once_with("mr_42_5")
+    mock_gitlab.get_merge_request.assert_called_with(42, 5)
+
+
+def test_retry_comment_with_success_emoji_ignored(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that a 'retry' comment with a success emoji is ignored and not re-processed."""
+    project_id = 42
+    state_manager.update_mr_last_processed_note(project_id, 5, 100)
+
+    mr = MergeRequest(
+        iid=5,
+        title="MR with retry comment",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="opened",
+        author="claude-bot",
+    )
+    mock_gitlab.get_merge_requests.return_value = [mr]
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
+
+    notes = [
+        Note(id=100, body="retry", author_username="user", system=False, award_emojis=["white_check_mark"], discussion_id="disc1"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+    mock_gitlab.get_note_emojis.return_value = ["white_check_mark"]
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_processor.process_comment.assert_not_called()
+
+
+def test_retry_comment_without_success_emoji_processed(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that a 'retry' comment without a success emoji is processed, even if note ID <= last_processed_note_id."""
+    project_id = 42
+    state_manager.update_mr_last_processed_note(project_id, 5, 100)
+
+    mr = MergeRequest(
+        iid=5,
+        title="MR with retry comment",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="opened",
+        author="claude-bot",
+    )
+    mock_gitlab.get_merge_requests.return_value = [mr]
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
+
+    notes = [
+        Note(id=100, body="retry", author_username="user", system=False, award_emojis=[], discussion_id="disc1"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+    mock_gitlab.get_note_emojis.return_value = []
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_processor.process_comment.assert_called_once_with(
+        project, mr, 100, "retry", discussion_id="disc1"
+    )
+
+
+def test_retry_comment_with_failure_emoji_ignored(
+    config_file: Path,
+    mock_gitlab: MagicMock,
+    mock_discord: MagicMock,
+    mock_processor: MagicMock,
+    state_manager: StateManager,
+) -> None:
+    """Test that a 'retry' comment with a failure emoji (x) is ignored and not re-processed."""
+    project_id = 42
+    state_manager.update_mr_last_processed_note(project_id, 5, 100)
+
+    mr = MergeRequest(
+        iid=5,
+        title="MR with retry comment",
+        web_url="https://git.example.com/merge_requests/5",
+        source_branch="5-branch",
+        state="opened",
+        author="claude-bot",
+    )
+    mock_gitlab.get_merge_requests.return_value = [mr]
+    mock_gitlab.get_current_user.return_value = {"username": "claude-bot"}
+
+    notes = [
+        Note(id=100, body="retry", author_username="user", system=False, award_emojis=["x"], discussion_id="disc1"),
+    ]
+    mock_gitlab.get_notes.return_value = notes
+    mock_gitlab.get_note_emojis.return_value = ["x"]
+
+    watcher = Watcher(
+        disable_lock=True,
+        config_path=str(config_file),
+        gitlab=mock_gitlab,
+        discord=mock_discord,
+        processor=mock_processor,
+        state=state_manager,
+    )
+    project = watcher.config.projects[0]
+
+    watcher.check_mr_status(project)
+
+    mock_processor.process_comment.assert_not_called()
+
+
+
 
 

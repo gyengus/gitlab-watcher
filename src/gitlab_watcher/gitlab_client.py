@@ -5,7 +5,6 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from urllib.parse import quote
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -99,6 +98,10 @@ class GitLabClient:
         self.logger = logging.getLogger(__name__)
         self.base_url = url.rstrip("/")
         
+        # Add URL validation
+        if not re.match(r"^https?://[a-zA-Z0-9\-_./:]+$", self.base_url):
+            raise ValueError(f"Invalid characters or format in GitLab URL: {self.base_url}")
+            
         if not re.match(r"^[a-zA-Z0-9_\-\.]+$", token):
             raise ValueError("Invalid characters in GITLAB_TOKEN. Only alphanumeric, underscores, hyphens, and dots are allowed.")
             
@@ -158,22 +161,35 @@ class GitLabClient:
             response = self.session.request(method, url, **kwargs)
 
             if response.status_code == 401:
-                raise GitLabAuthenticationError()
+                err = GitLabAuthenticationError()
+                err.response = response
+                raise err
             elif response.status_code == 403:
-                raise GitLabForbiddenError(url)
+                err = GitLabForbiddenError(url)
+                err.response = response
+                raise err
             elif response.status_code == 404:
-                raise GitLabNotFoundError("Resource", url)
+                err = GitLabNotFoundError("Resource", url)
+                err.response = response
+                raise err
             elif response.status_code == 429:
                 retry_after_str = response.headers.get("Retry-After")
                 retry_after = int(retry_after_str) if retry_after_str and retry_after_str.isdigit() else None
-                raise GitLabRateLimitError(retry_after)
+                err = GitLabRateLimitError(retry_after)
+                err.response = response
+                raise err
             elif response.status_code >= 400:
-                raise GitLabAPIError(response.status_code, response.text)
+                err = GitLabAPIError(response.status_code, response.text)
+                err.response = response
+                raise err
 
             return response
 
         except requests.RequestException as e:
-            raise GitLabConnectionError(f"Request failed: {e}")
+            err = GitLabConnectionError(f"Request failed: {e}")
+            if hasattr(e, "response") and e.response is not None:
+                err.response = e.response
+            raise err
     def _request_all(self, method: str, url: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Make HTTP request and follow pagination to fetch all items."""
         params = kwargs.get("params", {}).copy()
@@ -214,8 +230,7 @@ class GitLabClient:
             params["assignee_username"] = assignee_username
 
         endpoint = "/issues"
-        response = self._request("GET", self._api_url(project_id, endpoint), params=params)
-        data = response.json()
+        data = self._request_all("GET", self._api_url(project_id, endpoint), params=params)
 
         return [
             Issue(
@@ -318,10 +333,10 @@ class GitLabClient:
                 author_username = author_data.get("username", "ghost")
                 notes.append(
                     Note(
-                        id=note["id"],
-                        body=note["body"],
+                        id=note.get("id", 0),
+                        body=note.get("body", ""),
                         author_username=author_username,
-                        system=note["system"],
+                        system=note.get("system", False),
                         award_emojis=[], # Emojis are fetched lazily in the watcher
                         discussion_id=note.get("discussion_id", ""),
                         noteable_type=note.get("noteable_type"),
@@ -444,6 +459,13 @@ class GitLabClient:
                     json={"name": emoji_name}
                 )
                 return True
+            except GitLabAPIError as e:
+                msg = getattr(e, "message", "")
+                resp_text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+                if "already been taken" in msg or "already been taken" in resp_text:
+                    self.logger.debug(f"Emoji {emoji_name} already exists on note {note_id} in discussion {discussion_id}")
+                    return True
+                self.logger.debug(f"Failed discussion-scoped emoji for note {note_id}: {e}. Falling back to MR-scoped API.")
             except Exception as e:
                 self.logger.debug(f"Failed discussion-scoped emoji for note {note_id}: {e}. Falling back to MR-scoped API.")
         
@@ -456,6 +478,17 @@ class GitLabClient:
                 json={"name": emoji_name}
             )
             return True
+        except GitLabAPIError as e:
+            msg = getattr(e, "message", "")
+            resp_text = e.response.text if hasattr(e, "response") and e.response is not None else ""
+            if "already been taken" in msg or "already been taken" in resp_text:
+                self.logger.debug(f"Emoji {emoji_name} already exists on note {note_id}")
+                return True
+            if resp_text:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {resp_text})")
+            else:
+                self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e}")
+            return False
         except Exception as e:
             if hasattr(e, 'response') and e.response is not None:
                 self.logger.warning(f"Failed to add emoji {emoji_name} to note {note_id}: {e} (Response: {e.response.text})")

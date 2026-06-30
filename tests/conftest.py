@@ -4,6 +4,24 @@ import threading
 from unittest.mock import patch, MagicMock
 
 
+import shutil
+from pathlib import Path
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_test_watcher_dir():
+    """Ensure /tmp/test-watcher is cleaned up after the test session."""
+    test_dir = Path("/tmp/test-watcher")
+    # Clean up before session starts just in case
+    if test_dir.exists():
+        shutil.rmtree(test_dir, ignore_errors=True)
+    
+    yield
+    
+    # Clean up after session ends
+    if test_dir.exists():
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
 class MockFileHandler(logging.Handler):
     """Mock file handler that doesn't actually write to files."""
     def __init__(self, filename=None, *args, **kwargs):

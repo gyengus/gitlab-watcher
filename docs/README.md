@@ -1,78 +1,78 @@
-# GitLab Watcher - Részletes Dokumentáció
+# GitLab Watcher - Detailed Documentation
 
-Ez a dokumentáció a GitLab Watcher projekt teljes körű technikai leírását tartalmazza.
-
----
-
-## Tartalomjegyzék
-
-1. [Projekt áttekintés és cél](#1-projekt-áttekintés-és-cél)
-2. [Részletes architektúra leírás](#2-részletes-architektúra-leírás)
-3. [Telepítési útmutató](#3-telepítési-útmutató)
-4. [Konfigurációs lehetőségek](#4-konfigurációs-lehetőségek)
-5. [Működési folyamatok](#5-működési-folyamatok)
-6. [Állapotkezelés részletei](#6-állapotkezelés-részletei)
-7. [API integrációk](#7-api-integrációk)
-8. [Hibakezelés és recovery mechanizmusok](#8-hibakezelés-és-recovery-mechanizmusok)
-9. [Fejlesztői útmutató](#9-fejlesztői-útmutató)
-10. [Lehetséges fejlesztési irányok](#10-lehetséges-fejlesztési-irányok)
+This documentation contains a comprehensive technical description of the GitLab Watcher project.
 
 ---
 
-## 1. Projekt áttekintés és cél
+## Table of Contents
 
-### 1.1 Célkitűzés
+1. [Project Overview and Goal](#1-project-overview-and-goal)
+2. [Detailed Architecture Description](#2-detailed-architecture-description)
+3. [Installation Guide](#3-installation-guide)
+4. [Configuration Options](#4-configuration-options)
+5. [Operational Processes](#5-operational-processes)
+6. [State Management Details](#6-state-management-details)
+7. [API Integrations](#7-api-integrations)
+8. [Error Handling and Recovery Mechanisms](#8-error-handling-and-recovery-mechanisms)
+9. [Developer Guide](#9-developer-guide)
+10. [Potential Development Directions](#10-potential-development-directions)
 
-A **GitLab Watcher** egy Python alapú daemon, amely automatizálja a szoftverfejlesztési munkafolyamatokat GitLab környezetben. A rendszer Claude CLI-t használ a mesterséges intelligencia támogatta kódoláshoz, lehetővé téve az issue-k automatikus feldolgozását és a merge request kommentekre való válaszadást.
+---
 
-### 1.2 Főbb funkciók
+## 1. Project Overview and Goal
 
-| Funkció | Leírás |
+### 1.1 Objective
+
+**GitLab Watcher** is a Python-based daemon that automates software development workflows in a GitLab environment. The system uses Claude CLI for AI-assisted coding, allowing automatic processing of issues and responding to merge request comments.
+
+### 1.2 Key Features
+
+| Feature | Description |
 |---------|--------|
-| **Issue Processing** | A konfigurált felhasználóhoz rendelt issue-k automatikus feldolgozása |
-| **MR Comment Processing** | Merge request kommentekre történő automatikus válaszadás |
-| **Post-Merge Cleanup** | Merged MR-ek után automatikus takarítás (branch törlés, master frissítés) |
-| **Discord Notifications** | Valós idejű értesítések Discord webhookon keresztül |
-| **State Persistence** | Állapot perzisztencia a folyamatok követéséhez |
+| **Issue Processing** | Automatic processing of issues assigned to the configured user |
+| **MR Comment Processing** | Automatic response to merge request comments |
+| **Post-Merge Cleanup** | Automatic cleanup after merged MRs (branch deletion, master update) |
+| **Discord Notifications** | Real-time notifications via a Discord webhook |
+| **State Persistence** | State persistence to track processes |
 
-### 1.3 Technológiai stack
+### 1.3 Tech Stack
 
-- **Python 3.11+**: Alap programozási nyelv
+- **Python 3.11+**: Base programming language
 - **Click**: CLI framework
-- **requests**: HTTP kliens a GitLab API kommunikációhoz
-- **subprocess**: Git műveletek és Claude CLI végrehajtás
-- **dataclasses**: Adatstruktúrák definiálása
+- **requests**: HTTP client for GitLab API communication
+- **subprocess**: Git operations and Claude CLI execution
+- **dataclasses**: Data structure definitions
 
-### 1.4 Követelmények
+### 1.4 Requirements
 
-- Python 3.11 vagy újabb
-- Git telepítve és konfigurálva
-- GitLab hozzáférés (Personal Access Token)
-- Claude CLI vagy Ollama (opcionális Discord webhook)
+- Python 3.11 or newer
+- Git installed and configured
+- GitLab access (Personal Access Token)
+- Claude CLI or Ollama (optional Discord webhook)
 
 ---
 
-## 2. Részletes architektúra leírás
+## 2. Detailed Architecture Description
 
-### 2.1 Modulok áttekintése
+### 2.1 Modules Overview
 
 ```
 src/gitlab_watcher/
-├── __init__.py          # Csomag inicializáció, verzió definíció
-├── __main__.py          # python -m gitlab_watcher belépési pont
-├── cli.py               # Click CLI belépési pont
-├── watcher.py           # Fő monitoring ciklus
-├── processor.py         # Üzleti logika (issue/MR feldolgozás)
-├── gitlab_client.py     # GitLab API kliens
-├── git_ops.py           # Git műveletek wrapper
-├── config.py            # Konfiguráció kezelés
-├── state.py             # Állapot perzisztencia
-└── discord.py           # Discord webhook értesítések
+├── __init__.py          # Package initialization, version definition
+├── __main__.py          # python -m gitlab_watcher entry point
+├── cli.py               # Click CLI entry point
+├── watcher.py           # Main monitoring loop
+├── processor.py         # Business logic (issue/MR processing)
+├── gitlab_client.py     # GitLab API client
+├── git_ops.py           # Git operations wrapper
+├── config.py            # Configuration management
+├── state.py             # State persistence
+└── discord.py           # Discord webhook notifications
 ```
 
-### 2.2 Részletes modul leírások
+### 2.2 Detailed Module Descriptions
 
-#### 2.2.1 `cli.py` - Parancssori felület
+#### 2.2.1 `cli.py` - Command Line Interface
 
 ```python
 @click.command()
@@ -84,30 +84,30 @@ def main(config: str, verbose: bool) -> None:
     watcher.run()
 ```
 
-**Funkciók:**
-- Egyszerű CLI interfész a Click framework segítségével
-- Konfigurációs fájl elérési út testreszabása
-- Verbose mód debug célból
+**Features:**
+- Simple CLI interface using the Click framework
+- Configuration file path customization
+- Verbose mode for debugging purposes
 
-#### 2.2.2 `watcher.py` - Központi koordinátor
+#### 2.2.2 `watcher.py` - Central Coordinator
 
-A `Watcher` osztály a rendszer központi koordinátora, amely:
-- Inicializálja az összes függőséget (GitLab kliens, Discord webhook, State manager, Processor)
-- Végrehajtja a fő monitoring ciklust
-- Kezeli az issue és MR státusz ellenőrzéseket
+The `Watcher` class is the central coordinator of the system, which:
+- Initializes all dependencies (GitLab client, Discord webhook, State manager, Processor)
+- Executes the main monitoring loop
+- Handles issue and MR status checks
 
-**Főbb metódusok:**
+**Key Methods:**
 
-| Metódus | Felelősség |
+| Method | Responsibility |
 |---------|------------|
-| `__init__()` | Inicializáció, konfiguráció betöltése, dependency injection |
-| `_extract_from_remote()` | GitLab URL és token kinyerése git remote URL-ből |
-| `check_issues()` | Új issue-k keresése és feldolgozás |
-| `check_mr_status()` | MR státusz ellenőrzése (merge, komment) |
-| `run()` | Fő ciklus |
+| `__init__()` | Initialization, configuration loading, dependency injection |
+| `_extract_from_remote()` | Extract GitLab URL and token from git remote URL |
+| `check_issues()` | Find and process new issues |
+| `check_mr_status()` | Check MR status (merge, comment) |
+| `run()` | Main loop |
 
 **Dependency Injection:**
-A `Watcher` támogatja a dependency injection-t, ami tesztelhetővé teszi:
+The `Watcher` supports dependency injection, making it testable:
 
 ```python
 def __init__(
@@ -122,33 +122,33 @@ def __init__(
 ) -> None:
 ```
 
-#### 2.2.3 `processor.py` - Üzleti logika
+#### 2.2.3 `processor.py` - Business Logic
 
-A `Processor` osztály felelős az issue-k és MR kommentek tényleges feldolgozásáért.
+The `Processor` class is responsible for the actual processing of issues and MR comments.
 
-**Főbb metódusok:**
+**Key Methods:**
 
-| Metódus | Leírás |
+| Method | Description |
 |---------|--------|
-| `_run_claude()` | Claude CLI végrehajtása megadott prompttal |
-| `process_issue()` | Issue feldolgozása: branch létrehozás, Claude futtatás, MR létrehozás |
-| `process_comment()` | MR komment feldolgozása: branch checkout, Claude futtatás, push |
-| `cleanup_after_merge()` | Takarítás merge után: master frissítés, branch törlés |
+| `_run_claude()` | Execute Claude CLI with a given prompt |
+| `process_issue()` | Process issue: create branch, run Claude, create MR |
+| `process_comment()` | Process MR comment: check out branch, run Claude, push |
+| `cleanup_after_merge()` | Clean up after merge: update master, delete branch |
 
-**AI Tool módok:**
+**AI Tool Modes:**
 
-A rendszer négy módot támogat az AI tool futtatásához:
+The system supports four modes for running the AI tool:
 
-| Mód | Parancs | Leírás |
+| Mode | Command | Description |
 |-----|---------|--------|
-| `ollama` | `ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"` | Alapértelmezett mód, Ollama konténeren keresztül |
-| `direct` | `claude -p --permission-mode acceptEdits "<prompt>"` | Közvetlen Claude CLI hívás |
-| `opencode` | `opencode "<prompt>"` | Opencode CLI használata |
-| `custom` | Felhasználó által definiált parancs | Rugalmas, egyedi konfiguráció bármilyen AI eszközhöz |
+| `ollama` | `ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"` | Default mode, via Ollama container |
+| `direct` | `claude -p --permission-mode acceptEdits "<prompt>"` | Direct Claude CLI call |
+| `opencode` | `opencode "<prompt>"` | Using Opencode CLI |
+| `custom` | User-defined command | Flexible, custom configuration for any AI tool |
 
-**Prompt struktúra:**
+**Prompt Structure:**
 
-Issue feldolgozáshoz:
+For issue processing:
 ```text
 You are working on issue #{issue.iid}: {issue.title}
 
@@ -161,7 +161,7 @@ Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits.
 ```
 
-MR komment feldolgozáshoz:
+For MR comment processing:
 ```text
 You are working on a merge request titled: {mr.title}
 Branch: {mr.source_branch}
@@ -175,11 +175,11 @@ Do not use conventional commit prefixes like feat:, fix:, etc.
 Do not add Co-Authored-By signature to commits.
 ```
 
-#### 2.2.4 `gitlab_client.py` - GitLab API kliens
+#### 2.2.4 `gitlab_client.py` - GitLab API Client
 
-A `GitLabClient` osztály a GitLab REST API v4 interfészt valósítja meg.
+The `GitLabClient` class implements the GitLab REST API v4 interface.
 
-**Adatstruktúrák:**
+**Data Structures:**
 
 ```python
 @dataclass
@@ -205,20 +205,20 @@ class Note:
     author_username: str
 ```
 
-**API metódusok:**
+**API Methods:**
 
-| Metódus | Végpont | Leírás |
+| Method | Endpoint | Description |
 |---------|---------|--------|
-| `get_issues()` | `GET /projects/:id/issues` | Issue-k listázása |
-| `get_merge_requests()` | `GET /projects/:id/merge_requests` | MR-ek listázása |
-| `get_merge_request()` | `GET /projects/:id/merge_requests/:iid` | Egy MR lekérése |
-| `get_notes()` | `GET /projects/:id/merge_requests/:iid/notes` | Kommentek listázása |
-| `update_issue_labels()` | `PUT /projects/:id/issues/:iid` | Issue címkék frissítése |
-| `create_merge_request()` | `POST /projects/:id/merge_requests` | MR létrehozása |
+| `get_issues()` | `GET /projects/:id/issues` | List issues |
+| `get_merge_requests()` | `GET /projects/:id/merge_requests` | List MRs |
+| `get_merge_request()` | `GET /projects/:id/merge_requests/:iid` | Fetch a single MR |
+| `get_notes()` | `GET /projects/:id/merge_requests/:iid/notes` | List comments |
+| `update_issue_labels()` | `PUT /projects/:id/issues/:iid` | Update issue labels |
+| `create_merge_request()` | `POST /projects/:id/merge_requests` | Create MR |
 
-**Retry logika:**
+**Retry Logic:**
 
-A kliens automatikus újrapróbálkozást implementál 5xx hibákra:
+The client implements automatic retries for 5xx errors:
 
 ```python
 def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -240,27 +240,27 @@ def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
     raise RuntimeError(f"Request failed after {self.max_retries} retries: {last_error}")
 ```
 
-#### 2.2.5 `git_ops.py` - Git műveletek
+#### 2.2.5 `git_ops.py` - Git Operations
 
-A `GitOps` osztály a Git parancsokat burkolja subprocess hívásokkal.
+The `GitOps` class wraps Git commands using subprocess calls.
 
-**Metódusok:**
+**Methods:**
 
-| Metódus | Git parancs | Leírás |
+| Method | Git Command | Description |
 |---------|-------------|--------|
-| `fetch(remote)` | `git fetch <remote>` | Távoli repository frissítése |
-| `checkout(branch, create)` | `git checkout [-b] <branch>` | Branch váltás/létrehozás |
-| `pull(remote, branch)` | `git pull [<remote> [<branch>]]` | Változások letöltése |
-| `push(remote, branch, set_upstream)` | `git push [-u] <remote> <branch>` | Változások feltöltése |
-| `delete_branch(branch, force)` | `git branch -D|-d <branch>` | Branch törlése |
-| `branch_exists(branch)` | `git rev-parse --verify <branch>` | Branch létezésének ellenőrzése |
-| `get_current_branch()` | `git rev-parse --abbrev-ref HEAD` | Aktuális branch neve |
-| `get_remote_url(remote)` | `git config --get remote.<remote>.url` | Remote URL lekérése |
-| `generate_slug(title)` | - | URL-barát slug generálás (static) |
+| `fetch(remote)` | `git fetch <remote>` | Update remote repository |
+| `checkout(branch, create)` | `git checkout [-b] <branch>` | Switch/create branch |
+| `pull(remote, branch)` | `git pull [<remote> [<branch>]]` | Pull changes |
+| `push(remote, branch, set_upstream)` | `git push [-u] <remote> <branch>` | Push changes |
+| `delete_branch(branch, force)` | `git branch -D|-d <branch>` | Delete branch |
+| `branch_exists(branch)` | `git rev-parse --verify <branch>` | Check if branch exists |
+| `get_current_branch()` | `git rev-parse --abbrev-ref HEAD` | Get current branch name |
+| `get_remote_url(remote)` | `git config --get remote.<remote>.url` | Get remote URL |
+| `generate_slug(title)` | - | Generate URL-friendly slug (static) |
 
-**Slug generálás:**
+**Slug Generation:**
 
-A branch nevek automatikus generálásához:
+For automatic generation of branch names:
 
 ```python
 @staticmethod
@@ -273,13 +273,13 @@ def generate_slug(title: str, max_length: int = 30) -> str:
     return slug[:max_length]
 ```
 
-Példa: `"Fix bug #123!!!"` → `"fix-bug-123"`
+Example: `"Fix bug #123!!!"` → `"fix-bug-123"`
 
-#### 2.2.6 `config.py` - Konfiguráció kezelés
+#### 2.2.6 `config.py` - Configuration Management
 
-A konfiguráció Bash-stílusú fájlokból töltődik be.
+Configuration is loaded from Bash-style files.
 
-**Adatstruktúrák:**
+**Data Structures:**
 
 ```python
 @dataclass
@@ -303,289 +303,290 @@ class Config:
     projects: list[ProjectConfig] = field(default_factory=list)
 ```
 
-**Konfigurációs fájl formátum:**
+**Configuration File Format:**
 
 ```bash
-# Alapvető beállítások
+# Basic settings
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="your-token"
 DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
 
-# Workflow címkék
+# Workflow labels
 LABEL_IN_PROGRESS="In progress"
 LABEL_REVIEW="Review"
 
-# Felhasználó és időzítés
+# User and timing
 GITLAB_USERNAME="claude"
 POLL_INTERVAL=30
 
-# AI tool mód
+# AI tool mode
 AI_TOOL_MODE="ollama"
 AI_TOOL_CUSTOM_COMMAND=""
 
-# Projektek
+# Projects
 PROJECT_DIRS=(
   "/path/to/project1"
   "/path/to/project2"
 )
 ```
 
-**Projektfelfedezés:**
+**Project Discovery:**
 
-A rendszer automatikusan felfedezi a projekteket a `PROJECT_DIRS` könyvtárakban lévő `PROJECT.md` fájlok alapján. A fájlban a `Project ID: <szám>` sor határozza meg a GitLab projekt azonosítót.
+The system automatically discovers projects based on `PROJECT.md` files in the `PROJECT_DIRS` directories. The line `Project ID: <number>` in the file defines the GitLab project ID.
 
-Támogatott formátumok:
+Supported formats:
 - `Project ID: 31`
 - `Project ID: **31**`
 - `project_id: 31`
 
-#### 2.2.7 `state.py` - Állapotkezelés
+#### 2.2.7 `state.py` - State Management
 
-A `StateManager` osztály perzisztálja a projektek állapotát JSON fájlokba.
+The `StateManager` class persists project states into JSON files.
 
-**Állapot struktúra:**
+**State Structure:**
 
 ```python
 @dataclass
 class ProjectState:
-    last_mr_iid: Optional[int] = None      # Utolsó MR IID
-    last_mr_state: Optional[str] = None     # Utolsó MR státusz
-    last_note_id: int = 0                    # Utolsó feldolgozott komment ID
-    last_branch: Optional[str] = None        # Utolsó branch neve
-    processing: bool = False                 # Feldolgozás folyamatban-e
+    last_mr_iid: Optional[int] = None      # Last MR IID
+    last_mr_state: Optional[str] = None     # Last MR status
+    last_note_id: int = 0                    # Last processed comment ID
+    last_branch: Optional[str] = None        # Last branch name
+    processing: bool = False                 # Processing in progress indicator
 ```
 
-**Főbb metódusok:**
+**Key Methods:**
 
-| Metódus | Leírás |
+| Method | Description |
 |---------|--------|
-| `load(project_id)` | Állapot betöltése (cache-elt) |
-| `init_state(project_id)` | Inicializáció induláskor (processing=False) |
-| `save(project_id)` | Állapot mentése fájlba |
-| `is_processing(project_id)` | Feldolgozás állapot ellenőrzése |
-| `set_processing(project_id, bool)` | Feldolgozás jelző beállítása |
-| `update_mr_state(...)` | MR állapot frissítése |
-| `reset(project_id)` | Állapot teljes törlése |
+| `load(project_id)` | Load state (cached) |
+| `init_state(project_id)` | Initialization on startup (processing=False) |
+| `save(project_id)` | Save state to file |
+| `is_processing(project_id)` | Check processing state |
+| `set_processing(project_id, bool)` | Set processing flag |
+| `update_mr_state(...)` | Update MR state |
+| `reset(project_id)` | Reset state completely |
 
-**Fájl elhelyezkedés:**
+**File Location:**
 
 ```
 /tmp/gitlab-watcher/
-├── state_42.json    # 42-es projekt állapota
-├── state_31.json    # 31-es projekt állapota
+├── state_42.json    # State of project 42
+├── state_31.json    # State of project 31
 └── ...
 ```
 
-#### 2.2.8 `discord.py` - Discord értesítések
+#### 2.2.8 `discord.py` - Discord Notifications
 
-A `DiscordWebhook` osztály Discord webhook üzeneteket küld.
+The `DiscordWebhook` class sends Discord webhook messages.
 
-**Értesítés típusok:**
+**Notification Types:**
 
-| Metódus | Emoji | Esemény |
+| Method | Emoji | Event |
 |---------|-------|---------|
-| `notify_issue_started()` | 🚀 | Issue feldolgozás kezdete |
-| `notify_mr_created()` | ✅ | MR létrehozása |
-| `notify_changes_applied()` | ✅ | Komment alapú változtatások |
+| `notify_issue_started()` | 🚀 | Issue processing start |
+| `notify_mr_created()` | ✅ | MR creation |
+| `notify_changes_applied()` | ✅ | Comment-based changes applied |
 | `notify_mr_merged()` | ✅ | MR merge |
-| `notify_cleanup_complete()` | 🧹 | Takarítás befejezése |
-| `notify_error()` | ❌ | Hiba esetén |
+| `notify_cleanup_complete()` | 🧹 | Cleanup complete |
+| `notify_error()` | ❌ | On error |
 
 ---
 
-## 3. Telepítési útmutató
+## 3. Installation Guide
 
-### 3.1 Rendszerkövetelmények
+### 3.1 System Requirements
 
-- Python 3.11 vagy újabb
-- Git (telepítve és elérhető a PATH-ban)
-- Claude CLI vagy Ollama (AI végrehajtáshoz)
+- Python 3.11 or newer
+- Git (installed and available in PATH)
+- Claude CLI or Ollama (for AI execution)
 
-### 3.2 Telepítés forráskódból
+### 3.2 Installation from Source
 
 ```bash
-# Repository klónozása
+# Clone the repository
 git clone https://git.gyengus.hu/gyengus/gitlab-watcher.git
 cd gitlab-watcher
 
-# Fejlesztői módban telepítés (ajánlott)
+# Install in development mode (recommended)
 pip install -e ".[dev]"
 
-# Vagy normál telepítés
+# Or normal installation
 pip install .
 ```
 
-### 3.3 Függőségek
+### 3.3 Dependencies
 
-A `pyproject.toml` alapján:
+Based on `pyproject.toml`:
 
-**Fő függőségek:**
+**Main Dependencies:**
 - `click>=8.0.0` - CLI framework
-- `requests>=2.28.0` - HTTP kliens
+- `requests>=2.28.0` - HTTP client
 
-**Fejlesztői függőségek:**
-- `pytest>=7.0.0` - Teszt framework
-- `pytest-cov>=4.0.0` - Kód fedettség
+**Development Dependencies:**
+- `pytest>=7.0.0` - Test framework
+- `pytest-cov>=4.0.0` - Code coverage
 
-### 3.4 Konfiguráció beállítása
+### 3.4 Setting up Configuration
 
-1. Hozd létre a konfigurációs könyvtárat és fájlt:
+1. Create the configuration directory and file:
 
 ```bash
 mkdir -p ~/.config/gitlab-watcher
 cp gitlab-watcher.conf ~/.config/gitlab-watcher/config.conf
 ```
 
-2. Töltsd ki a konfigurációt:
+2. Fill in the configuration:
 
 ```bash
-# GitLab kapcsolat
+# GitLab connection
 GITLAB_URL="https://your-gitlab-instance.com"
 GITLAB_TOKEN="your-personal-access-token"
 
-# Discord webhook (opcionális)
+# Discord webhook (optional)
 DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
 
-# Workflow címkék (testreszabható)
+# Workflow labels (customizable)
 LABEL_IN_PROGRESS="In progress"
 LABEL_REVIEW="Review"
 
-# Monitorozott felhasználó
+# Monitored user
 GITLAB_USERNAME="claude"
 
-# Polling intervallum (másodperc)
+# Polling interval (seconds)
 POLL_INTERVAL=30
 
-# AI tool mód: ollama, direct, opencode, custom
+# AI tool mode: ollama, direct, opencode, custom
 AI_TOOL_MODE="ollama"
 
-# Projektek
+# Projects
 PROJECT_DIRS=(
   "/path/to/project1"
   "/path/to/project2"
 )
 ```
 
-3. Minden projekthez hozz létre `PROJECT.md` fájlt:
+3. Create a `PROJECT.md` file for each project:
 
 ```markdown
 Project ID: 42
 
-# Projekt dokumentáció...
+# Project Documentation...
 
-## Build parancsok
+## Build Commands
 ...
 ```
 
-### 3.5 Futtatás
+### 3.5 Running
 
 ```bash
-# Alapértelmezett konfigurációval
+# With default configuration
 gitlab-watcher
 
-# Egyéni konfigurációval
+# With custom configuration
 gitlab-watcher -c /path/to/config.conf
 
-# Verbose módban
+# In verbose mode
 gitlab-watcher --verbose
 ```
 
 ---
 
-## 4. Konfigurációs lehetőségek
+## 4. Configuration Options
 
-### 4.1 Teljes konfigurációs referencia
+### 4.1 Full Configuration Reference
 
-| Változó | Típus | Alapértelmezett | Leírás |
+| Variable | Type | Default | Description |
 |---------|-------|-----------------|--------|
-| `GITLAB_URL` | string | - | GitLab szerver URL |
+| `GITLAB_URL` | string | - | GitLab server URL |
 | `GITLAB_TOKEN` | string | - | Personal Access Token |
-| `DISCORD_WEBHOOK` | string | "" | Discord webhook URL (opcionális) |
-| `LABEL_IN_PROGRESS` | string | "In progress" | "Folyamatban" címke neve |
-| `LABEL_REVIEW` | string | "Review" | "Véleményezés" címke neve |
-| `GITLAB_USERNAME` | string | "claude" | Monitorozott GitLab felhasználó |
-| `POLL_INTERVAL` | int | 30 | Polling intervallum (másodperc) |
-| `AI_TOOL_MODE` | string | "ollama" | AI tool mód |
-| `AI_TOOL_CUSTOM_COMMAND` | string | "" | Egyéni parancs (custom módhoz) |
-| `PROJECT_DIRS` | array | [] | Projekt könyvtárak listája |
+| `DISCORD_WEBHOOK` | string | "" | Discord webhook URL (optional) |
+| `LABEL_IN_PROGRESS` | string | "In progress" | Name of the "In progress" label |
+| `LABEL_REVIEW` | string | "Review" | Name of the "Review" label |
+| `GITLAB_USERNAME` | string | "claude" | Monitored GitLab username |
+| `POLL_INTERVAL` | int | 30 | Polling interval (seconds) |
+| `AI_TOOL_MODE` | string | "ollama" | AI tool mode |
+| `AI_TOOL_CUSTOM_COMMAND` | string | "" | Custom command (for custom mode) |
+| `PROJECT_DIRS` | array | [] | List of project directories |
 
-### 4.2 GitLab Token beszerzése
+### 4.2 Obtaining a GitLab Token
 
-1. Jelentkezz be a GitLab-ba
-2. Menj a **Settings > Access Tokens**
-3. Hozz létre új tokent a következő jogokkal:
-   - `api` - Teljes API hozzáférés
-   - `write_repository` - Repository írás
+1. Log in to GitLab
+2. Go to **Settings > Access Tokens**
+3. Create a new token with the following scopes:
+   - `api` - Full API access
+   - `write_repository` - Repository write access
 
-### 4.3 GitLab URL és Token automatikus felismerése
+### 4.3 Automatic Discovery of GitLab URL and Token
 
-Ha a konfigurációban nincs megadva `GITLAB_URL` és `GITLAB_TOKEN`, a rendszer megpróbálja kinyerni a git remote URL-ből:
+If `GITLAB_URL` and `GITLAB_TOKEN` are not specified in the configuration, the system attempts to extract them from the git remote URL:
 
 ```
 https://token@git.example.com/group/project.git  → URL: https://git.example.com, Token: token
 https://user:token@git.example.com/group/project.git  → URL: https://git.example.com, Token: token
 ```
 
-### 4.4 AI Tool módok
+### 4.4 AI Tool Modes
 
-#### Ollama mód (alapértelmezett)
+#### Ollama Mode (Default)
 
 ```bash
 AI_TOOL_MODE="ollama"
 ```
 
-Előfeltétel: Ollama telepítése és `claude` modell jelenléte.
+Prerequisite: Ollama installed and `claude` model present.
 
-#### Direct mód
+#### Direct Mode
 
 ```bash
 AI_TOOL_MODE="direct"
 ```
 
-Közvetlen Claude CLI hívás. Előfeltétel: `claude` parancs elérhető a PATH-ban.
+Direct Claude CLI call. Prerequisite: `claude` command available in PATH.
 
-#### Opencode mód
+#### Opencode Mode
 
 ```bash
 AI_TOOL_MODE="opencode"
 ```
 
-Opencode CLI használata. Előfeltétel: `opencode` parancs elérhető a PATH-ban.
+Using Opencode CLI. Prerequisite: `opencode` command available in PATH.
 
-#### Custom mód
+#### Custom Mode
 
 ```bash
 AI_TOOL_MODE="custom"
+# Note: Separating flags and values is recommended for security
 AI_TOOL_CUSTOM_COMMAND="my-ai-tool --prompt {prompt} --workdir {cwd}"
 ```
 
-Egyéni parancs definiálása bármilyen AI eszközhöz. Elérhető változók:
-- `{prompt}` - A prompt szöveg (kötelező)
-- `{cwd}` - A munkakönyvtár elérési útja (opcionális)
+Defining a custom command for any AI tool. Available placeholders:
+- `{prompt}` - The prompt text (required)
+- `{cwd}` - The path of the working directory (optional)
 
-**Fontos:** A munkakönyvtár automatikusan beállításra kerül a parancs futtatása előtt.
-Csak akkor használd a `{cwd}` változót, ha az AI eszköz explicit könyvtár paramétert igényel.
+**Important:** The working directory is automatically set before running the command.
+Only use the `{cwd}` placeholder if the AI tool requires an explicit directory parameter.
 
-Példák:
+Examples:
 ```bash
-# A tool az aktuális könyvtárban dolgozik - nincs szükség {cwd}-re
+# The tool operates in the current directory - {cwd} not needed
 AI_TOOL_MODE="custom"
 AI_TOOL_CUSTOM_COMMAND="my-claude --prompt {prompt}"
 
-# A tool explicit könyvtár paramétert igényel
+# The tool requires an explicit directory parameter
 AI_TOOL_MODE="custom"
 AI_TOOL_CUSTOM_COMMAND="my-opencode --task {prompt} --workspace {cwd}"
 
-# Bármilyen más AI eszköz - csak prompt szükséges
+# Any other AI tool - only prompt required
 AI_TOOL_MODE="custom"
 AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
 ```
 
 ---
 
-## 5. Működési folyamatok
+## 5. Operational Processes
 
-### 5.1 Fő monitoring ciklus
+### 5.1 Main Monitoring Loop
 
 ```
 ┌─────────────────────────────────────┐
@@ -608,14 +609,14 @@ AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │                    Issue Processing                            │
-├────────────────────────────────────────────────────────────────┤
+│ -------------------------------------------------------------- │
 │                                                                │
 │  1. check_issues()                                             │
 │     ├── Get issues assigned to GITLAB_USERNAME                 │
 │     ├── Filter: no "In progress" AND no "Review" label         │
 │     └── First matching issue → process_issue()                 │
 │                                                                │
-│  2. process_issue()                                             │
+│  2. process_issue()                                            │
 │     ├── Set processing flag = True                             │
 │     ├── Add "In progress" label to issue                       │
 │     ├── Discord: "Starting Issue" notification                 │
@@ -623,7 +624,7 @@ AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
 │     ├── Git: checkout -b {iid}-{slug}                          │
 │     ├── Run Claude CLI with issue description                  │
 │     ├── Git: push -u origin {branch}                           │
-│     ├── GitLab: create_merge_request()                          │
+│     ├── GitLab: create_merge_request()                         │
 │     ├── GitLab: update_issue_labels(["Review"])                │
 │     ├── Discord: "MR Created" notification                     │
 │     └── Set processing flag = False                            │
@@ -639,7 +640,7 @@ AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │                 MR Comment Processing                           │
-├────────────────────────────────────────────────────────────────┤
+│ -------------------------------------------------------------- │
 │                                                                │
 │  1. check_mr_status()                                          │
 │     ├── Get open MRs by GITLAB_USERNAME                        │
@@ -666,7 +667,7 @@ AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │                   Post-Merge Cleanup                            │
-├────────────────────────────────────────────────────────────────┤
+│ -------------------------------------------------------------- │
 │                                                                │
 │  1. check_mr_status()                                          │
 │     ├── If state.last_mr_iid is set:                           │
@@ -674,13 +675,13 @@ AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
 │     └── If MR state == "merged":                               │
 │         └── cleanup_after_merge()                              │
 │                                                                │
-│  2. cleanup_after_merge()                                       │
+│  2. cleanup_after_merge()                                      │
 │     ├── Discord: "MR Merged" notification                      │
 │     ├── Git: checkout master                                   │
-│     ├── Git: pull                                               │
+│     ├── Git: pull                                              │
 │     ├── Git: delete branch -D {branch}                         │
 │     ├── Discord: "Cleanup complete" notification               │
-│     └── State: reset()                                          │
+│     └── State: reset()                                         │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -711,11 +712,11 @@ AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
 
 ---
 
-## 6. Állapotkezelés részletei
+## 6. State Management Details
 
-### 6.1 State File Struktúra
+### 6.1 State File Structure
 
-Az állapot JSON fájlokban tárolódik:
+The state is stored in JSON files:
 
 ```json
 {
@@ -732,7 +733,7 @@ Az állapot JSON fájlokban tárolódik:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      State Transitions                      │
-├─────────────────────────────────────────────────────────────┤
+│ ----------------------------------------------------------- │
 │                                                             │
 │  Start → init_state()                                       │
 │            ├── Load from file (if exists)                   │
@@ -761,70 +762,69 @@ Az állapot JSON fájlokban tárolódik:
 
 ### 6.3 Crash Recovery
 
-A `processing` flag crash recovery-t tesz lehetővé:
+The `processing` flag allows crash recovery:
 
-- **Induláskor**: `init_state()` minden projektre → `processing=False`
-- **Feldolgozás alatt**: `processing=True` → megakadályozza az újrainduló folyamatokat
-- **Befejezéskor**: `processing=False`
+- **On startup**: `init_state()` for all projects → `processing=False`
+- **During processing**: `processing=True` → prevents re-starting processes
+- **Upon completion**: `processing=False`
 
-Ez biztosítja, hogy egy összeomlás után ne induljon el újra egy részlegesen feldolgozott issue.
+This ensures that a partially processed issue is not re-processed upon restart after a crash.
 
 ---
 
-## 7. API integrációk
+## 7. API Integrations
 
 ### 7.1 GitLab API v4
 
-A rendszer a GitLab REST API v4-et használja.
+The system uses the GitLab REST API v4.
 
-**Használt végpontok:**
+**Endpoints Used:**
 
-| Végpont | Metódus | Használat |
+| Endpoint | Method | Usage |
 |---------|---------|-----------|
-| `/projects/:id/issues` | GET | Issue-k listázása |
-| `/projects/:id/issues/:iid` | PUT | Issue címkék frissítése |
-| `/projects/:id/merge_requests` | GET, POST | MR-ek listázása, létrehozása |
-| `/projects/:id/merge_requests/:iid` | GET | Egy MR lekérése |
-| `/projects/:id/merge_requests/:iid/notes` | GET | Kommentek listázása |
+| `/projects/:id/issues` | GET | List issues |
+| `/projects/:id/issues/:iid` | PUT | Update issue labels |
+| `/projects/:id/merge_requests` | GET, POST | List, create MRs |
+| `/projects/:id/merge_requests/:iid` | GET | Fetch a single MR |
+| `/projects/:id/merge_requests/:iid/notes` | GET | List comments |
 
-**Query paraméterek:**
+**Query Parameters:**
 
 ```python
-# Issue-k lekérése
+# Fetch issues
 get_issues(
     project_id=42,
     state="opened",
     assignee_username="claude"
 )
 
-# MR-ek lekérése
+# Fetch MRs
 get_merge_requests(
     project_id=42,
     state="opened",
     author_username="claude"
 )
 
-# Kommentek lekérése
+# Fetch comments
 get_notes(
     project_id=42,
     mr_iid=1,
-    sort="desc"  # Csökkenő sorrend (legújabb elől)
+    sort="desc"  # Descending order (newest first)
 )
 ```
 
 ### 7.2 AI Tool CLI Integration
 
-Az AI tool hívás a `Processor._run_claude()` metódusban történik:
+The AI tool call takes place in the `Processor._run_claude()` method:
 
 ```python
 def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
-    # Parancs összeállítása mód szerint
+    # Build command based on mode
     if self.ai_tool_mode == "ollama":
         cmd = ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits", prompt]
     elif self.ai_tool_mode == "direct":
         cmd = ["claude", "-p", "--permission-mode", "acceptEdits", prompt]
     elif self.ai_tool_mode == "custom":
-        # Placeholder-ek helyettesítése
         cmd = [part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path))
                for part in shlex.split(self.ai_tool_custom_command)]
     elif self.ai_tool_mode == "opencode":
@@ -833,7 +833,7 @@ def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
         cmd = [part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path))
                for part in shlex.split(self.ai_tool_custom_command)]
 
-    env = {"CLAUDECODE": ""}  # Environment változó beállítás
+    env = {"CLAUDECODE": ""}  # Set environment variable
 
     result = subprocess.run(
         cmd,
@@ -841,20 +841,20 @@ def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
         capture_output=True,
         text=True,
         env=env,
-        timeout=600,  # 10 perces timeout
+        timeout=600,  # 10 minutes timeout
     )
     return result.returncode == 0, result.stdout + result.stderr
 ```
 
-**Fontos paraméterek:**
-- `--permission-mode acceptEdits`: Automatikus szerkesztési engedély
-- `-p`: Non-interactive mód
-- `CLAUDECODE=""`: Környezeti változó konfliktus elkerülése
-- 600 másodperces timeout: Hosszabb futású műveletekhez
+**Important Parameters:**
+- `--permission-mode acceptEdits`: Automatic editing permission
+- `-p`: Non-interactive mode
+- `CLAUDECODE=""`: Prevent environment variable conflicts
+- 600-second timeout: For longer running operations
 
 ### 7.3 Discord Webhook
 
-A Discord webhook egyszerű JSON POST kéréseket használ:
+The Discord webhook uses simple JSON POST requests:
 
 ```python
 response = requests.post(
@@ -863,19 +863,19 @@ response = requests.post(
     headers={"Content-Type": "application/json"},
     timeout=10,
 )
-# Sikeres válasz: HTTP 204 (No Content)
+# Successful response: HTTP 204 (No Content)
 ```
 
 ---
 
-## 8. Hibakezelés és recovery mechanizmusok
+## 8. Error Handling and Recovery Mechanisms
 
-### 8.1 GitLab API hibák
+### 8.1 GitLab API Errors
 
-A `GitLabClient` retry logikát implementál:
+The `GitLabClient` implements retry logic:
 
 ```python
-# Alapértelmezett: 3 újrapróbálkozés, 1 másodperces késleltetés
+# Default: 3 retries, 1 second delay
 client = GitLabClient(
     url="https://git.example.com",
     token="token",
@@ -883,27 +883,27 @@ client = GitLabClient(
     retry_delay=1.0,
 )
 
-# Retry feltételek:
-# - 5xx szerver hibák
-# - Network hibák (ConnectionError, Timeout)
-# NEM retry: 4xx kliens hibák
+# Retry Conditions:
+# - 5xx server errors
+# - Network errors (ConnectionError, Timeout)
+# NO retry on 4xx client errors
 ```
 
-### 8.2 Git műveletek hibái
+### 8.2 Git Operations Errors
 
-A GitOps metódusok boolean visszatérési értéket használnak:
+GitOps methods use boolean return values:
 
 ```python
-# Sikeres művelet
+# Successful operation
 if git.checkout(branch, create=True):
-    # folytatás
+    # proceed
 else:
-    # hibakezelés
+    # error handling
 ```
 
-A hibák logolásra kerülnek és a folyamat biztonságosan megszakad.
+Errors are logged and the process is safely aborted.
 
-### 8.3 Claude CLI hibák
+### 8.3 Claude CLI Errors
 
 ```python
 try:
@@ -915,29 +915,12 @@ except FileNotFoundError:
     return False, "Claude CLI not found"
 ```
 
-**Hibák típusai:**
-- Timeout (600s után)
-- CLI nem található
-- Nem nulla exit kód
+**Types of Errors:**
+- Timeout (after 600s)
+- CLI not found
+- Non-zero exit code
 
-### 8.4 State recovery
-
-Az állapotkezelés biztosítja a konzisztenciát:
-
-```python
-# Induláskor minden projekt processing flag reset
-for project in config.projects:
-    state.init_state(project.project_id)  # processing = False
-
-# Feldolgozás alatt
-state.set_processing(project_id, True)   # Lock
-# ... munka ...
-state.set_processing(project_id, False)  # Unlock
-
-# Crash esetén a következő indulásnál az init_state() reseteli a flaget
-```
-
-### 8.5 Fő ciklus hibakezelés
+### 8.5 Main Loop Error Handling
 
 ```python
 while True:
@@ -951,18 +934,18 @@ while True:
         break
     except Exception as e:
         self.logger.error(f"Error in main loop: {e}")
-        time.sleep(self.config.poll_interval)  # Folytatás alvás után
+        time.sleep(self.config.poll_interval)  # Continue after sleeping
 ```
 
 ---
 
-## 9. Fejlesztői útmutató
+## 9. Developer Guide
 
-### 9.1 Projekt struktúra
+### 9.1 Project Structure
 
 ```
 gitlab-watcher/
-├── src/gitlab_watcher/      # Forráskód
+├── src/gitlab_watcher/      # Source code
 │   ├── __init__.py
 │   ├── __main__.py
 │   ├── cli.py
@@ -973,7 +956,7 @@ gitlab-watcher/
 │   ├── config.py
 │   ├── state.py
 │   └── discord.py
-├── tests/                    # Tesztek
+├── tests/                    # Tests
 │   ├── test_watcher.py
 │   ├── test_processor.py
 │   ├── test_gitlab_client.py
@@ -981,37 +964,37 @@ gitlab-watcher/
 │   ├── test_config.py
 │   ├── test_discord.py
 │   └── test_config_extra.py
-├── docs/                     # Dokumentáció
+├── docs/                     # Documentation
 │   └── plans/
-├── pyproject.toml            # Projekt konfiguráció
-├── README.md                 # Gyors kezdés
-└── CLAUDE.md                 # Project ID és fejlesztői megjegyzések
+├── pyproject.toml            # Project configuration
+├── README.md                 # Quick start
+└── CLAUDE.md                 # Project ID and developer notes
 ```
 
-### 9.2 Tesztelés
+### 9.2 Testing
 
-**Teszt futtatása:**
+**Running Tests:**
 
 ```bash
-# Összes teszt
+# All tests
 pytest
 
-# Verbose kimenet
+# Verbose output
 pytest -v
 
-# Coverage jelentés
+# Coverage report
 pytest --cov=gitlab_watcher --cov-report=term-missing
 
-# Egy teszt fájl
+# A single test file
 pytest tests/test_watcher.py
 
-# Egy teszt
+# A single test
 pytest tests/test_watcher.py::TestWatcherCheckIssues::test_check_issues_with_backlog_issue
 ```
 
-**Teszt struktúra:**
+**Test Structure:**
 
-A tesztek pytest fixture-eket használnak:
+Tests use pytest fixtures:
 
 ```python
 @pytest.fixture
@@ -1034,9 +1017,9 @@ def processor(gitlab_client, discord_webhook, state_manager) -> Processor:
     )
 ```
 
-**Mock-olt tesztek:**
+**Mocked Tests:**
 
-A külső függőségek (GitLab API, Git, Claude CLI) mock-olva vannak:
+External dependencies (GitLab API, Git, Claude CLI) are mocked:
 
 ```python
 @patch("subprocess.run")
@@ -1046,11 +1029,11 @@ def test_run_claude_success(mock_run, processor, project_config):
     assert success is True
 ```
 
-### 9.3 Kód minőség
+### 9.3 Code Quality
 
-**Type hints:**
+**Type Hints:**
 
-A projekt teljes körű type annotation-t használ:
+The project uses comprehensive type annotations following modern standards:
 
 ```python
 def process_issue(
@@ -1063,7 +1046,7 @@ def process_issue(
 
 **Docstrings:**
 
-Minden publikus metódus rendelkezik docstring-gel:
+All public methods have docstrings in Google style:
 
 ```python
 def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
@@ -1080,13 +1063,13 @@ def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
 
 ### 9.4 Dependency Injection
 
-A `Watcher` osztály támogatja a dependency injection-t a tesztelhetőség érdekében:
+The `Watcher` class supports dependency injection for testability:
 
 ```python
-# Normál használat
+# Normal usage
 watcher = Watcher(config_path="config.conf")
 
-# Teszteléshez mock-okkal
+# Testing with mocks
 mock_gitlab = MagicMock(spec=GitLabClient)
 mock_discord = MagicMock(spec=DiscordWebhook)
 mock_processor = MagicMock(spec=Processor)
@@ -1101,68 +1084,68 @@ watcher = Watcher(
 )
 ```
 
-### 9.5 Fejlesztői környezet beállítása
+### 9.5 Setting up the Development Environment
 
 ```bash
-# Repository klónozása
+# Clone the repository
 git clone https://git.gyengus.hu/gyengus/gitlab-watcher.git
 cd gitlab-watcher
 
-# Virtuális környezet létrehozása
+# Create virtual environment
 python -m venv venv
 source venv/bin/activate
 
-# Fejlesztői függőségek telepítése
+# Install development dependencies
 pip install -e ".[dev]"
 
-# Tesztek futtatása
+# Run tests
 pytest
 ```
 
 ---
 
-## 10. Lehetséges fejlesztési irányok
+## 10. Potential Development Directions
 
-### 10.1 Rövid távú fejlesztések
+### 10.1 Short-term Improvements
 
-| Funkció | Leírás | Prioritás |
+| Feature | Description | Priority |
 |---------|--------|-----------|
-| **Logging javítás** | Strukturáltabb logging, naplófájlok rotáció | Magas |
-| **Hiba értesítések** | Részletesebb hibaüzenetek Discord-on | Magas |
-| **Konfiguráció validáció** | Konfigurációs hibák korai detektálása | Közepes |
-| **Retry policy** | Testreszabható újrapróbálkozási stratégia | Közepes |
+| **Logging Improvements** | Structured logging, log file rotation | High |
+| **Error Notifications** | More detailed error messages on Discord | High |
+| **Configuration Validation** | Early detection of configuration errors | Medium |
+| **Retry Policy** | Customizable retry strategy | Medium |
 
-### 10.2 Közepes távú fejlesztések
+### 10.2 Medium-term Improvements
 
-| Funkció | Leírás |
+| Feature | Description |
 |---------|--------|
-| **Több GitLab példány** | Több GitLab szerver monitorozása |
-| **Adatbázis alapú state** | JSON helyett SQLite/PostgreSQL |
-| **Web UI** | Egyszerű web interfész a monitorozáshoz |
-| **API endpoint** | REST API az állapot lekérdezéséhez |
-| **Metrics export** | Prometheus/Grafana kompatibilis metrikák |
+| **Multiple GitLab Instances** | Monitoring multiple GitLab servers |
+| **Database-backed State** | SQLite/PostgreSQL instead of JSON |
+| **Web UI** | Simple web interface for monitoring |
+| **API Endpoint** | REST API for status querying |
+| **Metrics Export** | Prometheus/Grafana compatible metrics |
 
-### 10.3 Hosszú távú fejlesztések
+### 10.3 Long-term Improvements
 
-| Funkció | Leírás |
+| Feature | Description |
 |---------|--------|
-| **Plugin rendszer** | Testreszabható feldolgozó modulok |
-| **Multi-language support** | Több AI modell támogatása (GPT, Gemini, stb.) |
-| **Kubernetes deployment** | Containerizált deployment |
-| **GitLab Webhook integration** | Valós idejű események webhook-on keresztül |
+| **Plugin System** | Customizable processing modules |
+| **Multi-language Support** | Support for multiple AI models (GPT, Gemini, etc.) |
+| **Kubernetes Deployment** | Containerized deployment |
+| **GitLab Webhook Integration** | Real-time events via webhook |
 
-### 10.4 Ismert korlátok
+### 10.4 Known Limitations
 
-1. **Lineáris feldolgozás**: Egyszerre csak egy issue/MR folyamat fut projektekenként
-2. **Nincs prioritás**: Issue-k feldolgozási sorrendje nincs befolyásolva
-3. **Nincs rate limiting**: GitLab API hívások nincs korlátozva
-4. **Single-thread**: Nincs párhuzamos feldolgozás
+1. **Linear Processing**: Only one issue/MR process runs at a time per project
+2. **No Priority**: No prioritization of issue processing order
+3. **No Rate Limiting**: GitLab API calls are not rate-limited
+4. **Single-threaded**: No parallel processing
 
-### 10.5 Javasolt refactor-ok
+### 10.5 Suggested Refactorings
 
 ```python
-# Jelenleg: Watcher közvetlenül hívja a GitLab API-t
-# Javasolt: Service layer bevezetése
+# Currently: Watcher calls GitLab API directly
+# Suggested: Introduce service layer
 
 class IssueService:
     def get_backlog_issues(self, project_id: int) -> list[Issue]:
@@ -1172,52 +1155,52 @@ class MergeRequestService:
     def get_open_mrs(self, project_id: int) -> list[MergeRequest]:
         ...
 
-# Előnyök:
-# - Jobb tesztelhetőség
-# - Könnyebb mock-olás
-# -清晰abb felelősségi körök
+# Benefits:
+# - Better testability
+# - Easier mocking
+# - Clearer separation of concerns
 ```
 
 ---
 
-## Függelék
+## Appendix
 
-### A. Példa konfigurációs fájl
+### A. Example Configuration File
 
 ```bash
-# ~/.claude/config/gitlab_watcher.conf
+# ~/.config/gitlab-watcher/config.conf
 
-# GitLab kapcsolat
+# GitLab connection
 GITLAB_URL="https://git.example.com"
 GITLAB_TOKEN="glpat-xxxxxxxxxxxx"
 
-# Discord értesítések (opcionális)
+# Discord notifications (optional)
 DISCORD_WEBHOOK="https://discord.com/api/webhooks/123456/abcdef"
 
-# Workflow címkék
+# Workflow labels
 LABEL_IN_PROGRESS="In progress"
 LABEL_REVIEW="Review"
 
-# Monitorozott felhasználó
+# Monitored user
 GITLAB_USERNAME="claude"
 
-# Polling intervallum (másodperc)
+# Polling interval (seconds)
 POLL_INTERVAL=30
 
-# AI tool mód: ollama, direct, custom, opencode, opencode-custom
+# AI tool mode: ollama, direct, custom, opencode, opencode-custom
 AI_TOOL_MODE="ollama"
 
-# Egyéni parancs (custom vagy opencode-custom módhoz)
+# Custom command (for custom or opencode-custom mode)
 AI_TOOL_CUSTOM_COMMAND=""
 
-# Projektek
+# Projects
 PROJECT_DIRS=(
   "/home/user/projects/my-project"
   "/home/user/projects/another-project"
 )
 ```
 
-### B. Példa PROJECT.md fájl
+### B. Example PROJECT.md File
 
 ```markdown
 # My Project
@@ -1241,21 +1224,21 @@ make test
 This project uses...
 ```
 
-### C. Environment változók
+### C. Environment Variables
 
-| Változó | Leírás |
+| Variable | Description |
 |---------|--------|
-| `CLAUDECODE` | Claude CLI kompatibilitáshoz (üresre állítva) |
+| `CLAUDECODE` | For Claude CLI compatibility (set to empty) |
 
 ---
 
-## Kapcsolat
+## Contact
 
 - **Repository**: https://git.gyengus.hu/gyengus/gitlab-watcher
 - **Issues**: https://git.gyengus.hu/gyengus/gitlab-watcher/issues
-- **Szerző**: Gyengus
+- **Author**: Gyengus
 
 ---
 
-*Dokumentáció verzió: 1.0.0*
-*Utolsó frissítés: 2026-03-11*
+*Documentation Version: 1.0.0*
+*Last Updated: 2026-03-11*

@@ -159,3 +159,7 @@ class DiscordWebhook:
         if details:
             content += f"\n\n```{details}```"
         return self.send(content)
+
+
+__all__ = ["DiscordWebhook"]
+

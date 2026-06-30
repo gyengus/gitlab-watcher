@@ -33,7 +33,7 @@ from .discord import DiscordWebhook
 from .exceptions import GitLabAPIError
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient, Issue, MergeRequest, Note
-from .logging_utils import SensitiveDataFilter, sanitize_for_log
+from .logging_utils import sanitize_for_log
 from .protocols import GitOperations
 from .state import StateManager
 
@@ -279,8 +279,8 @@ class Processor:
                 # Remove placeholders before validation
                 cleaned_part = re.sub(placeholder_pattern, "", part)
                 # Tightened regex: no spaces in general arguments. 
-                # Allowed characters include alphanumeric, hyphens, underscores, dots, forward slashes, colons, and equals signs.
-                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./+:=]+$", cleaned_part):
+                # Allowed characters include alphanumeric, hyphens, underscores, dots, forward slashes, and colons.
+                if cleaned_part and not re.match(r"^[a-zA-Z0-9\-_./+:]+$", cleaned_part):
                     raise ValueError(f"Invalid character in AI tool command part: {part}. Shell metacharacters and spaces are forbidden in general arguments.")
                 
                 # If it's a flag (starts with -), check against whitelist
@@ -330,6 +330,7 @@ class Processor:
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "LANG": "en_US.UTF-8",
             "TERM": "xterm-256color",
+            "CLAUDECODE": "",
         }
         
         # SEC-01 fix: Pass HOME and other essential environment variables
@@ -337,6 +338,11 @@ class Processor:
         # Only pass HOME, as USERPROFILE, APPDATA, LOCALAPPDATA are generally not needed for Linux daemons.
         if "HOME" in os.environ:
             env["HOME"] = os.environ["HOME"]
+        
+        # Pass build-related environment variables safely without leaking secrets
+        for var in ["JAVA_HOME", "MAVEN_HOME", "M2_HOME", "GRAALVM_HOME"]:
+            if var in os.environ:
+                env[var] = os.environ[var]
         
         self.logger.info(f"Running AI tool ({self.ai_tool_mode}) with timeout {self.ai_tool_timeout}s")
 
@@ -404,22 +410,27 @@ class Processor:
             try:
                 if pgid and hasattr(os, "killpg"):
                     os.killpg(pgid, signal.SIGTERM)
+            except OSError:
+                pass
+
+            try:
                 wait_start = time.time()
                 while time.time() - wait_start < 2:
                     if process.poll() is not None:
                         break
                     time.sleep(0.1)
                 if process.poll() is None:
-                    if pgid and hasattr(os, "killpg"):
-                        os.killpg(pgid, signal.SIGKILL)
-                    else:
-                        process.kill()
+                    try:
+                        if pgid and hasattr(os, "killpg"):
+                            os.killpg(pgid, signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except OSError:
+                        pass
                     try:
                         process.wait(timeout=1)
                     except Exception:
                         pass
-            except ProcessLookupError:
-                pass
             except OSError as e:
                 self.logger.error(f"Error cleaning up process group {pgid}: {e}")
 
@@ -464,12 +475,14 @@ class Processor:
                  raise RuntimeError(f"Security risk: {ai_log_dir} is a symbolic link.")
             
             # Ensure permissions are correct even if it already existed
-            st = ai_log_dir.stat()
-            if os.name != 'nt' and st.st_uid == os.getuid():
-                os.chmod(ai_log_dir, 0o700)
-            elif os.name != 'nt':
-                self.logger.warning(f"AI log directory {ai_log_dir} is not owned by current user!")
-        except OSError as e:
+            try:
+                st = ai_log_dir.stat()
+                if os.name != 'nt' and (st.st_mode & 0o077): # Check if group/other have permissions
+                    self.logger.warning(f"AI log directory {ai_log_dir} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                    os.chmod(ai_log_dir, 0o700)
+            except OSError as e:
+                self.logger.warning(f"Failed to restrict permissions for AI log directory {ai_log_dir}: {e}")
+        except Exception as e:
             self.logger.error(f"Failed to secure AI log directory: {e}")
             # Fallback to system temp if needed, but we prefer the configured state dir
             pass
@@ -756,7 +769,11 @@ class Processor:
                 )
                 return False
 
-            self.logger.info(f"[{project.name}] Creating branch: {branch}")
+            if git.branch_exists(branch):
+                self.logger.info(f"[{project.name}] Switching to existing branch: {branch}")
+            else:
+                self.logger.info(f"[{project.name}] Creating branch: {branch}")
+            
             success, error = git.checkout(branch, create=True)
             if not success:
                 self.logger.error(f"[{project.name}] Could not create branch {branch}: {error}")
@@ -820,13 +837,18 @@ class Processor:
                     return False
 
                 self.logger.info(f"[{project.name}] AI tool completed successfully for issue #{issue.iid}")
-                
                 # Determine whether the LLM actually produced any work
                 post_ai_commit = git.get_current_commit()
                 has_new_commits = post_ai_commit and post_ai_commit != pre_ai_commit
                 has_uncommitted = git.has_uncommitted_changes()
-                llm_made_changes = has_new_commits or has_uncommitted
+                
+                # Check if branch has any commits compared to master.
+                # This is important for retries where work was done in a previous run.
+                has_any_commits = git.has_unpushed_work(self.default_branch)
+                
+                llm_made_changes = has_new_commits or has_uncommitted or has_any_commits
                 is_finished = "/done" in output
+
 
                 if not llm_made_changes:
                     self.logger.info(f"[{project.name}] AI tool made no changes for issue #{issue.iid}")
@@ -1011,7 +1033,7 @@ class Processor:
 
             # Switch to MR branch
             try:
-                self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull/rebase)")
+                self.logger.info(f"[{project.name}] Preparing repository (fetch/checkout/pull)")
                 git.fetch()
                 git.checkout(mr.source_branch)
                 git.pull("origin", mr.source_branch)

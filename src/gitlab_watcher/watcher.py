@@ -41,6 +41,7 @@ class Watcher:
         processor: Optional[Processor] = None,
         state: Optional[StateManager] = None,
         disable_lock: bool = False,
+        work_dir: Optional[str | Path] = None,
     ) -> None:
         """Initialize watcher.
 
@@ -54,6 +55,18 @@ class Watcher:
         """
         self.config = load_config(config_path)
         self.verbose = verbose
+        
+        # Determine work_dir
+        if work_dir:
+            self.work_dir = Path(work_dir)
+        elif state and hasattr(state, "work_dir"):
+            self.work_dir = state.work_dir
+        else:
+            # Use a separate directory for tests to avoid interfering with production logs/state
+            if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ:
+                self.work_dir = Path("/tmp/test-watcher")
+            else:
+                self.work_dir = Path("/tmp/gitlab-watcher")
 
         # Setup logging
         if verbose:
@@ -81,20 +94,21 @@ class Watcher:
 
         try:
             # Ensure the directory exists and has restricted permissions (0700)
-            os.makedirs(log_path.parent, mode=0o700, exist_ok=True)
-            try:
-                st = log_path.parent.stat()
-                # Security: Verify directory is owned by current user
-                if os.name != 'nt' and st.st_uid != os.getuid():
-                     self.logger.warning(f"Log directory {log_path.parent} is not owned by current user! This might be a security risk.")
+            if log_path.parent not in (Path("."), Path("")):
+                os.makedirs(log_path.parent, mode=0o700, exist_ok=True)
+                try:
+                    st = log_path.parent.stat()
+                    # Security: Verify directory is owned by current user
+                    if os.name != 'nt' and st.st_uid != os.getuid():
+                         self.logger.warning(f"Log directory {log_path.parent} is not owned by current user! This might be a security risk.")
 
-                # SEC-02 fix: Always attempt to restrict permissions if they are too broad (readable/writable by others)
-                if os.name != 'nt' and (st.st_mode & 0o077):
-                    self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
-                    os.chmod(log_path.parent, 0o700)
-            except OSError as e:
-                self.logger.error(f"Failed to secure log directory permissions for {log_path.parent}: {e}")
-                pass
+                    # SEC-02 fix: Always attempt to restrict permissions if they are too broad (readable/writable by others)
+                    if os.name != 'nt' and (st.st_mode & 0o077):
+                        self.logger.warning(f"Log directory {log_path.parent} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
+                        os.chmod(log_path.parent, 0o700)
+                except OSError as e:
+                    self.logger.error(f"Failed to secure log directory permissions for {log_path.parent}: {e}")
+                    pass
 
             # Security: Use os.open with O_NOFOLLOW to prevent symlink attacks.
             # SEC-01 fix: Open and hold the file descriptor to avoid TOCTOU bypass.
@@ -116,8 +130,10 @@ class Watcher:
                 raise
             
         except (PermissionError, OSError) as e:
-            # Fallback to work directory in /tmp
-            fallback_dir = Path("/tmp/gitlab-watcher")
+            # Fallback to work directory
+            fallback_dir = self.work_dir
+            if os.name != 'nt' and fallback_dir.is_symlink():
+                 raise RuntimeError(f"Security risk: {fallback_dir} is a symbolic link.")
             os.makedirs(fallback_dir, mode=0o700, exist_ok=True)
             
             try:
@@ -126,9 +142,9 @@ class Watcher:
                     if st.st_uid == os.getuid():
                         os.chmod(fallback_dir, 0o700)
                     else:
-                        self.logger.warning(f"Fallback log directory {fallback_dir} has insecure permissions but is not owned by current user. Cannot fix.")
-            except OSError:
-                pass
+                        self.logger.warning(f"Fallback log directory {fallback_dir} has insecure permissions ({oct(st.st_mode)}) and is not owned by current user. Cannot restrict permissions.")
+            except OSError as e:
+                self.logger.warning(f"Failed to restrict permissions for fallback log directory {fallback_dir}: {e}")
 
             fallback_path = fallback_dir / "watcher.log"
             try:
@@ -174,9 +190,10 @@ class Watcher:
         # but for now let's keep it to our logger to fix the memory leak.
         # If the user really wants root coverage, they can add it once in cli.py.
 
-        # Create work directory (for state files)
-        self.work_dir = Path("/tmp/gitlab-watcher")
+        # Ensure work directory exists and has restricted permissions (0700)
         try:
+            if os.name != 'nt' and self.work_dir.is_symlink():
+                raise RuntimeError(f"Security risk: {self.work_dir} is a symbolic link and will not be used.")
             if not self.work_dir.exists():
                 # Security: Atomic creation with restricted permissions (0700)
                 os.makedirs(self.work_dir, mode=0o700, exist_ok=True)
@@ -194,7 +211,7 @@ class Watcher:
                 os.chmod(self.work_dir, 0o700)
             
             # Always attempt to restrict permissions if they are too broad
-            if os.name != 'nt' and (st.st_mode & 0o022):
+            if os.name != 'nt' and (st.st_mode & 0o077):
                 self.logger.warning(f"Work directory {self.work_dir} has insecure permissions ({oct(st.st_mode)}). Attempting to restrict to 0700.")
                 os.chmod(self.work_dir, 0o700)
         except (OSError, PermissionError) as e:
@@ -386,7 +403,8 @@ class Watcher:
             def pinned_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
                 h = host.lower() if host else ""
                 if h in socket._pinned_hosts:
-                    return socket._original_getaddrinfo(socket._pinned_hosts[h], port, family, type, proto, flags)
+                    res = socket._original_getaddrinfo(socket._pinned_hosts[h], port, 0, type, proto, flags)
+                    return [r for r in res if family == 0 or r[0] == family]
                 return socket._original_getaddrinfo(host, port, family, type, proto, flags)
 
             socket.getaddrinfo = pinned_getaddrinfo
@@ -430,14 +448,6 @@ class Watcher:
         """Identify issues that are either in backlog or stuck 'In progress'."""
         project_name = project.name
 
-        # Identify which MRs are actually relevant to the issues we're looking at
-        # (branch name matches "{issue_iid}-*")
-        issue_iids = {issue.iid for issue in issues}
-        relevant_mrs = [
-            mr for mr in open_mrs 
-            if any(mr.source_branch.startswith(f"{iid}-") for iid in issue_iids)
-        ]
-
         # MR-01 fix: Prioritize already "In progress" issues to avoid concurrent processing
         # on the same repository. If any issue is already being worked on, only consider
         # those for potential retry; do not pick up new backlog issues.
@@ -461,8 +471,15 @@ class Watcher:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but no MR found)", issue.iid)
                     return issue, True
                 
-                # Check if MR has commits
                 mr = matching_mrs[0]
+                git = GitOps(project.path)
+                
+                # Prioritize checking for unpushed local commits first
+                if git.has_unpushed_commits(mr.source_branch):
+                    self._log_info(project.project_id, "Retrying stuck issue #%s (In progress with unpushed commits on branch %s)", issue.iid, mr.source_branch)
+                    return issue, True
+
+                # Only fetch commits if no unpushed local work is detected
                 try:
                     mr_commits = self.gitlab.get_merge_request_commits(project.project_id, mr.iid)
                 except Exception as e:
@@ -472,21 +489,18 @@ class Watcher:
                 if not mr_commits:
                     self._log_info(project.project_id, "Retrying stuck issue #%s (In progress but MR has no commits)", issue.iid)
                     return issue, True
-                
-                # If MR has commits but we are still "In progress", it might be because 
-                # of unpushed local work or failed label update.
-                mr = matching_mrs[0]
-                git = GitOps(project.path)
-                if git.has_unpushed_commits(mr.source_branch):
-                    self._log_info(project.project_id, "Retrying stuck issue #%s (In progress with unpushed commits on branch %s)", issue.iid, mr.source_branch)
-                    return issue, True
 
                 continue
         return None
 
     def check_issues(self, project: ProjectConfig) -> None:
-
         """Check for new issues to process."""
+        if not self.gitlab_username:
+            if not getattr(self, "_warned_username", False):
+                self._log_warning(project.project_id, "Skipping issue check: gitlab_username is not set.")
+                self._warned_username = True
+            return
+
         if self.state.is_processing(project.project_id):
             return
 
@@ -526,6 +540,7 @@ class Watcher:
             if iid in open_iids:
                 continue
 
+            self.gitlab.invalidate_cache(f"mr_{project.project_id}_{iid}")
             mr = self.gitlab.get_merge_request(project.project_id, iid)
 
             if mr is None:
@@ -539,21 +554,25 @@ class Watcher:
 
                 mr_data = state.tracked_mrs.get(iid_str, {})
                 branch = mr_data.get("branch") or ""
-                created_by_watcher = mr_data.get("created_by_watcher", False)
 
-                if not created_by_watcher:
-                    self._log_info(project.project_id, "MR !%s merged/closed but not created by watcher — skipping cleanup", iid)
+                # Cleanup if we have a known branch for this MR
+                if not branch:
+                    self._log_info(project.project_id, "MR !%s merged/closed but no branch info found — skipping cleanup", iid)
                     self.state.remove_tracked_mr(project.project_id, iid)
-                    return True
+                    continue
 
-                self.processor.cleanup_after_merge(
-                    project=project,
-                    branch=branch,
-                    mr_title=mr.title,
-                    mr_url=mr.web_url,
-                    mr_iid=iid,
-                )
-                self.state.remove_tracked_mr(project.project_id, iid)
+                try:
+                    self.processor.cleanup_after_merge(
+                        project=project,
+                        branch=branch,
+                        mr_title=mr.title,
+                        mr_url=mr.web_url,
+                        mr_iid=iid,
+                    )
+                except Exception as e:
+                    self._log_error(project.project_id, f"Cleanup failed: {e}")
+                finally:
+                    self.state.remove_tracked_mr(project.project_id, iid)
                 return True
         return False
 
@@ -563,34 +582,51 @@ class Watcher:
         notes = sorted(notes, key=lambda n: n.id)
         
         state = self.state.load(project.project_id)
-        last_processed_id = state.last_processed_note_id or 0
+        
+        # Track last_processed_note_id per-MR to avoid comments on one MR skipping comments on another
+        mr_id_str = str(mr.iid)
+        mr_state = state.tracked_mrs.get(mr_id_str, {}) if hasattr(state, "tracked_mrs") and hasattr(state.tracked_mrs, "get") else {}
+        last_processed_id = mr_state.get("last_processed_note_id") if isinstance(mr_state, dict) else None
+        if last_processed_id is None:
+            last_processed_id = 0
 
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:
                 continue
 
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))
+            SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
+            FAILURE_EMOJIS = ["x", "no_entry"]
+            STOP_EMOJIS = SUCCESS_EMOJIS + FAILURE_EMOJIS
+
+            # Fetch emojis once if needed
+            note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id) if is_retry_request or note.id > last_processed_id else []
+
+            if is_retry_request:
+                # If a success or failure emoji is already present on this note, do not retry it.
+                # This prevents infinite loops where a "retry" comment is processed,
+                # gets a success or failure emoji, and is repeatedly processed in subsequent cycles.
+                if any(e in note_emojis for e in STOP_EMOJIS):
+                    is_retry_request = False
 
             # Skip already handled via persistent state
             if note.id <= last_processed_id and not is_retry_request:
                 continue
 
-            SUCCESS_EMOJIS = ["white_check_mark", "heavy_check_mark", "check", "ballot_box_with_check"]
-            SKIP_EMOJIS = ["eyes", "x", "no_entry"] + SUCCESS_EMOJIS
+            # Remove "eyes" from skip list so we can recover interrupted processes
+            SKIP_EMOJIS = ["x", "no_entry"] + SUCCESS_EMOJIS
             
             # Use in-memory cache first
             is_skipped = note.id in self._processed_notes
             
             if not is_skipped:
-                # Fetch award emojis for this specific note
-                note_emojis = self.gitlab.get_note_emojis(project.project_id, mr.iid, note.id)
                 has_emojis = any(e in note_emojis for e in SKIP_EMOJIS)
                 is_skipped = has_emojis
             
             if is_skipped and not is_retry_request:
                 # If it's effectively skipped but we haven't updated the persistent state, do it now
                 if note.id > last_processed_id:
-                    self.state.update_last_processed_note(project.project_id, note.id)
+                    self.state.update_mr_last_processed_note(project.project_id, mr.iid, note.id)
                 continue
             
             if is_retry_request and is_skipped:
@@ -610,7 +646,7 @@ class Watcher:
                     project.project_id, mr.iid, note.id, "white_check_mark", 
                     discussion_id=note.discussion_id
                 )
-                self.state.update_last_processed_note(project.project_id, note.id)
+                self.state.update_mr_last_processed_note(project.project_id, mr.iid, note.id)
                 continue
 
 
@@ -619,12 +655,18 @@ class Watcher:
             self._processed_notes.add(note.id)
             self.processor.process_comment(project, mr, note.id, note.body, discussion_id=note.discussion_id)
             self.state.update_mr_state(project.project_id, mr.iid, mr.state, mr.source_branch)
-            self.state.update_last_processed_note(project.project_id, note.id)
+            self.state.update_mr_last_processed_note(project.project_id, mr.iid, note.id)
             return True
         return False
 
     def check_mr_status(self, project: ProjectConfig) -> None:
         """Check MR status for comments and merge cleanup."""
+        if not self.gitlab_username:
+            if not getattr(self, "_warned_username", False):
+                self._log_warning(project.project_id, "Skipping MR check: gitlab_username is not set.")
+                self._warned_username = True
+            return
+
         if self.state.is_processing(project.project_id):
             self._log_debug(project.project_id, "Project is currently processing, skipping MR check.")
             return
@@ -698,6 +740,13 @@ class Watcher:
 
     def stop(self) -> None:
         """Stop the watcher and cleanup resources."""
+        # Restore original getaddrinfo to prevent global test pollution
+        import socket
+        if hasattr(socket, "_pinned_hosts") and hasattr(socket, "_original_getaddrinfo"):
+            socket._pinned_hosts.clear()
+            socket.getaddrinfo = socket._original_getaddrinfo
+            del socket._original_getaddrinfo, socket._pinned_hosts
+
         # Release lock file
         if self._lock_file and fcntl:
             try:

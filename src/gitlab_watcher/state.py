@@ -14,10 +14,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_SAVE_DELAY = 1.0
 
 
-class TrackedMRInfo(TypedDict):
+class TrackedMRInfo(TypedDict, total=False):
     """Information about a tracked merge request."""
     branch: str
     created_by_watcher: bool
+    last_processed_note_id: int
 
 
 @dataclass
@@ -96,6 +97,7 @@ class StateManager:
                 if last_iid and str(last_iid) not in data["tracked_mrs"]:
                     data["tracked_mrs"][str(last_iid)] = {
                         "branch": data.get("last_branch"),
+                        "last_processed_note_id": data.get("last_processed_note_id", 0),
                     }
                 
                 # Filter data to only include valid ProjectState fields
@@ -155,11 +157,13 @@ class StateManager:
             
             # Capture what we are about to save
             to_save = list(self._dirty)
+            saved_successfully = []
             for project_id in to_save:
-                self._save_sync(project_id)
+                if self._save_sync(project_id):
+                    saved_successfully.append(project_id)
             
             # Remove only what we saved
-            self._dirty.difference_update(to_save)
+            self._dirty.difference_update(saved_successfully)
             
             # CONC-01 fix: Only reset the timer reference if no more dirty items remain
             # AND it's still the same timer that started this flush. 
@@ -167,11 +171,11 @@ class StateManager:
             if not self._dirty and self._save_timer is threading.current_thread():
                 self._save_timer = None
 
-    def _save_sync(self, project_id: int) -> None:
+    def _save_sync(self, project_id: int) -> bool:
         """Synchronous save to file with atomic replacement and restricted permissions."""
         with self._lock:
             if project_id not in self._states:
-                return
+                return False
             state_file = self._state_file(project_id)
             temp_file = state_file.with_suffix(".tmp")
             try:
@@ -199,18 +203,14 @@ class StateManager:
                     flags, 
                     0o600
                 )
-                try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
                     if hasattr(os, "fchmod"):
                         os.fchmod(fd, 0o600)
-                except Exception:
-                    os.close(fd)
-                    raise
-
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
                     json.dump(state_dict, f, indent=2)
                 
                 # Rename atomically
                 temp_file.replace(state_file)
+                return True
             except Exception as e:
                 logger.error(f"Failed to save state for project {project_id}: {e}")
                 if temp_file.exists():
@@ -218,6 +218,7 @@ class StateManager:
                         temp_file.unlink()
                     except Exception:
                         pass
+                return False
 
     def load(self, project_id: int) -> ProjectState:
         """Load state for a project, returning cached state if available.
@@ -264,10 +265,13 @@ class StateManager:
         with self._lock:
             if self._save_timer is not None:
                 self._save_timer.cancel()
+            saved_successfully = []
             for project_id in self._dirty:
-                self._save_sync(project_id)
-            self._dirty.clear()
-            self._save_timer = None
+                if self._save_sync(project_id):
+                    saved_successfully.append(project_id)
+            self._dirty.difference_update(saved_successfully)
+            if not self._dirty:
+                self._save_timer = None
 
     def get(self, project_id: int, key: str) -> Optional[str | int | bool]:
         """Get a state value."""
@@ -333,6 +337,22 @@ class StateManager:
             current = self.get(project_id, "last_processed_note_id")
             if current is None or not isinstance(current, int) or note_id > current:
                 self.set(project_id, "last_processed_note_id", note_id)
+                self.force_save(project_id)
+
+    def update_mr_last_processed_note(self, project_id: int, mr_iid: int, note_id: int) -> None:
+        """Update the last processed note ID for a specific MR and force an immediate save."""
+        with self._lock:
+            state = self.load(project_id)
+            mr_id_str = str(mr_iid)
+            if mr_id_str not in state.tracked_mrs:
+                state.tracked_mrs[mr_id_str] = {
+                    "branch": "",
+                    "created_by_watcher": False,
+                }
+            mr_state = state.tracked_mrs[mr_id_str]
+            current = mr_state.get("last_processed_note_id")
+            if current is None or not isinstance(current, int) or note_id > current:
+                mr_state["last_processed_note_id"] = note_id
                 self.force_save(project_id)
 
     def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str, created_by_watcher: bool = False) -> None:
