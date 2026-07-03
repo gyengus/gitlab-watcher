@@ -59,4 +59,4 @@ Executed the full test suite to guarantee coverage and no regressions:
 ```bash
 pytest --cov=gitlab_watcher
 ```
-All 281 tests passed with core modules maintaining high lefedettség (coverage).
+All 281 tests passed with core modules maintaining high coverage.
