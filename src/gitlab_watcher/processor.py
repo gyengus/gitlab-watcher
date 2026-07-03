@@ -967,12 +967,6 @@ class Processor:
                         return False
 
                 if mr:
-                    # Sync labels on MR to match issue
-                    try:
-                        self.gitlab.update_merge_request_labels(project.project_id, mr.iid, issue.labels)
-                    except Exception as label_err:
-                        self.logger.warning(f"[{project.name}] Failed to update MR labels: {label_err}")
-
                     if llm_made_changes:
                         # Track the MR we just created so the watcher knows it's ours
                         self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True, agent=agent_name)

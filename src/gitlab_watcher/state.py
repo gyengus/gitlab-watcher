@@ -371,8 +371,8 @@ class StateManager:
                 state.tracked_mrs[mr_id_str] = mr_info
                 self.force_save(project_id)
             else:
-                # Update agent if provided
-                if agent:
+                # Update agent if provided and different
+                if agent and state.tracked_mrs[mr_id_str].get("agent") != agent:
                     state.tracked_mrs[mr_id_str]["agent"] = agent
                     self.force_save(project_id)
             
