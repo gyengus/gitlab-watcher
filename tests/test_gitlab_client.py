@@ -438,3 +438,43 @@ class TestGitLabClientConfiguration:
         assert mock_request.call_args_list[2][0][0] == "DELETE"
         assert "/103" in mock_request.call_args_list[2][0][1]
 
+    @patch("requests.Session.request")
+    def test_update_merge_request_labels(self, mock_request: Mock, client: GitLabClient) -> None:
+        """Test updating merge request labels."""
+        mock_request.return_value = Mock(status_code=200)
+
+        result = client.update_merge_request_labels(42, 1, ["bug", "agent:Senior Software Engineer"])
+
+        assert result is True
+        mock_request.assert_called_once()
+        assert mock_request.call_args[0][0] == "PUT"
+        assert "labels" in mock_request.call_args[1]["data"]
+        assert mock_request.call_args[1]["data"]["labels"] == "bug,agent:Senior Software Engineer"
+
+    @patch("requests.Session.request")
+    def test_create_merge_request_with_labels(self, mock_request: Mock, client: GitLabClient) -> None:
+        """Test creating merge request with labels."""
+        mock_request.return_value = Mock(
+            status_code=200,
+            json=lambda: {
+                "iid": 5,
+                "title": "Fix bug",
+                "web_url": "url",
+                "source_branch": "feature",
+                "state": "opened",
+                "labels": ["bug", "agent:Senior Software Engineer"]
+            }
+        )
+
+        mr = client.create_merge_request(
+            42, "feature", "master", "Fix bug", "description", ["bug", "agent:Senior Software Engineer"]
+        )
+
+        assert mr is not None
+        assert mr.iid == 5
+        assert mr.labels == ["bug", "agent:Senior Software Engineer"]
+        mock_request.assert_called_once()
+        assert mock_request.call_args[0][0] == "POST"
+        assert mock_request.call_args[1]["data"]["labels"] == "bug,agent:Senior Software Engineer"
+
+

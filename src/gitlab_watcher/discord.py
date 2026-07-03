@@ -1,6 +1,7 @@
 """Discord webhook notifications."""
 
 from dataclasses import dataclass
+from typing import Optional
 
 import requests
 
@@ -48,6 +49,7 @@ class DiscordWebhook:
         issue_url: str,
         branch: str,
         is_retry: bool = False,
+        agent: Optional[str] = None,
     ) -> bool:
         """Notify that issue processing has started.
         
@@ -57,17 +59,21 @@ class DiscordWebhook:
             issue_url: URL of the issue
             branch: Branch name
             is_retry: True if this is a retry after a failed MR creation
+            agent: Name of the active OpenCode agent
         """
+        agent_line = f"Agent: `{agent}`\n" if agent else ""
         if is_retry:
             return self.send(
                 f"🔄 **Retrying Issue** [{project_name}]\n"
                 f"[{issue_title}]({issue_url})\n\n"
+                f"{agent_line}"
                 f"Branch: `{branch}` (continuing after failed MR creation)"
             )
         else:
             return self.send(
                 f"🚀 **Starting Issue** [{project_name}]\n"
                 f"[{issue_title}]({issue_url})\n\n"
+                f"{agent_line}"
                 f"Branch: `{branch}`"
             )
 

@@ -563,6 +563,7 @@ AI_TOOL_CUSTOM_COMMAND="my-ai-tool --prompt {prompt} --workdir {cwd}"
 Defining a custom command for any AI tool. Available placeholders:
 - `{prompt}` - The prompt text (required)
 - `{cwd}` - The path of the working directory (optional)
+- `{agent}` - The resolved agent name (optional, parsed from labels)
 
 **Important:** The working directory is automatically set before running the command.
 Only use the `{cwd}` placeholder if the AI tool requires an explicit directory parameter.
@@ -577,10 +578,21 @@ AI_TOOL_CUSTOM_COMMAND="my-claude --prompt {prompt}"
 AI_TOOL_MODE="custom"
 AI_TOOL_CUSTOM_COMMAND="my-opencode --task {prompt} --workspace {cwd}"
 
-# Any other AI tool - only prompt required
-AI_TOOL_MODE="custom"
-AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
+# OpenCode custom command with agent support
+AI_TOOL_MODE="opencode-custom"
+AI_TOOL_CUSTOM_COMMAND="opencode --agent {agent} run {prompt}"
 ```
+
+#### Selecting OpenCode Agents via Labels
+
+You can dynamically select which OpenCode agent should process a specific issue or merge request by using GitLab labels:
+
+1. **Issue Labeling**: Assign a label in the format `agent:[Agent Name]` (or `agent-[Agent Name]`, e.g., `agent:Senior frontend developer`) to the issue.
+2. **Mutual Exclusion**: If multiple agent labels are assigned, the watcher automatically retains the first one and removes the other redundant ones from the issue to ensure clarity.
+3. **MR Label Inheritance**: When the MR is created for the issue, it automatically inherits the selected agent label.
+4. **Dynamic MR Comment Handling**: You can change the agent on the MR at any time (e.g. from `agent:Senior frontend developer` to `agent:Senior software testing expert`). The watcher will always use the agent currently labeled on the MR when processing new reviewer comments.
+5. **Custom Commands**: You can use the `{agent}` placeholder in your custom command template. If no agent label is present on the task, the placeholder evaluates to an empty string `""` and the watcher lets OpenCode default to its own configured agent.
+6. **Discord Notifications**: The name of the selected agent is displayed in the Discord start notifications and comment processing messages.
 
 ---
 

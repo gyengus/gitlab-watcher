@@ -51,6 +51,7 @@ class MergeRequest:
     source_branch: str
     state: str
     author: str = ""
+    labels: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -264,6 +265,7 @@ class GitLabClient:
                 source_branch=item.get("source_branch", ""),
                 state=item.get("state", ""),
                 author=(item.get("author") or {}).get("username", ""),
+                labels=item.get("labels", []),
             )
             for item in data
         ]
@@ -291,6 +293,7 @@ class GitLabClient:
                 source_branch=cached.get("source_branch", ""),
                 state=cached.get("state", ""),
                 author=(cached.get("author") or {}).get("username", ""),
+                labels=cached.get("labels", []),
             )
 
         try:
@@ -313,6 +316,7 @@ class GitLabClient:
             source_branch=data.get("source_branch", ""),
             state=data.get("state", ""),
             author=(data.get("author") or {}).get("username", ""),
+            labels=data.get("labels", []),
         )
 
     def get_notes(
@@ -373,19 +377,23 @@ class GitLabClient:
         target_branch: str,
         title: str,
         description: str,
+        labels: Optional[list[str]] = None,
     ) -> Optional[MergeRequest]:
         """Create a new merge request."""
         endpoint = "/merge_requests"
+        post_data = {
+            "source_branch": source_branch,
+            "target_branch": target_branch,
+            "title": title,
+            "description": description,
+        }
+        if labels:
+            post_data["labels"] = ",".join(labels)
 
         response = self._request(
             "POST",
             self._api_url(project_id, endpoint),
-            data={
-                "source_branch": source_branch,
-                "target_branch": target_branch,
-                "title": title,
-                "description": description,
-            },
+            data=post_data,
         )
 
         data = response.json()
@@ -399,7 +407,30 @@ class GitLabClient:
             web_url=data.get("web_url", ""),
             source_branch=data.get("source_branch", ""),
             state=data.get("state", ""),
+            author=(data.get("author") or {}).get("username", ""),
+            labels=data.get("labels", []),
         )
+
+    def update_merge_request_labels(
+        self,
+        project_id: int,
+        mr_iid: int,
+        labels: list[str],
+    ) -> bool:
+        """Update labels on a merge request."""
+        labels_str = ",".join(labels)
+        endpoint = f"/merge_requests/{mr_iid}"
+
+        response = self._request(
+            "PUT",
+            self._api_url(project_id, endpoint),
+            data={"labels": labels_str},
+        )
+
+        # Invalidate MR cache after modification
+        self.invalidate_cache(f"mr_{project_id}_{mr_iid}")
+
+        return response.status_code == 200
 
     def invalidate_cache(self, key: Optional[str] = None) -> None:
         """Invalidate cache entries.
