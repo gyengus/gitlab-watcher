@@ -1455,6 +1455,34 @@ class TestProcessorAgentSelection:
             cmd = processor._build_ai_command("Prompt text", project_config.path, agent=None)
             assert cmd == ["opencode", "--agent", "", "run", "Prompt text"]
 
+    def test_build_ai_command_with_invalid_agent(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test that building AI command with invalid agent name raises ValueError."""
+        processor.ai_tool_mode = "opencode"
+        
+        # Valid agent names (should not raise ValueError)
+        valid_agents = ["Android developer", "Senior UX/UI designer", "ESP32 Specialist", "Researcher", "agent:Researcher"]
+        for agent in valid_agents:
+            cmd = processor._build_ai_command("Prompt text", project_config.path, agent=agent)
+            assert "--agent" in cmd
+            assert cmd[cmd.index("--agent") + 1] == agent
+
+        # Invalid agent names (should raise ValueError)
+        invalid_agents = [
+            "-some-flag",
+            "--some-flag",
+            " -some-flag",
+            "agent;injection",
+            "agent|injection",
+            "agent\ninjection",
+            "agent&injection",
+            "agent>injection",
+            "agent<injection",
+            "agent$injection",
+        ]
+        for agent in invalid_agents:
+            with pytest.raises(ValueError, match="Invalid agent name"):
+                processor._build_ai_command("Prompt text", project_config.path, agent=agent)
+
     @patch("subprocess.Popen")
     @patch.object(Processor, "_run_ai_tool")
     def test_process_issue_with_agent_label(

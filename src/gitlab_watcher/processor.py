@@ -264,6 +264,11 @@ class Processor:
 
     def _build_ai_command(self, prompt: str, repo_path: Path, model_override: Optional[str] = None, agent: Optional[str] = None) -> list[str]:
         """Build the command list for the AI tool."""
+        if agent:
+            trimmed_agent = agent.strip()
+            if trimmed_agent.startswith("-") or not re.match(r"^[a-zA-Z0-9 \-_.:/]+$", agent):
+                raise ValueError(f"Invalid agent name: {agent}")
+
         if self.ai_tool_mode == "ollama":
             model_to_use = model_override if model_override else "claude"
             cmd = ["ollama", "launch", model_to_use, "--", "-p", "--permission-mode", "acceptEdits", prompt]
