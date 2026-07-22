@@ -267,6 +267,17 @@ AI_TOOL_MODE="ollama"  # or "direct", "opencode", "custom"
 AI_TOOL_TIMEOUT=3600   # default is 1 hour
 ```
 
+### Selecting OpenCode Agents via Labels
+
+You can dynamically select which OpenCode agent should process a specific issue or merge request by using GitLab labels:
+
+1. **Issue Labeling**: Assign a label in the format `agent:[Agent Name]` (or `agent-[Agent Name]`, e.g., `agent:Senior frontend developer`) to the issue.
+2. **Mutual Exclusion**: If multiple agent labels are assigned, the watcher automatically retains the first one and removes the other redundant ones from the issue to ensure clarity.
+3. **MR Label Inheritance**: When the watcher creates a Merge Request for the issue, it copies the selected agent label to the MR.
+4. **Dynamic MR Comment Handling**: You can change the agent on the MR at any time (e.g. from `agent:Senior frontend developer` to `agent:Senior software testing expert`). The watcher will always use the agent currently labeled on the MR when processing new reviewer comments.
+5. **Custom Commands**: You can use the `{agent}` placeholder in your custom command template (e.g., `AI_TOOL_CUSTOM_COMMAND="opencode --agent {agent} run {prompt}"`). If no agent label is present on the task, the placeholder evaluates to an empty string `""` and the watcher lets OpenCode default to its own configured agent.
+6. **Discord Notifications**: The name of the selected agent is displayed in the Discord start notifications and comment processing messages.
+
 ### Timeout & Error Diagnostics
 
 If an AI tool exceeds the configured `AI_TOOL_TIMEOUT` or fails with an error, the watcher will attempt to capture and display the partial output (`stdout`/`stderr`) generated before termination. These details are sent to Discord in a formatted code block and logged locally for troubleshooting.

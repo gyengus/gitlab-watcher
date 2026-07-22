@@ -130,9 +130,10 @@ The `Processor` class is responsible for the actual processing of issues and MR 
 
 | Method | Description |
 |---------|--------|
-| `_run_claude()` | Execute Claude CLI with a given prompt |
-| `process_issue()` | Process issue: create branch, run Claude, create MR |
-| `process_comment()` | Process MR comment: check out branch, run Claude, push |
+| `_run_ai_tool_with_failover()` | Run AI tool CLI with failover mechanism |
+| `_run_ai_tool()` | Execute AI tool CLI with a given prompt |
+| `process_issue()` | Process issue: create branch, run AI tool, create MR |
+| `process_comment()` | Process MR comment: check out branch, run AI tool, push |
 | `cleanup_after_merge()` | Clean up after merge: update master, delete branch |
 
 **AI Tool Modes:**
@@ -563,6 +564,7 @@ AI_TOOL_CUSTOM_COMMAND="my-ai-tool --prompt {prompt} --workdir {cwd}"
 Defining a custom command for any AI tool. Available placeholders:
 - `{prompt}` - The prompt text (required)
 - `{cwd}` - The path of the working directory (optional)
+- `{agent}` - The resolved agent name (optional, parsed from labels)
 
 **Important:** The working directory is automatically set before running the command.
 Only use the `{cwd}` placeholder if the AI tool requires an explicit directory parameter.
@@ -577,10 +579,21 @@ AI_TOOL_CUSTOM_COMMAND="my-claude --prompt {prompt}"
 AI_TOOL_MODE="custom"
 AI_TOOL_CUSTOM_COMMAND="my-opencode --task {prompt} --workspace {cwd}"
 
-# Any other AI tool - only prompt required
-AI_TOOL_MODE="custom"
-AI_TOOL_CUSTOM_COMMAND="cursor-agent --message {prompt}"
+# OpenCode custom command with agent support
+AI_TOOL_MODE="opencode-custom"
+AI_TOOL_CUSTOM_COMMAND="opencode --agent {agent} run {prompt}"
 ```
+
+#### Selecting OpenCode Agents via Labels
+
+You can dynamically select which OpenCode agent should process a specific issue or merge request by using GitLab labels:
+
+1. **Issue Labeling**: Assign a label in the format `agent:[Agent Name]` (or `agent-[Agent Name]`, e.g., `agent:Senior frontend developer`) to the issue.
+2. **Mutual Exclusion**: If multiple agent labels are assigned, the watcher automatically retains the first one and removes the other redundant ones from the issue to ensure clarity.
+3. **MR Label Inheritance**: When the MR is created for the issue, it automatically inherits the selected agent label.
+4. **Dynamic MR Comment Handling**: You can change the agent on the MR at any time (e.g. from `agent:Senior frontend developer` to `agent:Senior software testing expert`). The watcher will always use the agent currently labeled on the MR when processing new reviewer comments.
+5. **Custom Commands**: You can use the `{agent}` placeholder in your custom command template. If no agent label is present on the task, the placeholder evaluates to an empty string `""` and the watcher lets OpenCode default to its own configured agent.
+6. **Discord Notifications**: The name of the selected agent is displayed in the Discord start notifications and comment processing messages.
 
 ---
 
@@ -815,42 +828,50 @@ get_notes(
 
 ### 7.2 AI Tool CLI Integration
 
-The AI tool call takes place in the `Processor._run_claude()` method:
+The AI tool execution is managed by `Processor._run_ai_tool_with_failover()`, which calls the underlying `Processor._run_ai_tool()` method. 
 
 ```python
-def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
-    # Build command based on mode
-    if self.ai_tool_mode == "ollama":
-        cmd = ["ollama", "launch", "claude", "--", "-p", "--permission-mode", "acceptEdits", prompt]
-    elif self.ai_tool_mode == "direct":
-        cmd = ["claude", "-p", "--permission-mode", "acceptEdits", prompt]
-    elif self.ai_tool_mode == "custom":
-        cmd = [part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path))
-               for part in shlex.split(self.ai_tool_custom_command)]
-    elif self.ai_tool_mode == "opencode":
-        cmd = ["opencode", prompt]
-    elif self.ai_tool_mode == "opencode-custom":
-        cmd = [part.replace("{prompt}", prompt).replace("{cwd}", str(repo_path))
-               for part in shlex.split(self.ai_tool_custom_command)]
+def _run_ai_tool(self, prompt: str, repo_path: Path, model_override: Optional[str] = None, agent: Optional[str] = None) -> tuple[bool, str]:
+    # Sanitization and length check
+    safe_prompt = self._sanitize_prompt(prompt)
+    if len(safe_prompt) > MAX_TOTAL_PROMPT_LENGTH:
+        safe_prompt = safe_prompt[:MAX_TOTAL_PROMPT_LENGTH - len(truncation_message)] + truncation_message
 
-    env = {"CLAUDECODE": ""}  # Set environment variable
-
-    result = subprocess.run(
-        cmd,
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=600,  # 10 minutes timeout
-    )
-    return result.returncode == 0, result.stdout + result.stderr
+    # Build command based on mode (ollama, direct, opencode, custom, opencode-custom)
+    cmd = self._build_ai_command(safe_prompt, repo_path, model_override, agent)
+    
+    # Run subprocess with timeout (default: 1 hour) and silence timeout (30 minutes)
+    returncode, full_output, timed_out, silence_timed_out = self._execute_ai_subprocess(cmd, repo_path)
+    
+    # Analyze output for success and error patterns (including failover triggers)
+    return self._analyze_ai_output(returncode, full_output, timed_out, silence_timed_out, cmd)
 ```
 
-**Important Parameters:**
-- `--permission-mode acceptEdits`: Automatic editing permission
-- `-p`: Non-interactive mode
-- `CLAUDECODE=""`: Prevent environment variable conflicts
-- 600-second timeout: For longer running operations
+**Important Parameters & Safeguards:**
+- **Timeout Management**: 1-hour overall timeout and 30-minute silence timeout to prevent hung processes.
+- **Environment Variables**: Propagates system environment variables (like `JAVA_HOME`, `MAVEN_HOME`) so project-specific builders can compile/test, while setting `CLAUDECODE=""` to prevent conflicts.
+- **Prompt Sanitization**: Validates against forbidden injection patterns and enforces a maximum prompt length.
+- **Process Cleanup**: Uses process groups (`os.getpgid`, `os.killpg`) to ensure all background subprocesses spawned by the AI tool are cleaned up on timeout or termination.
+
+#### 7.2.1 Automatic Failover Model Support
+
+When the primary model/service encounters specific errors (such as 524 HTTP errors, rate limit errors, or general API call errors), the watcher can automatically retry the request using a backup model if `AI_TOOL_FAILOVER_MODEL` is configured.
+
+```python
+def _run_ai_tool_with_failover(self, prompt: str, repo_path: Path, agent: Optional[str] = None) -> tuple[bool, str]:
+    # 1. Primary Attempt
+    success, output = self._run_ai_tool(prompt, repo_path, model_override=None, agent=agent)
+    if success:
+        return True, output
+
+    # 2. Check if the error is eligible for failover
+    if not self._should_failover(output) or not self.ai_tool_failover_model:
+        return False, output
+
+    # 3. Failover Attempt
+    self.logger.info(f"Attempting failover to model: {self.ai_tool_failover_model}")
+    return self._run_ai_tool(prompt, repo_path, model_override=self.ai_tool_failover_model, agent=agent)
+```
 
 ### 7.3 Discord Webhook
 
@@ -968,7 +989,7 @@ gitlab-watcher/
 │   └── plans/
 ├── pyproject.toml            # Project configuration
 ├── README.md                 # Quick start
-└── CLAUDE.md                 # Project ID and developer notes
+└── AGENTS.md                 # Project ID and developer notes
 ```
 
 ### 9.2 Testing
@@ -1019,13 +1040,13 @@ def processor(gitlab_client, discord_webhook, state_manager) -> Processor:
 
 **Mocked Tests:**
 
-External dependencies (GitLab API, Git, Claude CLI) are mocked:
+External dependencies (GitLab API, Git, AI Tool execution) are mocked:
 
 ```python
-@patch("subprocess.run")
-def test_run_claude_success(mock_run, processor, project_config):
-    mock_run.return_value = Mock(returncode=0, stdout="Done", stderr="")
-    success, output = processor._run_claude("Fix the bug", project_config.path)
+@patch.object(Processor, "_run_ai_tool")
+def test_process_issue_success(mock_run_ai, processor, project_config, sample_issue):
+    mock_run_ai.return_value = (True, "Done /done")
+    success = processor.process_issue(project_config, sample_issue)
     assert success is True
 ```
 
@@ -1049,12 +1070,20 @@ def process_issue(
 All public methods have docstrings in Google style:
 
 ```python
-def _run_claude(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
-    """Run Claude CLI with a prompt based on configured mode.
+def _run_ai_tool(
+    self,
+    prompt: str,
+    repo_path: Path,
+    model_override: Optional[str] = None,
+    agent: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Run AI tool CLI with a prompt based on configured mode.
 
     Args:
-        prompt: The prompt for Claude
+        prompt: The prompt for the AI tool
         repo_path: Path to the repository
+        model_override: Optional model name to override the default
+        agent: Optional agent name to pass to the command
 
     Returns:
         Tuple of (success, output)

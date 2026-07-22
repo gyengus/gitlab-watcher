@@ -1,8 +1,8 @@
-# CLAUDE.md
+# AGENTS.md
 
 Project ID: 32
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to agents (such as Claude Code or OpenCode) when working with code in this repository.
 
 ## Project Overview
 
@@ -56,7 +56,7 @@ discord.py      → Discord webhook notifications
 
 ### Configuration Discovery
 
-Projects are discovered by scanning `PROJECT_DIRS` from the config file. Each project directory must contain a `CLAUDE.md` file with a `Project ID: <number>` entry. The watcher extracts the GitLab server URL from git remote URLs if not explicitly configured, but for security reasons, the `GITLAB_TOKEN` must always be provided in the configuration file.
+Projects are discovered by scanning `PROJECT_DIRS` from the config file. Each project directory must contain a `PROJECT.md`, `AGENTS.md`, or `CLAUDE.md` file with a `Project ID: <number>` entry. The watcher extracts the GitLab server URL from git remote URLs if not explicitly configured, but for security reasons, the `GITLAB_TOKEN` must always be provided in the configuration file.
 
 ### State Management
 
@@ -67,7 +67,7 @@ Per-project state is stored in `/tmp/gitlab-watcher/state_{project_id}.json`:
 
 ### AI Tool Integration
 
-The `_run_claude()` method in `processor.py` supports multiple AI tools:
+The `_run_ai_tool()` method in `processor.py` supports multiple AI tools:
 - **ollama**: `ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"`
 - **direct**: `claude -p --permission-mode acceptEdits "<prompt>"`
 - **opencode**: `opencode "<prompt>"`

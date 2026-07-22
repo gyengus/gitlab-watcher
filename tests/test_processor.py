@@ -7,7 +7,7 @@ import threading
 import time
 import queue
 from pathlib import Path
-from unittest.mock import call, Mock, patch, MagicMock
+from unittest.mock import call, Mock, patch, MagicMock, ANY
 
 import pytest
 
@@ -673,6 +673,151 @@ class TestProcessorProcessIssue:
         processor_with_git.discord.notify_issue_started.assert_called_once()
         args, kwargs = processor_with_git.discord.notify_issue_started.call_args
         assert kwargs["is_retry"] is True
+
+    @patch("subprocess.Popen")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_process_issue_preserves_labels_on_success(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that issue labels are preserved when moving to Review on success."""
+        # Mock GitOps
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
+        mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_commits.return_value = True
+
+        processor_with_git = Processor(
+            gitlab=MagicMock(),
+            discord=MagicMock(spec=DiscordWebhook),
+            state=processor.state,
+            gitlab_username="claude",
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Done /done\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+
+        processor_with_git.gitlab.update_issue_labels.return_value = True
+        processor_with_git.gitlab.create_merge_request.return_value = MergeRequest(
+            iid=1,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/1",
+            source_branch="1-fix-the-bug",
+            state="opened",
+        )
+        processor_with_git.state.init_state(project_config.project_id)
+
+        # Issue with custom labels, including in_progress
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="This is a bug description",
+            web_url="https://git.example.com/issues/1",
+            labels=["bug", "priority:high", "In progress"],
+        )
+
+        result = processor_with_git.process_issue(project_config, issue)
+
+        assert result is True
+        
+        # update_issue_labels is called twice:
+        # 1. To add "In progress" label: ["bug", "priority:high", "In progress"]
+        # 2. To transition to "Review": ["bug", "priority:high", "Review"]
+        calls = processor_with_git.gitlab.update_issue_labels.call_args_list
+        assert len(calls) == 2
+        # First call adding In progress (note: issue.labels + [self.label_in_progress])
+        # Wait, since the initial list contains "In progress", it might double it in the call arguments,
+        # but that is fine since set() ignores duplicates.
+        assert set(calls[0][0][2]) == {"bug", "priority:high", "In progress"}
+        # Second call to Review:
+        assert set(calls[1][0][2]) == {"bug", "priority:high", "Review"}
+
+    @patch("subprocess.Popen")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_process_issue_preserves_labels_on_no_changes(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that issue labels are preserved when moving to Review on no changes."""
+        # Mock GitOps
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
+        mock_git.get_current_commit.side_effect = ["hash1", "hash1"]  # No new commit
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        processor_with_git = Processor(
+            gitlab=MagicMock(),
+            discord=MagicMock(spec=DiscordWebhook),
+            state=processor.state,
+            gitlab_username="claude",
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Done /done\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+
+        processor_with_git.gitlab.update_issue_labels.return_value = True
+        processor_with_git.gitlab.create_merge_request.return_value = MergeRequest(
+            iid=1,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/1",
+            source_branch="1-fix-the-bug",
+            state="opened",
+        )
+        processor_with_git.state.init_state(project_config.project_id)
+
+        # Issue with custom labels, including in_progress
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="This is a bug description",
+            web_url="https://git.example.com/issues/1",
+            labels=["bug", "priority:high", "In progress"],
+        )
+
+        result = processor_with_git.process_issue(project_config, issue)
+
+        assert result is True
+        
+        # update_issue_labels is called twice:
+        # 1. To add "In progress" label: ["bug", "priority:high", "In progress"]
+        # 2. To transition to "Review" with AI-No-Changes: ["bug", "priority:high", "Review", "AI-No-Changes"]
+        calls = processor_with_git.gitlab.update_issue_labels.call_args_list
+        assert len(calls) == 2
+        # First call adding In progress:
+        assert set(calls[0][0][2]) == {"bug", "priority:high", "In progress"}
+        # Second call to Review:
+        assert set(calls[1][0][2]) == {"bug", "priority:high", "Review", "AI-No-Changes"}
 
 
 class TestProcessorProcessComment:
@@ -1404,6 +1549,236 @@ class TestProcessorCommentNoChanges:
         p.discord.notify_error.assert_called_once()
         p.discord.notify_no_changes_needed.assert_not_called()
         p.discord.notify_changes_applied.assert_not_called()
+
+
+class TestProcessorAgentSelection:
+    """Tests for the agent selection and label processing logic."""
+
+    def test_extract_agent_from_labels(self, processor: Processor) -> None:
+        """Test extracting agent name from labels and cleaning redundant labels."""
+        # Simple extraction
+        agent, cleaned = processor._extract_agent_from_labels(["bug", "agent:Senior frontend developer"])
+        assert agent == "Senior frontend developer"
+        assert cleaned == ["bug", "agent:Senior frontend developer"]
+
+        # Case-insensitive and dash prefix matching
+        agent, cleaned = processor._extract_agent_from_labels(["agent-Researcher", "feature"])
+        assert agent == "Researcher"
+        assert cleaned == ["feature", "agent:Researcher"]
+
+        # Redundant agent labels removal (keeps the first matched)
+        agent, cleaned = processor._extract_agent_from_labels(["agent:Android developer", "bug", "agent:Article analyst"])
+        assert agent == "Android developer"
+        assert cleaned == ["bug", "agent:Android developer"]
+
+        # No agent label
+        agent, cleaned = processor._extract_agent_from_labels(["bug", "feature"])
+        assert agent is None
+        assert cleaned == ["bug", "feature"]
+
+    def test_build_ai_command_with_agent(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test building AI command in opencode mode with an agent."""
+        processor.ai_tool_mode = "opencode"
+        cmd = processor._build_ai_command("Prompt text", project_config.path, agent="Android developer")
+        
+        assert "opencode" in cmd
+        assert "--agent" in cmd
+        assert cmd[cmd.index("--agent") + 1] == "Android developer"
+
+    def test_build_ai_command_custom_with_agent_placeholder(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test building custom AI command with agent placeholder."""
+        processor.ai_tool_mode = "opencode-custom"
+        processor.ai_tool_custom_command = "opencode --agent {agent} run {prompt}"
+        
+        # Patch validation to avoid real path checks on the test host
+        with patch.object(processor, "_validate_ai_binary", side_effect=lambda x: x):
+            # Valid agent
+            cmd = processor._build_ai_command("Prompt text", project_config.path, agent="Senior UX/UI designer")
+            assert cmd == ["opencode", "--agent", "Senior UX/UI designer", "run", "Prompt text"]
+
+            # Missing/Empty agent
+            cmd = processor._build_ai_command("Prompt text", project_config.path, agent=None)
+            assert cmd == ["opencode", "--agent", "", "run", "Prompt text"]
+
+    def test_build_ai_command_with_invalid_agent(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test that building AI command with invalid agent name raises ValueError."""
+        processor.ai_tool_mode = "opencode"
+        
+        # Valid agent names (should not raise ValueError)
+        valid_agents = ["Android developer", "Senior UX/UI designer", "ESP32 Specialist", "Researcher", "agent:Researcher"]
+        for agent in valid_agents:
+            cmd = processor._build_ai_command("Prompt text", project_config.path, agent=agent)
+            assert "--agent" in cmd
+            assert cmd[cmd.index("--agent") + 1] == agent
+
+        # Invalid agent names (should raise ValueError)
+        invalid_agents = [
+            "-some-flag",
+            "--some-flag",
+            " -some-flag",
+            "agent;injection",
+            "agent|injection",
+            "agent\ninjection",
+            "agent&injection",
+            "agent>injection",
+            "agent<injection",
+            "agent$injection",
+        ]
+        for agent in invalid_agents:
+            with pytest.raises(ValueError, match="Invalid agent name"):
+                processor._build_ai_command("Prompt text", project_config.path, agent=agent)
+
+    @patch("subprocess.Popen")
+    @patch.object(Processor, "_run_ai_tool")
+    def test_process_issue_with_agent_label(
+        self,
+        mock_run_ai: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that process_issue extracts and uses the agent from the issue's labels."""
+        mock_run_ai.return_value = (True, "Done /done")
+        
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.get_current_commit.return_value = "abc123"
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.branch_exists.return_value = False
+        mock_git.has_unpushed_work.return_value = True
+
+        p = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            git_factory=lambda path: mock_git,
+        )
+
+        p.gitlab.update_issue_labels = Mock()
+        p.gitlab.create_merge_request = Mock(
+            return_value=MergeRequest(iid=10, title="Test", web_url="url", source_branch="1-test", state="opened")
+        )
+        p.gitlab.update_merge_request_labels = Mock()
+        p.discord.notify_issue_started = Mock()
+
+        issue = Issue(
+            iid=1,
+            title="Implement registration",
+            description="desc",
+            web_url="url",
+            labels=["agent:Senior frontend developer", "agent:Senior Software Engineer"]  # Redundant label
+        )
+
+        result = p.process_issue(project_config, issue)
+
+        assert result is True
+        # Verify that update_issue_labels was called with the cleaned labels
+        p.gitlab.update_issue_labels.assert_any_call(
+            project_config.project_id,
+            1,
+            ["agent:Senior frontend developer", "In progress"]
+        )
+
+        # Verify discord message contains the agent name
+        p.discord.notify_issue_started.assert_called_once_with(
+            project_config.name,
+            "Implement registration",
+            "url",
+            "1-implement-registration",
+            is_retry=False,
+            agent="Senior frontend developer",
+        )
+
+        # Verify AI tool was run with the agent
+        mock_run_ai.assert_called_with(ANY, project_config.path, model_override=None, agent="Senior frontend developer")
+
+        # Verify MR was created with the correct labels
+        p.gitlab.create_merge_request.assert_called_once_with(
+            project_config.project_id,
+            source_branch="1-implement-registration",
+            target_branch="master",
+            title="Implement registration",
+            description="desc\n\nCloses #1",
+            labels=["agent:Senior frontend developer"]
+        )
+
+        # Verify state has the agent saved
+        state = p.state.load(project_config.project_id)
+        assert state.tracked_mrs["10"]["agent"] == "Senior frontend developer"
+
+    @patch.object(Processor, "_run_ai_tool")
+    def test_process_comment_with_agent_label_and_state_fallback(
+        self,
+        mock_run_ai: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test process_comment resolves the agent from MR labels, and falls back to state."""
+        mock_run_ai.return_value = (True, "Fixed /done")
+
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.get_current_commit.return_value = "abc1234"
+        mock_git.has_uncommitted_changes.return_value = False
+
+        p = Processor(
+            gitlab=processor.gitlab,
+            discord=processor.discord,
+            state=processor.state,
+            gitlab_username="claude",
+            label_in_progress="In progress",
+            label_review="Review",
+            git_factory=lambda path: mock_git,
+        )
+
+        p.gitlab.create_note_award_emoji = Mock()
+        p.gitlab.delete_note_award_emoji = Mock()
+        p.gitlab.update_merge_request_labels = Mock()
+        p.discord.send = Mock()
+        p.state.init_state(project_config.project_id)
+
+        # Scenario 1: Resolved from MR labels directly (with redundant cleaning)
+        mr = MergeRequest(
+            iid=20,
+            title="MR Title",
+            web_url="url",
+            source_branch="branch",
+            state="opened",
+            labels=["bug", "agent:Senior Software Engineer", "agent:Researcher"]
+        )
+
+        result = p.process_comment(project_config, mr, 999, "Fix bugs")
+        assert result is True
+        p.gitlab.update_merge_request_labels.assert_called_with(
+            project_config.project_id, 20, ["bug", "agent:Senior Software Engineer"]
+        )
+        assert "Agent: `Senior Software Engineer`" in p.discord.send.call_args_list[0][0][0]
+        # Check that state is updated to track it
+        state = p.state.load(project_config.project_id)
+        assert state.tracked_mrs["20"]["agent"] == "Senior Software Engineer"
+
+        # Scenario 2: Fallback to state
+        mr_no_labels = MergeRequest(
+            iid=20,
+            title="MR Title",
+            web_url="url",
+            source_branch="branch",
+            state="opened",
+            labels=["bug"]
+        )
+        # Clear mock calls
+        p.discord.send.reset_mock()
+        mock_run_ai.reset_mock()
+
+        result = p.process_comment(project_config, mr_no_labels, 1000, "Fix more bugs")
+        assert result is True
+        # Resolved from state and updated discord message
+        assert "Agent: `Senior Software Engineer`" in p.discord.send.call_args_list[0][0][0]
+        mock_run_ai.assert_called_with(ANY, project_config.path, model_override=None, agent="Senior Software Engineer")
+
 
 
 

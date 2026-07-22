@@ -19,6 +19,7 @@ class TrackedMRInfo(TypedDict, total=False):
     branch: str
     created_by_watcher: bool
     last_processed_note_id: int
+    agent: str
 
 
 @dataclass
@@ -355,17 +356,25 @@ class StateManager:
                 mr_state["last_processed_note_id"] = note_id
                 self.force_save(project_id)
 
-    def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str, created_by_watcher: bool = False) -> None:
+    def add_tracked_mr(self, project_id: int, mr_iid: int, branch: str, created_by_watcher: bool = False, agent: Optional[str] = None) -> None:
         """Add an MR to the tracked list if not already present."""
         with self._lock:
             state = self.load(project_id)
             mr_id_str = str(mr_iid)
             if mr_id_str not in state.tracked_mrs:
-                state.tracked_mrs[mr_id_str] = {
+                mr_info: TrackedMRInfo = {
                     "branch": branch,
                     "created_by_watcher": created_by_watcher,
                 }
+                if agent:
+                    mr_info["agent"] = agent
+                state.tracked_mrs[mr_id_str] = mr_info
                 self.force_save(project_id)
+            else:
+                # Update agent if provided and different
+                if agent and state.tracked_mrs[mr_id_str].get("agent") != agent:
+                    state.tracked_mrs[mr_id_str]["agent"] = agent
+                    self.force_save(project_id)
             
             # Clear failed MR flag when MR is successfully created BY THE WATCHER
             if created_by_watcher and branch in state.branches_with_failed_mr:

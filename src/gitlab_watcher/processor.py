@@ -113,6 +113,31 @@ class Processor:
 
         return prompt
 
+    def _extract_agent_from_labels(self, labels: list[str]) -> tuple[Optional[str], list[str]]:
+        """Extract agent name from labels and clean redundant agent labels.
+
+        Args:
+            labels: List of label names
+
+        Returns:
+            Tuple of (agent_name, cleaned_labels)
+        """
+        agent_name = None
+        cleaned_labels = []
+        
+        for label in labels:
+            match = re.match(r"^agent[:\-](.+)$", label, re.IGNORECASE)
+            if match:
+                if agent_name is None:
+                    agent_name = match.group(1).strip()
+            else:
+                cleaned_labels.append(label)
+                
+        if agent_name:
+            cleaned_labels.append(f"agent:{agent_name}")
+            
+        return agent_name, cleaned_labels
+
     def _validate_issue_title(self, title: str) -> str:
         """Validate and sanitize issue title.
 
@@ -237,8 +262,13 @@ class Processor:
         instructions.append(continue_instruction)
         return "\n".join(instructions)
 
-    def _build_ai_command(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> list[str]:
+    def _build_ai_command(self, prompt: str, repo_path: Path, model_override: Optional[str] = None, agent: Optional[str] = None) -> list[str]:
         """Build the command list for the AI tool."""
+        if agent:
+            trimmed_agent = agent.strip()
+            if trimmed_agent.startswith("-") or not re.match(r"^[a-zA-Z0-9 \-_.:/]+$", agent):
+                raise ValueError(f"Invalid agent name: {agent}")
+
         if self.ai_tool_mode == "ollama":
             model_to_use = model_override if model_override else "claude"
             cmd = ["ollama", "launch", model_to_use, "--", "-p", "--permission-mode", "acceptEdits", prompt]
@@ -250,6 +280,8 @@ class Processor:
             cmd = ["opencode", "--print-logs"]
             if model_override:
                 cmd.extend(["--model", model_override])
+            if agent:
+                cmd.extend(["--agent", agent])
             cmd.extend(["run", prompt, "--thinking", "--log-level", "DEBUG"])
         elif self.ai_tool_mode in ["opencode-custom", "custom"]:
             if not self.ai_tool_custom_command:
@@ -267,12 +299,12 @@ class Processor:
             # Validate all command parts to prevent argument injection
             # Allow alphanumeric, hyphens, underscores, dots, forward slashes, colons, and placeholders
             # We explicitly exclude any shell metacharacters like &, |, ;, $, etc.
-            placeholder_pattern = r"\{prompt\}|\{cwd\}|\{model\}"
+            placeholder_pattern = r"\{prompt\}|\{cwd\}|\{model\}|\{agent\}"
             
             # Whitelist of allowed flags for AI tools
             ALLOWED_AI_FLAGS = {
                 "--model", "--thinking", "--log-level", "--print-logs", 
-                "--permission-mode", "acceptEdits", "-p", "run", "--"
+                "--permission-mode", "acceptEdits", "-p", "run", "--", "--agent"
             }
             
             for i, part in enumerate(cmd_parts):
@@ -294,12 +326,13 @@ class Processor:
             cmd_parts[0] = self._validate_ai_binary(cmd_parts[0])
             
             model_val = model_override or ""
+            agent_val = agent or ""
             
             # Substituted values for custom command.
             # MANDATORY: Placeholders must be separate arguments in the list.
             # String replacement in parts is forbidden to prevent argument injection.
             cmd = []
-            placeholders = {"{prompt}", "{cwd}", "{model}"}
+            placeholders = {"{prompt}", "{cwd}", "{model}", "{agent}"}
             for part in cmd_parts:
                 if part == "{prompt}":
                     cmd.append(prompt)
@@ -307,6 +340,8 @@ class Processor:
                     cmd.append(str(repo_path))
                 elif part == "{model}":
                     cmd.append(model_val)
+                elif part == "{agent}":
+                    cmd.append(agent_val)
                 elif any(p in part for p in placeholders):
                     # Placeholder found but not as the entire argument
                     raise ValueError(f"AI tool command part contains an embedded placeholder: {part}. Placeholders must be separate arguments.")
@@ -600,7 +635,7 @@ class Processor:
         except Exception as e:
             self.logger.error(f"Failed to write AI log to {path}: {e}")
 
-    def _run_ai_tool(self, prompt: str, repo_path: Path, model_override: Optional[str] = None) -> tuple[bool, str]:
+    def _run_ai_tool(self, prompt: str, repo_path: Path, model_override: Optional[str] = None, agent: Optional[str] = None) -> tuple[bool, str]:
         """Run AI tool CLI with a prompt based on configured mode."""
         try:
             safe_prompt = self._sanitize_prompt(prompt)
@@ -612,7 +647,7 @@ class Processor:
                 # Ensure the final length including the message does not exceed the max
                 safe_prompt = safe_prompt[:MAX_TOTAL_PROMPT_LENGTH - len(truncation_message)] + truncation_message
 
-            cmd = self._build_ai_command(safe_prompt, repo_path, model_override)
+            cmd = self._build_ai_command(safe_prompt, repo_path, model_override, agent)
             returncode, full_output, timed_out, silence_timed_out = self._execute_ai_subprocess(cmd, repo_path)
             return self._analyze_ai_output(returncode, full_output, timed_out, silence_timed_out, cmd)
         except ValueError as e:
@@ -649,18 +684,19 @@ class Processor:
 
         return False
 
-    def _run_ai_tool_with_failover(self, prompt: str, repo_path: Path) -> tuple[bool, str]:
+    def _run_ai_tool_with_failover(self, prompt: str, repo_path: Path, agent: Optional[str] = None) -> tuple[bool, str]:
         """Run AI tool with failover capability.
  
          Args:
              prompt: The prompt for AI tool
              repo_path: Path to the repository
+             agent: Name of the active OpenCode agent
  
          Returns:
              Tuple of (success, output)
          """
         self.logger.info("Attempting AI tool execution with default configuration")
-        success, output = self._run_ai_tool(prompt, repo_path, model_override=None)
+        success, output = self._run_ai_tool(prompt, repo_path, model_override=None, agent=agent)
 
         if success:
             self.logger.info("AI tool execution successful with default configuration")
@@ -678,7 +714,7 @@ class Processor:
 
         self.logger.info(f"Attempting failover to model: {self.ai_tool_failover_model}")
 
-        success, output = self._run_ai_tool(prompt, repo_path, model_override=self.ai_tool_failover_model)
+        success, output = self._run_ai_tool(prompt, repo_path, model_override=self.ai_tool_failover_model, agent=agent)
 
         if success:
             self.logger.info(f"Failover successful using model: {self.ai_tool_failover_model}")
@@ -712,6 +748,10 @@ class Processor:
         try:
             git = self.git_factory(project.path)
 
+            # Extract agent from labels and clean redundant agent labels.
+            agent_name, cleaned_labels = self._extract_agent_from_labels(issue.labels)
+            issue.labels = cleaned_labels
+            
             # Read project documentation files
             doc_content = self._read_project_docs(project.path)
 
@@ -742,6 +782,7 @@ class Processor:
                 issue.web_url,
                 branch,
                 is_retry=is_retry,
+                agent=agent_name,
             )
 
             # Add "In progress" label
@@ -825,7 +866,7 @@ class Processor:
             # Run AI tool
             try:
                 self.logger.info(f"[{project.name}] Starting AI tool for issue #{issue.iid}")
-                success, output = self._run_ai_tool_with_failover(prompt, project.path)
+                success, output = self._run_ai_tool_with_failover(prompt, project.path, agent=agent_name)
                 
                 if not success:
                     self.logger.error(f"[{project.name}] AI tool failed for issue #{issue.iid}: {output}")
@@ -861,7 +902,7 @@ class Processor:
                             "Please review your changes with `git status` and `git diff`, run tests to be sure, "
                             "then commit with a descriptive message and push the branch."
                         )
-                        success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
+                        success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path, agent=agent_name)
                         if success_mop:
                             has_uncommitted = git.has_uncommitted_changes()
                             output = output_mop # Update output for later analysis
@@ -899,6 +940,7 @@ class Processor:
                         target_branch=self.default_branch,
                         title=issue.title,
                         description=f"{issue.description}\n\nCloses #{issue.iid}",
+                        labels=issue.labels,
                     )
                 except GitLabAPIError as api_err:
                     if api_err.status_code == 409:
@@ -924,14 +966,15 @@ class Processor:
                         return False
 
                 if mr:
+                    clean_labels = [l for l in issue.labels if l != self.label_in_progress]
                     if llm_made_changes:
                         # Track the MR we just created so the watcher knows it's ours
-                        self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True)
+                        self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True, agent=agent_name)
                         # Move to Review
                         self.gitlab.update_issue_labels(
                             project.project_id,
                             issue.iid,
-                            [self.label_review],
+                            clean_labels + [self.label_review],
                         )
                         self.discord.notify_mr_created(
                             project.name,
@@ -944,7 +987,7 @@ class Processor:
                         self.gitlab.update_issue_labels(
                             project.project_id,
                             issue.iid,
-                            [self.label_review, "AI-No-Changes"],
+                            clean_labels + [self.label_review, "AI-No-Changes"],
                         )
                         self.discord.notify_no_changes_needed(
                             project.name,
@@ -1019,11 +1062,38 @@ class Processor:
         try:
             git = self.git_factory(project.path)
 
+            # Resolve agent from MR labels or state file
+            agent_name, cleaned_mr_labels = self._extract_agent_from_labels(mr.labels)
+            if sorted(mr.labels) != sorted(cleaned_mr_labels):
+                self.logger.info(f"[{project.name}] Cleaning up redundant agent labels for MR !{mr.iid}")
+                try:
+                    self.gitlab.update_merge_request_labels(project.project_id, mr.iid, cleaned_mr_labels)
+                except Exception as label_err:
+                    self.logger.warning(f"[{project.name}] Failed to update MR labels: {label_err}")
+                mr.labels = cleaned_mr_labels
+
+            if not agent_name:
+                state = self.state.load(project.project_id)
+                mr_info = state.tracked_mrs.get(str(mr.iid))
+                if mr_info:
+                    agent_name = mr_info.get("agent")
+
+            if agent_name:
+                self.state.add_tracked_mr(
+                    project.project_id,
+                    mr.iid,
+                    mr.source_branch,
+                    created_by_watcher=False,
+                    agent=agent_name,
+                )
+
             # Read project documentation files
             doc_content = self._read_project_docs(project.path)
 
+            agent_line = f"Agent: `{agent_name}`\n" if agent_name else ""
             self.discord.send(
                 f"🤖 **Processing Comment** [{project.name}]\n"
+                f"{agent_line}"
                 f"[{mr.title}]({mr.web_url})\n\n"
                 f"Starting to work on: {comment}"
             )
@@ -1084,7 +1154,7 @@ class Processor:
             # Run AI tool
             try:
                 self.logger.info(f"[{project.name}] Starting AI tool for merge request !{mr.iid}")
-                success, output = self._run_ai_tool_with_failover(prompt, project.path)
+                success, output = self._run_ai_tool_with_failover(prompt, project.path, agent=agent_name)
                 
                 if not success:
                     self.logger.error(f"[{project.name}] AI tool failed for MR !{mr.iid}: {output}")
@@ -1163,7 +1233,7 @@ class Processor:
                         "Please review your changes with `git status` and `git diff`, run tests to be sure, "
                         "then commit with a descriptive message and push the branch."
                     )
-                    success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path)
+                    success_mop, output_mop = self._run_ai_tool_with_failover(mop_up_prompt, project.path, agent=agent_name)
                     if success_mop:
                         has_uncommitted = git.has_uncommitted_changes()
                         output = output_mop

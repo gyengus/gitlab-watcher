@@ -76,6 +76,47 @@ class TestDiscordWebhook:
         assert "1-fix-bug" in message
 
     @patch("requests.post")
+    def test_notify_issue_started_with_agent(self, mock_post: Mock) -> None:
+        """Test issue started notification with agent name."""
+        mock_post.return_value = Mock(status_code=204)
+
+        webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
+        result = webhook.notify_issue_started(
+            project_name="test-project",
+            issue_title="Fix bug",
+            issue_url="https://git.example.com/issues/1",
+            branch="1-fix-bug",
+            agent="Senior frontend developer",
+        )
+
+        assert result is True
+        call_args = mock_post.call_args
+        message = call_args.kwargs["json"]["content"]
+        assert "Starting Issue" in message
+        assert "Agent: `Senior frontend developer`" in message
+
+    @patch("requests.post")
+    def test_notify_issue_started_retry_with_agent(self, mock_post: Mock) -> None:
+        """Test issue started retry notification with agent name."""
+        mock_post.return_value = Mock(status_code=204)
+
+        webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
+        result = webhook.notify_issue_started(
+            project_name="test-project",
+            issue_title="Fix bug",
+            issue_url="https://git.example.com/issues/1",
+            branch="1-fix-bug",
+            is_retry=True,
+            agent="Senior frontend developer",
+        )
+
+        assert result is True
+        call_args = mock_post.call_args
+        message = call_args.kwargs["json"]["content"]
+        assert "Retrying Issue" in message
+        assert "Agent: `Senior frontend developer`" in message
+
+    @patch("requests.post")
     def test_notify_mr_created(self, mock_post: Mock) -> None:
         """Test MR created notification."""
         mock_post.return_value = Mock(status_code=204)
