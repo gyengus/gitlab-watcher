@@ -972,6 +972,7 @@ class Processor:
                         return False
 
                 if mr:
+                    clean_labels = [l for l in issue.labels if l != self.label_in_progress]
                     if llm_made_changes:
                         # Track the MR we just created so the watcher knows it's ours
                         self.state.add_tracked_mr(project.project_id, mr.iid, mr.source_branch, created_by_watcher=True, agent=agent_name)
@@ -979,7 +980,7 @@ class Processor:
                         self.gitlab.update_issue_labels(
                             project.project_id,
                             issue.iid,
-                            [self.label_review],
+                            clean_labels + [self.label_review],
                         )
                         self.discord.notify_mr_created(
                             project.name,
@@ -992,7 +993,7 @@ class Processor:
                         self.gitlab.update_issue_labels(
                             project.project_id,
                             issue.iid,
-                            [self.label_review, "AI-No-Changes"],
+                            clean_labels + [self.label_review, "AI-No-Changes"],
                         )
                         self.discord.notify_no_changes_needed(
                             project.name,

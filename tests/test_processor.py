@@ -674,6 +674,151 @@ class TestProcessorProcessIssue:
         args, kwargs = processor_with_git.discord.notify_issue_started.call_args
         assert kwargs["is_retry"] is True
 
+    @patch("subprocess.Popen")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_process_issue_preserves_labels_on_success(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that issue labels are preserved when moving to Review on success."""
+        # Mock GitOps
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
+        mock_git.get_current_commit.side_effect = ["hash1", "hash2"]
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_commits.return_value = True
+
+        processor_with_git = Processor(
+            gitlab=MagicMock(),
+            discord=MagicMock(spec=DiscordWebhook),
+            state=processor.state,
+            gitlab_username="claude",
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Done /done\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+
+        processor_with_git.gitlab.update_issue_labels.return_value = True
+        processor_with_git.gitlab.create_merge_request.return_value = MergeRequest(
+            iid=1,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/1",
+            source_branch="1-fix-the-bug",
+            state="opened",
+        )
+        processor_with_git.state.init_state(project_config.project_id)
+
+        # Issue with custom labels, including in_progress
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="This is a bug description",
+            web_url="https://git.example.com/issues/1",
+            labels=["bug", "priority:high", "In progress"],
+        )
+
+        result = processor_with_git.process_issue(project_config, issue)
+
+        assert result is True
+        
+        # update_issue_labels is called twice:
+        # 1. To add "In progress" label: ["bug", "priority:high", "In progress"]
+        # 2. To transition to "Review": ["bug", "priority:high", "Review"]
+        calls = processor_with_git.gitlab.update_issue_labels.call_args_list
+        assert len(calls) == 2
+        # First call adding In progress (note: issue.labels + [self.label_in_progress])
+        # Wait, since the initial list contains "In progress", it might double it in the call arguments,
+        # but that is fine since set() ignores duplicates.
+        assert set(calls[0][0][2]) == {"bug", "priority:high", "In progress"}
+        # Second call to Review:
+        assert set(calls[1][0][2]) == {"bug", "priority:high", "Review"}
+
+    @patch("subprocess.Popen")
+    @patch("os.killpg")
+    @patch("time.sleep")
+    def test_process_issue_preserves_labels_on_no_changes(
+        self,
+        mock_sleep: Mock,
+        mock_killpg: Mock,
+        mock_popen: Mock,
+        processor: Processor,
+        project_config: ProjectConfig,
+    ) -> None:
+        """Test that issue labels are preserved when moving to Review on no changes."""
+        # Mock GitOps
+        mock_git = MagicMock()
+        mock_git.checkout.return_value = (True, "")
+        mock_git.branch_exists.return_value = False
+        mock_git.get_current_commit.side_effect = ["hash1", "hash1"]  # No new commit
+        mock_git.has_uncommitted_changes.return_value = False
+        mock_git.has_unpushed_commits.return_value = False
+        mock_git.has_unpushed_work.return_value = False
+
+        processor_with_git = Processor(
+            gitlab=MagicMock(),
+            discord=MagicMock(spec=DiscordWebhook),
+            state=processor.state,
+            gitlab_username="claude",
+            label_in_progress=processor.label_in_progress,
+            label_review=processor.label_review,
+            default_branch="master",
+            git_factory=lambda path: mock_git,
+        )
+
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0, 0, 0, 0]
+        mock_process.stdout.readline.side_effect = ["Done /done\n", ""]
+        mock_process.returncode = 0
+        mock_process.pid = 1234
+        mock_popen.return_value = mock_process
+
+        processor_with_git.gitlab.update_issue_labels.return_value = True
+        processor_with_git.gitlab.create_merge_request.return_value = MergeRequest(
+            iid=1,
+            title="Fix the bug",
+            web_url="https://git.example.com/merge_requests/1",
+            source_branch="1-fix-the-bug",
+            state="opened",
+        )
+        processor_with_git.state.init_state(project_config.project_id)
+
+        # Issue with custom labels, including in_progress
+        issue = Issue(
+            iid=1,
+            title="Fix the bug",
+            description="This is a bug description",
+            web_url="https://git.example.com/issues/1",
+            labels=["bug", "priority:high", "In progress"],
+        )
+
+        result = processor_with_git.process_issue(project_config, issue)
+
+        assert result is True
+        
+        # update_issue_labels is called twice:
+        # 1. To add "In progress" label: ["bug", "priority:high", "In progress"]
+        # 2. To transition to "Review" with AI-No-Changes: ["bug", "priority:high", "Review", "AI-No-Changes"]
+        calls = processor_with_git.gitlab.update_issue_labels.call_args_list
+        assert len(calls) == 2
+        # First call adding In progress:
+        assert set(calls[0][0][2]) == {"bug", "priority:high", "In progress"}
+        # Second call to Review:
+        assert set(calls[1][0][2]) == {"bug", "priority:high", "Review", "AI-No-Changes"}
+
 
 class TestProcessorProcessComment:
     """Tests for the process_comment method."""
