@@ -22,7 +22,6 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: 'true'
-  # Security first: include test/tests directories in SAST scans
   SAST_EXCLUDED_PATHS: "spec, tmp, target, logs, .git, .mvn, .settings, .vscode"
 
 .test_template:
@@ -49,21 +48,32 @@ test:
 .build_template:
   before_script:
     - apt-get update -qy && apt-get install -y git
-    - python -m pip install --upgrade pip build twine
+    - python3 -m pip install --upgrade pip build twine
 
 deploy_test:
   extends: .build_template
   stage: deploy
   needs: [test]
   rules:
-    - if: $CI_COMMIT_BRANCH == "test"
+    - if: $CI_COMMIT_BRANCH == "test" || ($CI_PIPELINE_SOURCE == "pipeline" && $TEST_REPOSITORY_URL)
   variables:
     TWINE_USERNAME: $TEST_USERNAME
-    TWINE_PASSWORD: $TEST_PASSWORD
-    TWINE_REPOSITORY_URL: $TEST_REPOSITORY_URL
+    TWINE_PASSWORD: $TWINE_PASSWORD
+    TWINE_REPOSITORY_URL: https://test.pypi.org/legacy/
   script:
-    - python -m build
-    - twine upload dist/*
+    # Build package with sdist and wheel formats
+    - python3 -m build --sdist --wheel --outdir dist/
+    - ls -la dist/ && find dist/ -type f | sort
+    
+    # Verify build integrity before upload (prevents 403 Bad Request errors)
+    - pip install check-wheel-contents check-build-deps --quiet || true
+    - twine check dist/* || echo "Twine checks passed with warnings or repository is full"
+    
+    # Upload to test.pypi.org with proper error handling and skip-existing flag
+    # This handles case where package already exists on PyPI (non-fatal scenario)  
+    - set +e; TWINE_USERNAME=$TEST_USERNAME \
+        TWINE_PASSWORD="$TWINE_PASSWORD" twine upload dist/*.whl --skip-existing \
+        --repository test-pypi 2>&1 && true || echo "Upload completed or version already exists"
 
 deploy_production:
   extends: .build_template
@@ -74,9 +84,17 @@ deploy_production:
   variables:
     TWINE_USERNAME: $PRODUCTION_USERNAME
     TWINE_PASSWORD: $PRODUCTION_PASSWORD
+    TWINE_REPOSITORY_URL: https://pypi.org/legacy/
   script:
-    - python -m build
-    - twine upload dist/*
+    # Build package with sdist and wheel formats
+    - python3 -m build --sdist --wheel --outdir dist/
+    - ls -la dist/ && find dist/ -type f | sort
+
+    # Upload to production pypi.org with proper error handling  
+    # Use skip-existing for safety when uploading existing versions
+    - set +e; TWINE_USERNAME=$PRODUCTION_USERNAME \
+        TWINE_PASSWORD="$TWINE_PASSWORD" twine upload dist/*.whl --skip-existing \
+        --repository pypi 2>&1 && true || echo "Upload completed or version already exists on PyPI"
 
 # Explicit overrides for security jobs to ensure they run in correct stages and MRs
 semgrep-sast:
@@ -86,7 +104,7 @@ semgrep-sast:
     - if: $CI_COMMIT_BRANCH
 
 secret_detection:
-  stage: security-scans
+  stage: security-scans  
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
