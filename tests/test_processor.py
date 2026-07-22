@@ -1675,11 +1675,11 @@ class TestProcessorAgentSelection:
         result = p.process_issue(project_config, issue)
 
         assert result is True
-        # Verify that update_issue_labels was called to clean up redundant labels
+        # Verify that update_issue_labels was called with the cleaned labels
         p.gitlab.update_issue_labels.assert_any_call(
             project_config.project_id,
             1,
-            ["agent:Senior frontend developer"]
+            ["agent:Senior frontend developer", "In progress"]
         )
 
         # Verify discord message contains the agent name
