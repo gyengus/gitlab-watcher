@@ -748,8 +748,14 @@ class Processor:
         try:
             git = self.git_factory(project.path)
 
-            # Extract agent from labels and clean redundant agent labels directly in memory.
+            # Extract agent from labels and clean redundant agent labels.
             agent_name, cleaned_labels = self._extract_agent_from_labels(issue.labels)
+            if sorted(issue.labels) != sorted(cleaned_labels):
+                try:
+                    self.gitlab.update_issue_labels(project.project_id, issue.iid, cleaned_labels)
+                except GitLabAPIError as e:
+                    self.logger.warning(f"[{project.name}] Failed to clean redundant issue agent labels: {e}")
+            issue.labels = cleaned_labels
             
             # Read project documentation files
             doc_content = self._read_project_docs(project.path)
