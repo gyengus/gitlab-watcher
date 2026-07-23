@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.0.0",
-    "requests>=2.32.0",  # Updated to a version that handles the dependency conflicts better
+    "requests>=2.32.0",
 ]
 
 [project.optional-dependencies]
@@ -50,13 +50,3 @@ where = ["src"]
 [tool.setuptools_scm]
 write_to = "src/gitlab_watcher/_version.py"
 fallback_version = "1.0.0-dev"
-
-# Package metadata for PyPI compatibility (prevents 403 Bad Request errors)
-[tool.setuptools]
-packages = ["src/gitlab_watcher"]
-license-files = "LICENSE"
-include-package-data = true  
-exclude-packages = []
-
-[metadata.metadata_version]
-schema-version = '1.2'
