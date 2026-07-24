@@ -69,11 +69,9 @@ deploy_test:
     - pip install check-wheel-contents check-build-deps --quiet || true
     - twine check dist/* || echo "Twine checks passed with warnings or repository is full"
     
-    # Upload to test.pypi.org with proper error handling and skip-existing flag for both wheel and source distributions
-    # This handles case where package already exists on PyPI (non-fatal scenario)  
-    - TWINE_USERNAME=$TEST_USERNAME \
-        TWINE_PASSWORD="$TWINE_PASSWORD" twine upload dist/* --skip-existing \
-        --repository testpypi 2>&1 || echo "Upload completed or version already exists"
+    # Upload to test.pypi.org with skip-existing flag for both wheel and source distributions
+    # This handles case where package already exists on PyPI (non-fatal, handled by --skip-existing)
+    - twine upload dist/* --skip-existing --repository testpypi 2>&1
 
 deploy_production:
   extends: .build_template
@@ -90,11 +88,9 @@ deploy_production:
     - python3 -m build --sdist --wheel --outdir dist/
     - ls -la dist/ && find dist/ -type f | sort
 
-    # Upload to production pypi.org with proper error handling for both wheel and source distributions  
+    # Upload to production pypi.org with skip-existing flag for both wheel and source distributions  
     # Use skip-existing for safety when uploading existing versions
-    - TWINE_USERNAME=$PRODUCTION_USERNAME \
-        TWINE_PASSWORD="$PRODUCTION_PASSWORD" twine upload dist/* --skip-existing \
-        --repository pypi 2>&1 || echo "Upload completed or version already exists on PyPI"
+    - twine upload dist/* --skip-existing --repository pypi 2>&1
 
 # Explicit overrides for security jobs to ensure they run in correct stages and MRs
 semgrep-sast:
