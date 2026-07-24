@@ -71,7 +71,7 @@ deploy_test:
     
     # Upload to test.pypi.org with skip-existing flag for both wheel and source distributions
     # This handles case where package already exists on PyPI (non-fatal, handled by --skip-existing)
-    - twine upload dist/* --skip-existing --repository testpypi 2>&1
+    - twine upload dist/* --skip-existing --repository-url https://test.pypi.org/legacy/ 2>&1
 
 deploy_production:
   extends: .build_template
@@ -88,9 +88,9 @@ deploy_production:
     - python3 -m build --sdist --wheel --outdir dist/
     - ls -la dist/ && find dist/ -type f | sort
 
-    # Upload to production pypi.org with skip-existing flag for both wheel and source distributions  
+    # Upload to production PyPI with skip-existing flag for both wheel and source distributions
     # Use skip-existing for safety when uploading existing versions
-    - twine upload dist/* --skip-existing --repository pypi 2>&1
+    - twine upload dist/* --skip-existing --repository-url https://upload.pypi.org/legacy/ 2>&1
 
 # Explicit overrides for security jobs to ensure they run in correct stages and MRs
 semgrep-sast:
