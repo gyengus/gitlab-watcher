@@ -245,6 +245,23 @@ def load_config(config_path: str) -> Config:
 
     config = Config(**config_args)
 
+    work_dir_path = Path(config.work_dir).expanduser().resolve()
+
+    sensitive_bases = [
+        "/etc", "/root", "/bin", "/sbin", "/usr/bin", "/usr/sbin",
+        "/proc", "/sys", "/dev", "/lib", "/lib64", "/usr/lib", "/usr/lib64"
+    ]
+    if any(work_dir_path.is_relative_to(Path(base)) for base in sensitive_bases):
+        raise ValueError(f"Configured WORK_DIR '{config.work_dir}' resolves to a sensitive system path: {work_dir_path}")
+
+    safe_bases = [
+        Path.home().resolve(),
+        Path.cwd().resolve(),
+        Path("/tmp").resolve(),
+        Path("/var/tmp").resolve(),
+    ]
+    if not any(work_dir_path.is_relative_to(base) for base in safe_bases):
+        raise ValueError(f"Configured WORK_DIR '{config.work_dir}' is outside safe bases: {work_dir_path}")
 
     # Get project directories
     project_dirs = raw_config.get("PROJECT_DIRS", [])
