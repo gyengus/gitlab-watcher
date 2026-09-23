@@ -71,7 +71,7 @@ def _init_components(config_path: str) -> tuple[Config, StateManager]:
     if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ:
         work_dir = Path("/tmp/test-watcher")
     else:
-        work_dir = Path("/tmp/gitlab-watcher")
+        work_dir = Path(cfg.work_dir)
         
     # Security: Verify it is not a symbolic link before creation
     if os.name != 'nt' and work_dir.is_symlink():

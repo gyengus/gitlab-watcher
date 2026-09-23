@@ -66,7 +66,7 @@ class Watcher:
             if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ:
                 self.work_dir = Path("/tmp/test-watcher")
             else:
-                self.work_dir = Path("/tmp/gitlab-watcher")
+                self.work_dir = Path(self.config.work_dir)
 
         # Setup logging
         if verbose:

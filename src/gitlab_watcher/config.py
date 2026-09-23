@@ -39,6 +39,7 @@ class Config:
     ai_tool_custom_command: str | list[str] = ""
     ai_tool_failover_model: str = ""
     ai_tool_timeout: int = 3600
+    work_dir: str = "/tmp/gitlab-watcher"
     log_file: str = "/var/log/gitlab-watcher.log"
     log_level: str = "INFO"
     gitlab_username: str = "OpenCode"
@@ -231,6 +232,7 @@ def load_config(config_path: str) -> Config:
         "ai_tool_custom_command": raw_config.get("AI_TOOL_CUSTOM_COMMAND", ""),
         "ai_tool_failover_model": get_str("AI_TOOL_FAILOVER_MODEL"),
         "ai_tool_timeout": get_int("AI_TOOL_TIMEOUT", 3600),
+        "work_dir": get_str("WORK_DIR", "/tmp/gitlab-watcher"),
         "log_file": get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
         "log_level": get_str("LOG_LEVEL", "INFO").upper(),
         "default_branch": get_str("DEFAULT_BRANCH", "master"),
