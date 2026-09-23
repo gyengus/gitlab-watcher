@@ -508,6 +508,12 @@ gitlab-watcher --verbose
 | `POLL_INTERVAL` | int | 30 | Polling interval (seconds) |
 | `AI_TOOL_MODE` | string | "ollama" | AI tool mode |
 | `AI_TOOL_CUSTOM_COMMAND` | string | "" | Custom command (for custom mode) |
+| `AI_TOOL_TIMEOUT` | int | 3600 | Maximum execution time in seconds |
+| `AI_TOOL_FAILOVER_MODEL` | string | "" | Fallback model name for service errors |
+| `DEFAULT_BRANCH` | string | "master" | Default base branch for creating MRs |
+| `WORK_DIR` | string | "/tmp/gitlab-watcher" | Directory for state files and AI logs |
+| `LOG_FILE` | string | "/var/log/gitlab-watcher.log" | Path to watcher's application log file |
+| `LOG_LEVEL` | string | "INFO" | Logging detail level |
 | `PROJECT_DIRS` | array | [] | List of project directories |
 
 ### 4.2 Obtaining a GitLab Token
@@ -1215,6 +1221,11 @@ GITLAB_USERNAME="claude"
 
 # Polling interval (seconds)
 POLL_INTERVAL=30
+
+# Directories and Logging
+WORK_DIR="/tmp/gitlab-watcher"
+LOG_FILE="/var/log/gitlab-watcher.log"
+LOG_LEVEL="INFO"
 
 # AI tool mode: ollama, direct, custom, opencode, opencode-custom
 AI_TOOL_MODE="ollama"
