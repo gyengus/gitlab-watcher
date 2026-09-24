@@ -225,6 +225,45 @@ PROJECT_DIRS=(
     assert config.ai_tool_timeout == 1234
 
 
+def test_load_config_with_work_dir(tmp_path: Path) -> None:
+    """Test loading config with WORK_DIR."""
+    config_file = tmp_path / "gitlab_watcher.conf"
+    config_file.write_text(
+        """
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="test-token"
+WORK_DIR="/tmp/custom-work-dir"
+PROJECT_DIRS=(
+    "{}"
+)
+""".format(tmp_path / "project")
+    )
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+
+    config = load_config(str(config_file))
+
+    assert config.work_dir == "/tmp/custom-work-dir"
+
+def test_load_config_default_work_dir(tmp_path: Path) -> None:
+    """Test default WORK_DIR when not specified."""
+    config_file = tmp_path / "test_no_work_dir.conf"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("Project ID: 42\n")
+    config_file.write_text(f"""
+GITLAB_URL="https://git.example.com"
+GITLAB_TOKEN="secret"
+PROJECT_DIRS=(
+  "{project_dir}"
+)
+""")
+    config = load_config(str(config_file))
+    assert config.work_dir == "/tmp/gitlab-watcher"
+
+
 def test_load_config_with_log_file(tmp_path: Path) -> None:
     """Test loading config with LOG_FILE."""
     config_file = tmp_path / "gitlab_watcher.conf"
