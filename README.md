@@ -1,8 +1,33 @@
-# GitLab Watcher
+# GitLab Watcher — Autonomous AI Issue & Merge Request Automation
 
-Monitor GitLab projects and automatically process issues and merge requests using AI tools. It features built-in support for automated branch management, AI-driven code generation, Discord notifications, and automatic failover to backup AI models when primary models encounter service issues.
+[![PyPI version](https://img.shields.io/pypi/v/gitlab-watcher)](https://pypi.org/project/gitlab-watcher/)
+[![Python 3.11+](https://img.shields.io/pypi/pyversions/gitlab-watcher)](https://pypi.org/project/gitlab-watcher/)
+[![License: MIT](https://img.shields.io/pypi/l/gitlab-watcher)](LICENSE)
 
-## What the Watcher Does
+Self-hosted Python daemon that monitors your GitLab projects and autonomously resolves issues, addresses merge request review comments, and cleans up merged branches using **Claude CLI** (direct or via **Ollama**), **OpenCode**, or any custom AI coding agent.
+
+## Key Benefits
+
+- **Multi-Tool & Model Agnostic:** Works with Claude CLI (direct or launched via Ollama), OpenCode, or custom CLI wrappers.
+- **Built-in Failover:** Automatically switches to backup or free models (e.g., OpenRouter Gemma/DeepSeek) on 524, timeout, or rate-limit errors.
+- **Label-Driven Agent Routing:** Assign specialized AI agents per issue or merge request using GitLab labels (`agent:...`).
+- **Security-First Design:** Never extracts tokens from git remotes, masks secrets in logs and Discord messages, enforces prompt sanitization, and isolates execution timeouts.
+- **Zero-Touch Cleanup:** Automatically updates your default branch and deletes merged feature branches.
+
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [AI Configuration & Failover](#ai-configuration--failover)
+- [Supported AI Tools](#supported-ai-tools)
+- [Troubleshooting](#troubleshooting)
+- [Development & Contributing](#development--contributing)
+- [Support & Donations](#support--donations)
+
+## How It Works
 
 ### Issue Processing (Automatic)
 
@@ -42,7 +67,10 @@ When an MR is merged:
 ## Installation
 
 ```bash
-# From PyPI (recommended)
+# Recommended for CLI daemons (isolated environment)
+pipx install gitlab-watcher
+
+# Or install directly via pip
 pip install gitlab-watcher
 ```
 
@@ -65,22 +93,11 @@ gitlab-watcher sync-state "Project Name"
 gitlab-watcher --verbose
 ```
 
-### Improved Error Handling
-The CLI now provides clean, human-readable error messages for common configuration issues (like missing files or invalid tokens) instead of showing a Python traceback. Use the `--verbose` flag if you need the full debug information.
+### CLI Error Handling & Diagnostics
+
+The CLI provides clean, human-readable error messages for common configuration issues (such as missing files or invalid tokens) instead of raw Python tracebacks. Use the `--verbose` (`-v`) flag when you need full debug output.
 
 ## Configuration
-
-### Logging
-
-You can set the log verbosity in `gitlab-watcher.conf`:
-
-```bash
-# LOG_LEVEL options: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_LEVEL="DEBUG"
-```
-
-Command line `--verbose` or `-v` flags will override this and force DEBUG level.
-
 
 Create the default configuration directory:
 
@@ -94,7 +111,7 @@ Create `~/.config/gitlab-watcher/config.conf` with your environment details:
 # Your GitLab instance URL (supports public domains and private/corporate IPs)
 GITLAB_URL="https://git.example.com"
 
-# Personal or Group Access Token (supports standard and OIDC tokens with dots)
+# Personal or Group Access Token (REQUIRED; supports standard and OIDC tokens with dots)
 GITLAB_TOKEN="your_token_here"
 
 # (Optional) Discord Webhook for detailed event notifications
@@ -103,7 +120,7 @@ DISCORD_WEBHOOK="https://discord.com/api/webhooks/your_webhook_id"
 # Monitoring interval in seconds
 POLL_INTERVAL=30
 
-# AI Tool implementation style (ollama, direct, opencode, custom)
+# AI Tool implementation style (ollama, direct, opencode, opencode-custom, custom)
 AI_TOOL_MODE="ollama"
 
 # Maximum execution time for AI tool in seconds (default: 3600 / 1 hour)
@@ -112,8 +129,11 @@ AI_TOOL_TIMEOUT=3600
 # Working directory for state files and AI logs (default: /tmp/gitlab-watcher)
 WORK_DIR="/tmp/gitlab-watcher"
 
-# Path to log file (default: /var/log/gitlab-watcher.log)
+# Path to log file (falls back to WORK_DIR/watcher.log if not writable)
 LOG_FILE="/var/log/gitlab-watcher.log"
+
+# LOG_LEVEL options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL="INFO"
 
 # List of absolute paths to project directories to monitor
 PROJECT_DIRS=(
@@ -124,19 +144,21 @@ PROJECT_DIRS=(
 
 *(Note: If `GITLAB_URL` is not provided in the configuration, the watcher will attempt to extract it from your git remotes automatically. For security reasons, `GITLAB_TOKEN` is never extracted from git remotes and must be provided in the config file or via the `GITLAB_TOKEN` environment variable.)*
 
+Command line `--verbose` or `-v` flags override `LOG_LEVEL` and force `DEBUG` level.
+
 Each monitored project directory must have a `PROJECT.md`, `AGENTS.md`, or `CLAUDE.md` file with a corresponding Project ID:
 
 ```markdown
 Project ID: 31
 ```
 
-## AI Configuration & Rules
+For the full configuration reference, architecture diagrams, and GitLab API details, see the [Detailed Documentation](docs/README.md).
 
-### Recommended: Configure AI Coding Rules
+## AI Configuration & Failover
 
 ### Automatic Failover Model Support
 
-The watcher includes an automatic failover feature that switches to a backup AI model when the primary model encounters service issues (like 524 errors, rate limits, or service unavailability). This ensures continuous operation for hobby projects.
+The watcher includes an automatic failover feature that switches to a backup AI model when the primary model encounters service issues (like 524 errors, rate limits, or service unavailability). This ensures continuous operation for hobby and production projects alike.
 
 #### Configuration
 
@@ -153,7 +175,7 @@ AI_TOOL_FAILOVER_MODEL="openrouter/google/gemma-3-12b-it:free"
 AI_TOOL_CUSTOM_COMMAND="opencode --model {model} run {prompt} --thinking --log-level DEBUG"
 ```
 
-#### How It Works
+#### How Failover Works
 
 1. **Primary Attempt**: Uses the configured AI tool with the default model
 2. **Error Detection**: Automatically detects provider errors (524, rate limits, service unavailable, etc.)
@@ -172,7 +194,7 @@ AI_TOOL_CUSTOM_COMMAND="opencode --model {model} run {prompt} --thinking --log-l
 - `openrouter/deepseek/deepseek-chat-v3.1` - Very capable, low cost
 - `openrouter/anthropic/claude-3.5-haiku` - Fast and capable, moderate cost
 
-#### Supported Modes
+#### Failover Support by Mode
 
 | Mode | Model Support | Description |
 |------|---------------|-------------|
@@ -184,7 +206,9 @@ AI_TOOL_CUSTOM_COMMAND="opencode --model {model} run {prompt} --thinking --log-l
 
 **Important**: Leave `AI_TOOL_FAILOVER_MODEL` empty if you don't want failover functionality. The watcher will maintain backward compatibility with existing configurations.
 
-For optimal AI-assisted development, it's highly recommended to configure AI coding rules at both global and project levels:
+### Recommended: Configure AI Coding Rules
+
+For optimal AI-assisted development, configure AI coding rules at both global and project levels:
 
 #### Global Rules (System-wide)
 Create `~/.config/opencode/AGENTS.md` or `~/.claude/CLAUDE.md` with general coding guidelines that apply to all projects:
@@ -220,10 +244,10 @@ Add `CLAUDE.md` or `AGENTS.md` to your project directory for project-specific gu
 - Maintain 90%+ test coverage
 
 ### Commit Guidelines
-- Use conventional commits: feat:, fix:, etc.
+- Use clear, descriptive commit messages in English
 ```
 
-### How It Works
+#### How Rule Loading Works
 
 1. **Automatic Rule Loading**: OpenCode automatically loads rules from:
    - Project `AGENTS.md` (preferred)
@@ -233,10 +257,6 @@ Add `CLAUDE.md` or `AGENTS.md` to your project directory for project-specific gu
 
 2. **Rule Priority**: Project-specific rules override global rules
 3. **No Manual Configuration Required**: The GitLab Watcher automatically uses these rules when processing issues and MR comments
-
-### Contributing Guidelines
-
-For detailed development guidelines, testing requirements, and troubleshooting tips, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Supported AI Tools
 
@@ -252,7 +272,7 @@ The watcher supports multiple AI tools:
 
 ### Model Parameter Support
 
-For `opencode` and `custom` modes, you can specify models dynamically:
+For `opencode`, `opencode-custom`, and `custom` modes, you can specify models dynamically:
 
 ```bash
 # Opencode mode with model parameter
@@ -267,7 +287,7 @@ The `{model}` placeholder will be replaced with the specified model name, `{prom
 Configure in `config.conf`:
 
 ```bash
-AI_TOOL_MODE="ollama"  # or "direct", "opencode", "custom"
+AI_TOOL_MODE="ollama"  # or "direct", "opencode", "opencode-custom", "custom"
 AI_TOOL_TIMEOUT=3600   # default is 1 hour
 ```
 
@@ -312,7 +332,7 @@ opencode --model openrouter/google/gemma-3-12b-it:free run "test prompt" --think
 opencode --model openrouter/google/gemma-3-12b-it:free run {prompt} --thinking --log-level DEBUG
 ```
 
-## Development
+## Development & Contributing
 
 ```bash
 # Install dev dependencies
@@ -324,6 +344,8 @@ pytest
 # Run tests with coverage
 pytest --cov=gitlab_watcher
 ```
+
+For detailed development guidelines, testing requirements, and commit conventions, see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Detailed Documentation](docs/README.md).
 
 ## Support & Donations
 
