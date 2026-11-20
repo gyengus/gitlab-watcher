@@ -89,6 +89,7 @@ class Processor:
         self.default_branch = default_branch
         self.git_factory = git_factory
         self.logger = logging.getLogger(__name__)
+        self._opencode_major_version: Optional[int] = None
 
     def _sanitize_prompt(self, prompt: str) -> str:
         """Sanitize prompt to prevent command injection.
@@ -262,6 +263,29 @@ class Processor:
         instructions.append(continue_instruction)
         return "\n".join(instructions)
 
+    def _get_opencode_major_version(self) -> int:
+        """Detect installed OpenCode major version (cached). Defaults to 2 if unknown."""
+        if self._opencode_major_version is not None:
+            return self._opencode_major_version
+
+        major_version = 2
+        try:
+            result = subprocess.run(
+                ["opencode", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            output = f"{result.stdout}\n{result.stderr}"
+            match = re.search(r"\bv?(\d+)\.\d+", output)
+            if match:
+                major_version = int(match.group(1))
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
+            self.logger.debug(f"Could not detect OpenCode version, defaulting to v2: {e}")
+
+        self._opencode_major_version = major_version
+        return major_version
+
     def _build_ai_command(self, prompt: str, repo_path: Path, model_override: Optional[str] = None, agent: Optional[str] = None) -> list[str]:
         """Build the command list for the AI tool."""
         if agent:
@@ -277,12 +301,20 @@ class Processor:
             if model_override:
                 cmd.extend(["--model", model_override])
         elif self.ai_tool_mode == "opencode":
-            cmd = ["opencode", "--print-logs"]
-            if model_override:
-                cmd.extend(["--model", model_override])
-            if agent:
-                cmd.extend(["--agent", agent])
-            cmd.extend(["run", prompt, "--thinking", "--log-level", "DEBUG"])
+            if self._get_opencode_major_version() >= 2:
+                cmd = ["opencode", "--print-logs", "--log-level", "debug", "run"]
+                if model_override:
+                    cmd.extend(["--model", model_override])
+                if agent:
+                    cmd.extend(["--agent", agent])
+                cmd.extend(["--thinking", prompt])
+            else:
+                cmd = ["opencode", "--print-logs"]
+                if model_override:
+                    cmd.extend(["--model", model_override])
+                if agent:
+                    cmd.extend(["--agent", agent])
+                cmd.extend(["run", prompt, "--thinking", "--log-level", "DEBUG"])
         elif self.ai_tool_mode in ["opencode-custom", "custom"]:
             if not self.ai_tool_custom_command:
                 raise ValueError(f"AI_TOOL_CUSTOM_COMMAND not set for {self.ai_tool_mode} mode")

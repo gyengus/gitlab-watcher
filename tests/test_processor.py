@@ -1585,6 +1585,70 @@ class TestProcessorAgentSelection:
         assert "--agent" in cmd
         assert cmd[cmd.index("--agent") + 1] == "Android developer"
 
+    def test_build_ai_command_opencode_v2_vs_v1(self, processor: Processor, project_config: ProjectConfig) -> None:
+        """Test opencode command generation for both v2 and v1."""
+        processor.ai_tool_mode = "opencode"
+
+        processor._opencode_major_version = 2
+        cmd_v2 = processor._build_ai_command(
+            "Prompt text",
+            project_config.path,
+            model_override="openrouter/test",
+            agent="Android developer",
+        )
+        assert cmd_v2 == [
+            "opencode",
+            "--print-logs",
+            "--log-level",
+            "debug",
+            "run",
+            "--model",
+            "openrouter/test",
+            "--agent",
+            "Android developer",
+            "--thinking",
+            "Prompt text",
+        ]
+
+        processor._opencode_major_version = 1
+        cmd_v1 = processor._build_ai_command(
+            "Prompt text",
+            project_config.path,
+            model_override="openrouter/test",
+            agent="Android developer",
+        )
+        assert cmd_v1 == [
+            "opencode",
+            "--print-logs",
+            "--model",
+            "openrouter/test",
+            "--agent",
+            "Android developer",
+            "run",
+            "Prompt text",
+            "--thinking",
+            "--log-level",
+            "DEBUG",
+        ]
+
+    def test_get_opencode_major_version_parsing_and_caching(self, processor: Processor) -> None:
+        """Test _get_opencode_major_version parses v1/v2 output and caches the result."""
+        mock_res = Mock(stdout="opencode v2.1.4\n", stderr="")
+        with patch("subprocess.run", return_value=mock_res) as mock_run:
+            assert processor._get_opencode_major_version() == 2
+            # Cached on second call
+            assert processor._get_opencode_major_version() == 2
+            mock_run.assert_called_once()
+
+        processor._opencode_major_version = None
+        mock_res_v1 = Mock(stdout="1.19.2\n", stderr="")
+        with patch("subprocess.run", return_value=mock_res_v1):
+            assert processor._get_opencode_major_version() == 1
+
+        processor._opencode_major_version = None
+        with patch("subprocess.run", side_effect=FileNotFoundError("not found")):
+            assert processor._get_opencode_major_version() == 2
+
     def test_build_ai_command_custom_with_agent_placeholder(self, processor: Processor, project_config: ProjectConfig) -> None:
         """Test building custom AI command with agent placeholder."""
         processor.ai_tool_mode = "opencode-custom"

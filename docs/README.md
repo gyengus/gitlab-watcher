@@ -594,9 +594,9 @@ AI_TOOL_CUSTOM_COMMAND="my-claude --prompt {prompt}"
 AI_TOOL_MODE="custom"
 AI_TOOL_CUSTOM_COMMAND="my-opencode --task {prompt} --workspace {cwd}"
 
-# OpenCode custom command with agent support
+# OpenCode custom command with agent support (OpenCode v2)
 AI_TOOL_MODE="opencode-custom"
-AI_TOOL_CUSTOM_COMMAND="opencode --agent {agent} run {prompt}"
+AI_TOOL_CUSTOM_COMMAND="opencode run --agent {agent} {prompt}"
 ```
 
 #### Selecting OpenCode Agents via Labels

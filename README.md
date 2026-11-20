@@ -172,7 +172,7 @@ AI_TOOL_MODE="opencode"
 AI_TOOL_FAILOVER_MODEL="openrouter/google/gemma-3-12b-it:free"
 
 # Custom command with model placeholder support
-AI_TOOL_CUSTOM_COMMAND="opencode --model {model} run {prompt} --thinking --log-level DEBUG"
+AI_TOOL_CUSTOM_COMMAND="opencode run --model {model} --thinking --log-level debug {prompt}"
 ```
 
 #### How Failover Works
@@ -276,7 +276,7 @@ For `opencode`, `opencode-custom`, and `custom` modes, you can specify models dy
 
 ```bash
 # Opencode mode with model parameter
-AI_TOOL_CUSTOM_COMMAND="opencode --model {model} run {prompt} --thinking --log-level DEBUG"
+AI_TOOL_CUSTOM_COMMAND="opencode run --model {model} --thinking --log-level debug {prompt}"
 
 # Custom command with model and working directory placeholders
 AI_TOOL_CUSTOM_COMMAND="my-ai-tool --model {model} --prompt \"{prompt}\" --cwd {cwd}"
@@ -299,7 +299,7 @@ You can dynamically select which OpenCode agent should process a specific issue 
 2. **Mutual Exclusion**: If multiple agent labels are assigned, the watcher automatically retains the first one and removes the other redundant ones from the issue to ensure clarity.
 3. **MR Label Inheritance**: When the watcher creates a Merge Request for the issue, it copies the selected agent label to the MR.
 4. **Dynamic MR Comment Handling**: You can change the agent on the MR at any time (e.g. from `agent:Senior frontend developer` to `agent:Senior software testing expert`). The watcher will always use the agent currently labeled on the MR when processing new reviewer comments.
-5. **Custom Commands**: You can use the `{agent}` placeholder in your custom command template (e.g., `AI_TOOL_CUSTOM_COMMAND="opencode --agent {agent} run {prompt}"`). If no agent label is present on the task, the placeholder evaluates to an empty string `""` and the watcher lets OpenCode default to its own configured agent.
+5. **Custom Commands**: You can use the `{agent}` placeholder in your custom command template (e.g., `AI_TOOL_CUSTOM_COMMAND="opencode run --agent {agent} {prompt}"`). If no agent label is present on the task, the placeholder evaluates to an empty string `""` and the watcher lets OpenCode default to its own configured agent.
 6. **Discord Notifications**: The name of the selected agent is displayed in the Discord start notifications and comment processing messages.
 
 ### Timeout & Error Diagnostics
@@ -326,10 +326,10 @@ If the failover feature isn't working as expected:
 To test failover manually:
 ```bash
 # Test with opencode mode
-opencode --model openrouter/google/gemma-3-12b-it:free run "test prompt" --thinking
+opencode run --model openrouter/google/gemma-3-12b-it:free --thinking "test prompt"
 
 # Test with custom command
-opencode --model openrouter/google/gemma-3-12b-it:free run {prompt} --thinking --log-level DEBUG
+opencode run --model openrouter/google/gemma-3-12b-it:free --thinking --log-level debug {prompt}
 ```
 
 ## Development & Contributing
