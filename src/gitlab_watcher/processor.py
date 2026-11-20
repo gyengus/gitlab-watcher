@@ -33,7 +33,7 @@ from .discord import DiscordWebhook
 from .exceptions import GitLabAPIError
 from .git_ops import GitOps
 from .gitlab_client import GitLabClient, Issue, MergeRequest, Note
-from .logging_utils import sanitize_for_log
+from .logging_utils import mask_output_secrets, sanitize_for_log
 from .protocols import GitOperations
 from .state import StateManager
 
@@ -104,7 +104,7 @@ class Processor:
             ValueError: If prompt contains forbidden patterns
         """
         for pattern in FORBIDDEN_PATTERNS:
-            match = re.search(pattern, prompt)
+            match = re.search(pattern, prompt, re.IGNORECASE)
             if match:
                 matched_text = match.group(0)
                 # Truncate matched text if it's very long
@@ -213,10 +213,13 @@ class Processor:
             # SEC-01 fix: use is_relative_to for robust path prefix checking
             is_trusted = any(Path(real_binary_path).is_relative_to(Path(td)) for td in TRUSTED_BINARY_DIRS)
             
-            # Also allow binaries within the current user's home (e.g. ~/.local/bin)
+            # Also allow binaries within the current user's home (e.g. ~/.local/bin, ~/.opencode/bin)
             # but resolve it first to ensure we compare apples to apples
-            home_bin = (Path.home() / ".local" / "bin").resolve()
-            if not is_trusted and Path(real_binary_path).is_relative_to(home_bin):
+            trusted_user_dirs = [
+                (Path.home() / ".local" / "bin").resolve(),
+                (Path.home() / ".opencode" / "bin").resolve(),
+            ]
+            if not is_trusted and any(Path(real_binary_path).is_relative_to(d) for d in trusted_user_dirs):
                 is_trusted = True
             
             # For development/tests, we might want to allow binaries in the current directory
@@ -226,7 +229,10 @@ class Processor:
             # is_trusted = True
                 
             if not is_trusted:
-                raise ValueError(f"AI tool binary located in untrusted directory: {binary}. Binary must be in {TRUSTED_BINARY_DIRS} or {home_bin}")
+                raise ValueError(
+                    f"AI tool binary located in untrusted directory: {binary}. "
+                    f"Binary must be in {TRUSTED_BINARY_DIRS} or {trusted_user_dirs}"
+                )
 
             if not os.access(real_binary_path, os.X_OK):
                 raise ValueError(f"AI tool binary is not executable: {binary}")
@@ -270,8 +276,9 @@ class Processor:
 
         major_version = 2
         try:
+            opencode_bin = self._validate_ai_binary("opencode")
             result = subprocess.run(
-                ["opencode", "--version"],
+                [opencode_bin, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -295,21 +302,22 @@ class Processor:
 
         if self.ai_tool_mode == "ollama":
             model_to_use = model_override if model_override else "claude"
-            cmd = ["ollama", "launch", model_to_use, "--", "-p", "--permission-mode", "acceptEdits", prompt]
+            cmd = [self._validate_ai_binary("ollama"), "launch", model_to_use, "--", "-p", "--permission-mode", "acceptEdits", prompt]
         elif self.ai_tool_mode == "direct":
-            cmd = ["claude", "-p", prompt, "--permission-mode", "acceptEdits"]
+            cmd = [self._validate_ai_binary("claude"), "-p", prompt, "--permission-mode", "acceptEdits"]
             if model_override:
                 cmd.extend(["--model", model_override])
         elif self.ai_tool_mode == "opencode":
+            opencode_bin = self._validate_ai_binary("opencode")
             if self._get_opencode_major_version() >= 2:
-                cmd = ["opencode", "--print-logs", "--log-level", "debug", "run"]
+                cmd = [opencode_bin, "--print-logs", "--log-level", "debug", "run"]
                 if model_override:
                     cmd.extend(["--model", model_override])
                 if agent:
                     cmd.extend(["--agent", agent])
                 cmd.extend(["--thinking", prompt])
             else:
-                cmd = ["opencode", "--print-logs"]
+                cmd = [opencode_bin, "--print-logs"]
                 if model_override:
                     cmd.extend(["--model", model_override])
                 if agent:
@@ -663,7 +671,7 @@ class Processor:
                 raise
 
             with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
-                f.write(final_output)
+                f.write(mask_output_secrets(final_output))
         except Exception as e:
             self.logger.error(f"Failed to write AI log to {path}: {e}")
 
@@ -1056,15 +1064,24 @@ class Processor:
         """Read relevant project documentation files (CLAUDE.md, ARCHITECTURE.md, etc)."""
         combined_content = ""
         doc_files = ["CLAUDE.md", "CONTRIBUTING.md", "ARCHITECTURE.md", "README.md"]
-        
+        repo_root = repo_path.resolve()
+
         for doc_file in doc_files:
             p = repo_path / doc_file
-            if p.exists():
-                try:
-                    content = p.read_text(encoding="utf-8")
-                    combined_content += f"--- {doc_file} ---\n{content}\n\n"
-                except Exception as e:
-                    self.logger.warning(f"Failed to read {doc_file}: {e}")
+            if p.is_symlink():
+                self.logger.warning(f"Skipping symlinked documentation file for security: {doc_file}")
+                continue
+            if not p.is_file():
+                continue
+            try:
+                resolved = p.resolve()
+                if not resolved.is_relative_to(repo_root):
+                    self.logger.warning(f"Skipping documentation file resolving outside repo: {doc_file}")
+                    continue
+                content = resolved.read_text(encoding="utf-8")
+                combined_content += f"--- {doc_file} ---\n{content}\n\n"
+            except Exception as e:
+                self.logger.warning(f"Failed to read {doc_file}: {e}")
         
         if len(combined_content) > MAX_DOC_CONTENT_LENGTH:
 

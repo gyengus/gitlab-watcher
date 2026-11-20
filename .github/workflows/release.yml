@@ -34,7 +34,9 @@ jobs:
           python-version: "3.12"
 
       - name: Generate Release Notes
-        run: python3 scripts/changelog.py --release-notes "${{ inputs.tag_name || github.ref_name }}" > release_notes.md
+        env:
+          TARGET_TAG: ${{ inputs.tag_name || github.ref_name }}
+        run: python3 scripts/changelog.py --release-notes "$TARGET_TAG" > release_notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

@@ -150,13 +150,43 @@ class GitLabClient:
         response = self._request("GET", self._api_url(None, "/user"))
         return response.json()
 
+    def get_project_member_access_level(self, project_id: int, username: str) -> Optional[int]:
+        """Return the project's effective access level for a username, or None if not a member."""
+        if not username:
+            return None
+
+        normalized = username.lower()
+        cache_key = f"member_{project_id}_{normalized}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached.get("access_level")
+
+        try:
+            members = self._request_all(
+                "GET",
+                self._api_url(project_id, "/members/all"),
+                params={"query": username},
+            )
+            for member in members:
+                if isinstance(member, dict) and str(member.get("username", "")).lower() == normalized:
+                    level = member.get("access_level")
+                    if isinstance(level, int):
+                        self._cache.set(cache_key, {"access_level": level})
+                        return level
+            self._cache.set(cache_key, {"access_level": None})
+        except Exception as e:
+            self.logger.warning(f"Could not verify member access level for {sanitize_for_log(username)}: {e}")
+
+        return None
+
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Make HTTP request with timeout and retry logic."""
         # Enforce SSL verification based on client configuration
         if "verify" not in kwargs:
             kwargs["verify"] = self.ssl_verify
-        # Set default timeout if not provided
+        # Set default timeout and disable redirects to prevent PRIVATE-TOKEN leakage / SSRF
         kwargs.setdefault("timeout", self.timeout)
+        kwargs.setdefault("allow_redirects", False)
 
         try:
             response = self.session.request(method, url, **kwargs)

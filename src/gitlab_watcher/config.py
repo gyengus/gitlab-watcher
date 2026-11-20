@@ -44,6 +44,7 @@ class Config:
     log_level: str = "INFO"
     gitlab_username: str = "OpenCode"
     default_branch: str = "master"
+    min_access_level: int = 20
     project_dirs: list[str] = field(default_factory=list)
     projects: list[ProjectConfig] = field(default_factory=list)
 
@@ -183,12 +184,14 @@ def load_config(config_path: str) -> Config:
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file}")
 
-    # Security check: Ensure config file is not world-writable
+    # Security check: Ensure config file has restricted permissions
     mode = config_file.stat().st_mode
     if mode & stat.S_IWOTH:
         logger.warning(f"Config file {config_file} is world-writable! This is a security risk.")
     if mode & stat.S_IWGRP:
         logger.warning(f"Config file {config_file} is group-writable. Ensure this is intentional.")
+    if mode & (stat.S_IROTH | stat.S_IRGRP):
+        logger.warning(f"Config file {config_file} is readable by group/others; recommend 'chmod 600' to protect GITLAB_TOKEN.")
 
     raw_config = parse_bash_config(config_file)
 
@@ -236,6 +239,7 @@ def load_config(config_path: str) -> Config:
         "log_file": get_str("LOG_FILE", "/var/log/gitlab-watcher.log"),
         "log_level": get_str("LOG_LEVEL", "INFO").upper(),
         "default_branch": get_str("DEFAULT_BRANCH", "master"),
+        "min_access_level": get_int("MIN_ACCESS_LEVEL", 20),
     }
 
     # Only override gitlab_username if explicitly set in config
@@ -244,6 +248,11 @@ def load_config(config_path: str) -> Config:
         config_args["gitlab_username"] = get_str("GITLAB_USERNAME")
 
     config = Config(**config_args)
+
+    if config.min_access_level < 10 or config.min_access_level > 50:
+        raise ValueError(
+            f"MIN_ACCESS_LEVEL must be between 10 and 50 (got {config.min_access_level})"
+        )
 
     work_dir_path = Path(config.work_dir).expanduser().resolve()
 

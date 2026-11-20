@@ -1,9 +1,16 @@
 """Discord webhook notifications."""
 
 from dataclasses import dataclass
+import re
 from typing import Optional
 
 import requests
+
+from .logging_utils import mask_output_secrets
+
+_DISCORD_WEBHOOK_RE = re.compile(
+    r"^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/[^/\s]+/[^/\s]+$"
+)
 
 
 @dataclass
@@ -23,6 +30,11 @@ class DiscordWebhook:
         """
         if not self.webhook_url:
             return True  # No webhook configured, skip silently
+
+        if not _DISCORD_WEBHOOK_RE.match(self.webhook_url):
+            return False
+
+        content = mask_output_secrets(content)
 
         # Discord has a 2000 character limit for message content.
         # Truncate if necessary, leaving room for the truncation message.

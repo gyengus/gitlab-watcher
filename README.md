@@ -135,6 +135,9 @@ LOG_FILE="/var/log/gitlab-watcher.log"
 # LOG_LEVEL options: DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_LEVEL="INFO"
 
+# Minimum GitLab access level to process MR comments (10=Guest, 20=Reporter, 30=Developer, 40=Maintainer, 50=Owner)
+MIN_ACCESS_LEVEL=20
+
 # List of absolute paths to project directories to monitor
 PROJECT_DIRS=(
   "/path/to/project1"

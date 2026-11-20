@@ -58,6 +58,7 @@ def mock_gitlab() -> MagicMock:
     """Create a mock GitLab client."""
     mock = MagicMock(spec=GitLabClient)
     mock.get_current_user.return_value = {"username": "claude"}
+    mock.get_project_member_access_level.return_value = 30
     return mock
 
 

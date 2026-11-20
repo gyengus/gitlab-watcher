@@ -449,7 +449,7 @@ class TestProcessorAIToolModes:
 
         assert success is True
         args = mock_popen.call_args[0][0]
-        assert args[0] == "ollama"
+        assert Path(args[0]).name == "ollama"
         assert args[1] == "launch"
         assert args[2] == "claude"
 
@@ -1482,10 +1482,11 @@ class TestProcessorCommentNoChanges:
         from gitlab_watcher.constants import MAX_AI_LOG_SIZE
         
         log_path = tmp_path / "test_truncation.log"
-        # Create content larger than MAX_AI_LOG_SIZE
-        # Use a mix of characters to ensure it's not just a single repeated char
+        # Create content larger than MAX_AI_LOG_SIZE (space-separated chunks)
         half_limit = MAX_AI_LOG_SIZE // 2
-        large_content = "A" * (half_limit + 100) + "MIDDLE" + "B" * (half_limit + 100)
+        chunk_a = ("AAAA " * ((half_limit + 100) // 5 + 1))[: half_limit + 100]
+        chunk_b = ("BBBB " * ((half_limit + 100) // 5 + 1))[: half_limit + 100]
+        large_content = chunk_a + "MIDDLE" + chunk_b
         
         processor._write_ai_log(log_path, large_content)
         
@@ -1495,8 +1496,8 @@ class TestProcessorCommentNoChanges:
         assert len(logged_content) < len(large_content)
         assert "... (output truncated due to size limit) ..." in logged_content
         # Should contain parts from beginning and end
-        assert logged_content.startswith("A" * 100)
-        assert logged_content.endswith("B" * 100)
+        assert logged_content.startswith("AAAA " * 20)
+        assert logged_content.endswith("BBBB " * 20)
         # Should NOT contain the MIDDLE part because it's in the truncated area
         assert "MIDDLE" not in logged_content
 
@@ -1581,7 +1582,7 @@ class TestProcessorAgentSelection:
         processor.ai_tool_mode = "opencode"
         cmd = processor._build_ai_command("Prompt text", project_config.path, agent="Android developer")
         
-        assert "opencode" in cmd
+        assert Path(cmd[0]).name == "opencode"
         assert "--agent" in cmd
         assert cmd[cmd.index("--agent") + 1] == "Android developer"
 
@@ -1589,47 +1590,48 @@ class TestProcessorAgentSelection:
         """Test opencode command generation for both v2 and v1."""
         processor.ai_tool_mode = "opencode"
 
-        processor._opencode_major_version = 2
-        cmd_v2 = processor._build_ai_command(
-            "Prompt text",
-            project_config.path,
-            model_override="openrouter/test",
-            agent="Android developer",
-        )
-        assert cmd_v2 == [
-            "opencode",
-            "--print-logs",
-            "--log-level",
-            "debug",
-            "run",
-            "--model",
-            "openrouter/test",
-            "--agent",
-            "Android developer",
-            "--thinking",
-            "Prompt text",
-        ]
+        with patch.object(processor, "_validate_ai_binary", side_effect=lambda x: x):
+            processor._opencode_major_version = 2
+            cmd_v2 = processor._build_ai_command(
+                "Prompt text",
+                project_config.path,
+                model_override="openrouter/test",
+                agent="Android developer",
+            )
+            assert cmd_v2 == [
+                "opencode",
+                "--print-logs",
+                "--log-level",
+                "debug",
+                "run",
+                "--model",
+                "openrouter/test",
+                "--agent",
+                "Android developer",
+                "--thinking",
+                "Prompt text",
+            ]
 
-        processor._opencode_major_version = 1
-        cmd_v1 = processor._build_ai_command(
-            "Prompt text",
-            project_config.path,
-            model_override="openrouter/test",
-            agent="Android developer",
-        )
-        assert cmd_v1 == [
-            "opencode",
-            "--print-logs",
-            "--model",
-            "openrouter/test",
-            "--agent",
-            "Android developer",
-            "run",
-            "Prompt text",
-            "--thinking",
-            "--log-level",
-            "DEBUG",
-        ]
+            processor._opencode_major_version = 1
+            cmd_v1 = processor._build_ai_command(
+                "Prompt text",
+                project_config.path,
+                model_override="openrouter/test",
+                agent="Android developer",
+            )
+            assert cmd_v1 == [
+                "opencode",
+                "--print-logs",
+                "--model",
+                "openrouter/test",
+                "--agent",
+                "Android developer",
+                "run",
+                "Prompt text",
+                "--thinking",
+                "--log-level",
+                "DEBUG",
+            ]
 
     def test_get_opencode_major_version_parsing_and_caching(self, processor: Processor) -> None:
         """Test _get_opencode_major_version parses v1/v2 output and caches the result."""

@@ -174,17 +174,18 @@ class Watcher:
             except (PermissionError, OSError) as e2:
                 self.logger.error(f"Failed to setup file logging: {e2}")
 
+        # Add sensitive data filter to both logger and file handler so child loggers are also filtered
+        self._sensitive_filter = SensitiveDataFilter()
+        self.logger.addFilter(self._sensitive_filter)
+
         if handler_path:
             # SEC-01: Pass file object to StreamHandler to use the secured fd
             file_handler = logging.StreamHandler(handler_path)
             file_handler.setFormatter(logging.Formatter(log_format))
+            file_handler.addFilter(self._sensitive_filter)
             # Add to our specific logger instead of root logger to avoid global leak in tests
             self.logger.addHandler(file_handler)
             self._log_handlers.append(file_handler)
-
-        # Add sensitive data filter
-        self._sensitive_filter = SensitiveDataFilter()
-        self.logger.addFilter(self._sensitive_filter)
         
         # In production mode (not tests), we might want to add to root logger
         # but for now let's keep it to our logger to fix the memory leak.
@@ -258,9 +259,10 @@ class Watcher:
             for result in addr_info:
                 ip_addr = result[4][0]
                 ip = ipaddress.ip_address(ip_addr)
+                check_ip = getattr(ip, "ipv4_mapped", None) or ip
                 # BUG-01 fix: Allow private IPs by default, only blocking loopback, link-local, unspecified, and reserved IPs.
                 # This ensures compatibility with self-hosted GitLab instances on intranets while preventing SSRF.
-                if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved:
+                if check_ip.is_loopback or check_ip.is_link_local or check_ip.is_unspecified or check_ip.is_reserved:
                     raise ValueError(f"GitLab URL hostname resolves to a forbidden IP: {ip_addr}")
                 allowed_ips.append(ip_addr)
             
@@ -592,6 +594,24 @@ class Watcher:
 
         for note in notes:
             if note.system or note.author_username == self.gitlab_username:
+                continue
+
+            access_level = self.gitlab.get_project_member_access_level(
+                project.project_id, note.author_username
+            )
+            min_level = self.config.min_access_level
+            if not isinstance(access_level, int) or access_level < min_level:
+                self._log_warning(
+                    project.project_id,
+                    "Ignoring comment %s on MR !%s from unauthorized user '%s' (access_level=%s, required>=%s)",
+                    note.id,
+                    mr.iid,
+                    sanitize_for_log(note.author_username),
+                    access_level,
+                    min_level,
+                )
+                if isinstance(access_level, int):
+                    self._processed_notes.add(note.id)
                 continue
 
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))

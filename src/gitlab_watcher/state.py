@@ -46,12 +46,13 @@ class StateManager:
             save_delay: Delay in seconds for debounced saves
         """
         self.work_dir = work_dir
-        # Security: Ensure work directory exists and has restricted permissions (0700)
+        # Security: Ensure work directory is not a symlink and has restricted permissions (0700)
+        import os
+        if os.name != 'nt' and self.work_dir.is_symlink():
+            raise RuntimeError(f"Security risk: {self.work_dir} is a symbolic link and will not be used.")
         if not self.work_dir.exists():
-            import os
             os.makedirs(self.work_dir, mode=0o700, exist_ok=True)
         try:
-            import os
             st = self.work_dir.stat()
             if os.name != 'nt' and st.st_uid != os.getuid():
                 raise PermissionError(f"Directory {self.work_dir} is owned by UID {st.st_uid}, not current UID {os.getuid()}. Aborting for security.")

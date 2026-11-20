@@ -518,6 +518,7 @@ gitlab-watcher --verbose
 | `AI_TOOL_TIMEOUT` | int | 3600 | Maximum execution time in seconds |
 | `AI_TOOL_FAILOVER_MODEL` | string | "" | Fallback model name for service errors |
 | `DEFAULT_BRANCH` | string | "master" | Default base branch for creating MRs |
+| `MIN_ACCESS_LEVEL` | int | 20 | Minimum GitLab access level to process MR comments (`10`=Guest, `20`=Reporter, `30`=Developer, `40`=Maintainer, `50`=Owner) |
 | `WORK_DIR` | string | "/tmp/gitlab-watcher" | Directory for state files and AI logs |
 | `LOG_FILE` | string | "/var/log/gitlab-watcher.log" | Path to watcher's application log file |
 | `LOG_LEVEL` | string | "INFO" | Logging detail level |
