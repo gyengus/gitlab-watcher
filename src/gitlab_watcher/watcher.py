@@ -610,8 +610,8 @@ class Watcher:
                     access_level,
                     min_level,
                 )
-                if isinstance(access_level, int):
-                    self._processed_notes.add(note.id)
+                self._processed_notes.add(note.id)
+                self.state.update_mr_last_processed_note(project.project_id, mr.iid, note.id)
                 continue
 
             is_retry_request = bool(re.search(r"(?i)\bretry\b", note.body))

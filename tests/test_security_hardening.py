@@ -171,12 +171,31 @@ class TestSecurityHardening(unittest.TestCase):
                 processed = watcher._find_and_process_comment(project, mr)
                 self.assertFalse(processed)
                 mock_processor.process_comment.assert_not_called()
+                self.assertIn(101, watcher._processed_notes)
+
+                # Non-member (None) should also be recorded to prevent repeated warning spam
+                mock_gitlab.get_project_member_access_level.return_value = None
+                mock_gitlab.get_notes.return_value = [
+                    Note(
+                        id=103,
+                        body="Non-member comment",
+                        author_username="outsider",
+                        system=False,
+                        award_emojis=[],
+                    )
+                ]
+                self.assertFalse(watcher._find_and_process_comment(project, mr))
+                self.assertIn(103, watcher._processed_notes)
+                self.assertEqual(
+                    watcher.state.load(42).tracked_mrs["1"]["last_processed_note_id"],
+                    103,
+                )
 
                 # Reporter (20) should be allowed by default (new note ID)
                 mock_gitlab.get_project_member_access_level.return_value = 20
                 mock_gitlab.get_notes.return_value = [
                     Note(
-                        id=102,
+                        id=104,
                         body="Please fix formatting",
                         author_username="reporter_user",
                         system=False,
