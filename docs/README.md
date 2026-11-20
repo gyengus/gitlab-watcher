@@ -60,14 +60,19 @@ This documentation contains a comprehensive technical description of the GitLab 
 src/gitlab_watcher/
 ├── __init__.py          # Package initialization, version definition
 ├── __main__.py          # python -m gitlab_watcher entry point
+├── cache.py             # Timed in-memory cache
 ├── cli.py               # Click CLI entry point
-├── watcher.py           # Main monitoring loop
-├── processor.py         # Business logic (issue/MR processing)
-├── gitlab_client.py     # GitLab API client
-├── git_ops.py           # Git operations wrapper
 ├── config.py            # Configuration management
+├── constants.py         # Shared timeouts, limits, and error patterns
+├── discord.py           # Discord webhook notifications
+├── exceptions.py        # Custom exception types
+├── git_ops.py           # Git operations wrapper
+├── gitlab_client.py     # GitLab API client
+├── logging_utils.py     # Sensitive data masking & logging setup
+├── processor.py         # Business logic (issue/MR processing)
+├── protocols.py         # Structural typing protocols
 ├── state.py             # State persistence
-└── discord.py           # Discord webhook notifications
+└── watcher.py           # Main monitoring loop
 ```
 
 ### 2.2 Detailed Module Descriptions
@@ -138,13 +143,14 @@ The `Processor` class is responsible for the actual processing of issues and MR 
 
 **AI Tool Modes:**
 
-The system supports four modes for running the AI tool:
+The system supports five modes for running the AI tool:
 
 | Mode | Command | Description |
 |-----|---------|--------|
-| `ollama` | `ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"` | Default mode, via Ollama container |
+| `ollama` | `ollama launch claude -- -p --permission-mode acceptEdits "<prompt>"` | Default mode, via Ollama |
 | `direct` | `claude -p --permission-mode acceptEdits "<prompt>"` | Direct Claude CLI call |
-| `opencode` | `opencode "<prompt>"` | Using Opencode CLI |
+| `opencode` | `opencode run "<prompt>"` | Using Opencode CLI |
+| `opencode-custom` | User-defined OpenCode command | Custom OpenCode template with placeholders |
 | `custom` | User-defined command | Flexible, custom configuration for any AI tool |
 
 **Prompt Structure:**
@@ -333,7 +339,7 @@ PROJECT_DIRS=(
 
 **Project Discovery:**
 
-The system automatically discovers projects based on `PROJECT.md` files in the `PROJECT_DIRS` directories. The line `Project ID: <number>` in the file defines the GitLab project ID.
+The system automatically discovers projects based on `PROJECT.md`, `AGENTS.md`, or `CLAUDE.md` files in the `PROJECT_DIRS` directories. The line `Project ID: <number>` in the file defines the GitLab project ID.
 
 Supported formats:
 - `Project ID: 31`
@@ -422,7 +428,7 @@ Based on `pyproject.toml`:
 
 **Main Dependencies:**
 - `click>=8.0.0` - CLI framework
-- `requests>=2.28.0` - HTTP client
+- `requests>=2.32.0` - HTTP client
 
 **Development Dependencies:**
 - `pytest>=7.0.0` - Test framework
@@ -501,10 +507,11 @@ gitlab-watcher --verbose
 |---------|-------|-----------------|--------|
 | `GITLAB_URL` | string | - | GitLab server URL |
 | `GITLAB_TOKEN` | string | - | Personal Access Token |
+| `GITLAB_SSL_VERIFY` | bool | true | Verify SSL certificates for GitLab API |
 | `DISCORD_WEBHOOK` | string | "" | Discord webhook URL (optional) |
 | `LABEL_IN_PROGRESS` | string | "In progress" | Name of the "In progress" label |
 | `LABEL_REVIEW` | string | "Review" | Name of the "Review" label |
-| `GITLAB_USERNAME` | string | "claude" | Monitored GitLab username |
+| `GITLAB_USERNAME` | string | "OpenCode" | Monitored GitLab username |
 | `POLL_INTERVAL` | int | 30 | Polling interval (seconds) |
 | `AI_TOOL_MODE` | string | "ollama" | AI tool mode |
 | `AI_TOOL_CUSTOM_COMMAND` | string | "" | Custom command (for custom mode) |
@@ -524,14 +531,16 @@ gitlab-watcher --verbose
    - `api` - Full API access
    - `write_repository` - Repository write access
 
-### 4.3 Automatic Discovery of GitLab URL and Token
+### 4.3 Automatic Discovery of GitLab URL
 
-If `GITLAB_URL` and `GITLAB_TOKEN` are not specified in the configuration, the system attempts to extract them from the git remote URL:
+If `GITLAB_URL` is not specified in the configuration, the system attempts to extract it from the git remote URL:
 
 ```
-https://token@git.example.com/group/project.git  → URL: https://git.example.com, Token: token
-https://user:token@git.example.com/group/project.git  → URL: https://git.example.com, Token: token
+https://git.example.com/group/project.git  → URL: https://git.example.com
+git@git.example.com:group/project.git      → URL: https://git.example.com
 ```
+
+> **Note:** For security reasons, `GITLAB_TOKEN` is **never** extracted from git remote URLs. It must be set in the configuration file or via the `GITLAB_TOKEN` environment variable.
 
 ### 4.4 AI Tool Modes
 
@@ -930,24 +939,17 @@ else:
 
 Errors are logged and the process is safely aborted.
 
-### 8.3 Claude CLI Errors
+### 8.3 AI Tool CLI Errors
 
-```python
-try:
-    result = subprocess.run(cmd, cwd=repo_path, timeout=600, ...)
-    return result.returncode == 0, result.stdout + result.stderr
-except subprocess.TimeoutExpired:
-    return False, "Claude timed out"
-except FileNotFoundError:
-    return False, "Claude CLI not found"
-```
+The `Processor` enforces both an overall execution timeout (`AI_TOOL_TIMEOUT`, default `3600`s / 1 hour) and a silence timeout (`SILENCE_TIMEOUT`, `1800`s / 30 minutes without output), and captures partial `stdout`/`stderr` on failure or timeout.
 
 **Types of Errors:**
-- Timeout (after 600s)
-- CLI not found
-- Non-zero exit code
+- Overall timeout (configurable via `AI_TOOL_TIMEOUT`, default 3600s)
+- Silence timeout (no output for 1800s)
+- CLI executable not found
+- Non-zero exit code or matched provider error patterns (triggers failover if configured)
 
-### 8.5 Main Loop Error Handling
+### 8.4 Main Loop Error Handling
 
 ```python
 while True:
@@ -1280,5 +1282,5 @@ This project uses...
 
 ---
 
-*Documentation Version: 1.0.0*
-*Last Updated: 2026-03-11*
+*Documentation Version: 1.1.0*
+*Last Updated: 2026-11-20*

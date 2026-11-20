@@ -122,7 +122,7 @@ PROJECT_DIRS=(
 )
 ```
 
-*(Note: If `GITLAB_URL` and `GITLAB_TOKEN` are not provided in the configuration, the watcher will attempt to extract them from your git remotes automatically.)*
+*(Note: If `GITLAB_URL` is not provided in the configuration, the watcher will attempt to extract it from your git remotes automatically. For security reasons, `GITLAB_TOKEN` is never extracted from git remotes and must be provided in the config file or via the `GITLAB_TOKEN` environment variable.)*
 
 Each monitored project directory must have a `PROJECT.md`, `AGENTS.md`, or `CLAUDE.md` file with a corresponding Project ID:
 
@@ -212,8 +212,8 @@ Add `CLAUDE.md` or `AGENTS.md` to your project directory for project-specific gu
 
 ## AI Coding Rules
 ### Language Specific
-- Python: Use Objects.requireNonNull() for null checks
-- JavaScript: Use Optional chaining
+- Java: Use `Objects.requireNonNull()` for null checks
+- JavaScript: Use optional chaining (`?.`)
 
 ### Testing Requirements
 - Run pytest after all code changes
@@ -247,6 +247,7 @@ The watcher supports multiple AI tools:
 | `ollama` | Launches Claude via Ollama (requires both `ollama` and `claude`) (default) | No |
 | `direct` | Direct Claude CLI execution (`claude`) | No |
 | `opencode` | Opencode CLI execution using `run` subcommand | Yes (`--model` flag) |
+| `opencode-custom` | Custom OpenCode command template | Yes (`{model}` placeholder) |
 | `custom` | Custom command for any AI tool | Yes (`{model}` placeholder) |
 
 ### Model Parameter Support
@@ -288,7 +289,7 @@ If an AI tool exceeds the configured `AI_TOOL_TIMEOUT` or fails with an error, t
 ## Troubleshooting
 
 ### "Default agent not found" (OpenCode)
-If you are using `oh-my-opencode` or similar plugins that add rejtett (hidden) characters to agent names, OpenCode might fail to find the agent in non-interactive mode.
+If you are using `oh-my-opencode` or similar plugins that add hidden characters to agent names, OpenCode might fail to find the agent in non-interactive mode.
 **Solution**: Define an explicit `default_agent` in your `~/.config/opencode/opencode.json` without hidden characters or special sorting prefixes.
 
 ### Discord Log Formatting
