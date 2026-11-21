@@ -1,0 +1,47 @@
+title: "[Q&A]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question about setting up, configuring, or running GitLab Watcher? Ask here!
+        Please remember to **redact `GITLAB_TOKEN`, Discord webhook URLs, and any secrets** before posting config snippets or logs.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What is your question?
+      description: Describe what you are trying to achieve or where you are stuck.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ai-tool
+    attributes:
+      label: AI tool mode
+      options:
+        - ollama
+        - direct (Claude CLI)
+        - opencode
+        - custom
+        - opencode-custom
+        - Not sure / N/A
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: GitLab Watcher version
+      placeholder: "e.g. 2.0.0"
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What have you tried so far?
+      description: Share any sanitized configuration snippets, commands, or relevant context.
+      render: shell
+    validations:
+      required: false
+

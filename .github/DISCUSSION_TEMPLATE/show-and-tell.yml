@@ -1,0 +1,31 @@
+title: "[Showcase]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Using GitLab Watcher in an interesting setup? Share your workflow, custom AI commands, or `agent:` label setups with the community!
+
+  - type: textarea
+    id: overview
+    attributes:
+      label: What are you automating?
+      description: Tell us about your projects, workflow, and how GitLab Watcher fits in.
+    validations:
+      required: true
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup & configuration highlights
+      description: Which AI tool mode, failover setup, or custom `AGENTS.md` / `PROJECT.md` rules worked best for you? (Redact any tokens or webhooks.)
+    validations:
+      required: false
+
+  - type: textarea
+    id: tips
+    attributes:
+      label: Lessons learned or tips
+      description: Anything that could help other users get the most out of GitLab Watcher.
+    validations:
+      required: false
+
