@@ -20,6 +20,7 @@ def mock_load_config():
 def mock_gitlab():
     mock = MagicMock(spec=GitLabClient)
     mock.get_current_user.return_value = {"username": "bot"}
+    mock.get_project_member_access_level.return_value = 30
     return mock
 
 @pytest.fixture

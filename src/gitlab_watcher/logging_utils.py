@@ -48,9 +48,35 @@ class SensitiveDataFilter(logging.Filter):
         Returns:
             Text with sensitive data masked
         """
-        for pattern, replacement in self.SENSITIVE_PATTERNS:
-            text = re.sub(pattern, replacement, text)
+        return mask_sensitive_data(text)
+
+
+def mask_sensitive_data(text: str) -> str:
+    """Mask sensitive tokens and credentials in arbitrary text."""
+    if not text:
         return text
+    for pattern, replacement in SensitiveDataFilter.SENSITIVE_PATTERNS:
+        text = re.sub(pattern, replacement, text)
+    return text
+
+
+_OUTPUT_SECRET_PATTERNS = [
+    (r"https?://[^:\s]+:[^@\s]+@", "https://***:***@"),
+    (r"https?://[^@\s]+@(?=[^/])", "https://***@"),
+    (r"\b(?:glpat|glcbt|gldt|gloas|glrt|ghp|gho|ghu|ghs|ghr|xoxb|xoxp)-[a-zA-Z0-9_\-]{10,}", "***TOKEN***"),
+    (r"\bsk-[a-zA-Z0-9_\-]{16,}", "***TOKEN***"),
+    (r"(?i)(PRIVATE-TOKEN\s*[:=]\s*)\S+", r"\1***TOKEN***"),
+    (r"(?i)(Bearer\s+)[a-zA-Z0-9_\-.]+", r"\1***TOKEN***"),
+]
+
+
+def mask_output_secrets(text: str) -> str:
+    """Mask known tokens and URL credentials in user-facing output without mangling stack traces."""
+    if not text:
+        return text
+    for pattern, replacement in _OUTPUT_SECRET_PATTERNS:
+        text = re.sub(pattern, replacement, text)
+    return text
 
 
 def sanitize_for_log(text: str, preserve_newlines: bool = False) -> str:
@@ -84,4 +110,4 @@ def sanitize_for_log(text: str, preserve_newlines: bool = False) -> str:
     return text.strip()
 
 
-__all__ = ["SensitiveDataFilter", "sanitize_for_log"]
+__all__ = ["SensitiveDataFilter", "mask_output_secrets", "mask_sensitive_data", "sanitize_for_log"]

@@ -1,0 +1,102 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in GitLab Watcher
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the details below so we can reproduce and fix it quickly.
+        **Important:** Always redact `GITLAB_TOKEN`, Discord webhook URLs, and any other secrets before posting logs or config snippets.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Configure `gitlab-watcher.conf` with '...'
+        2. Run `gitlab-watcher ...`
+        3. Trigger an issue or MR comment
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: GitLab Watcher version
+      description: Output of `gitlab-watcher --version` or commit hash.
+      placeholder: "e.g. 1.2.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: python-version
+    attributes:
+      label: Python version
+      options:
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - "Other"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ai-tool
+    attributes:
+      label: AI tool configured
+      options:
+        - ollama
+        - direct (Claude CLI)
+        - opencode
+        - custom
+        - opencode-custom
+        - N/A
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gitlab-env
+    attributes:
+      label: GitLab environment
+      options:
+        - GitLab.com
+        - Self-hosted GitLab
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. Ubuntu 24.04, Debian 12, macOS 15"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or configuration
+      description: Paste any relevant log output or sanitized config snippets. **Do NOT include tokens or webhooks.**
+      render: shell
+    validations:
+      required: false
+

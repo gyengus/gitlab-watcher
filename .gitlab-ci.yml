@@ -46,6 +46,8 @@ test:
   stage: test
 
 .build_template:
+  variables:
+    GIT_DEPTH: "0"
   before_script:
     - apt-get update -qy && apt-get install -y git
     - python3 -m pip install --upgrade pip build twine
@@ -65,9 +67,8 @@ deploy_test:
     - python3 -m build --sdist --wheel --outdir dist/
     - ls -la dist/ && find dist/ -type f | sort
     
-    # Verify build integrity before upload (prevents 403 Bad Request errors)
-    - pip install check-wheel-contents check-build-deps --quiet || true
-    - twine check dist/* || echo "Twine checks passed with warnings or repository is full"
+    # Verify build integrity before upload
+    - twine check dist/*
     
     # Upload to test.pypi.org with skip-existing flag for both wheel and source distributions
     # This handles case where package already exists on PyPI (non-fatal, handled by --skip-existing)

@@ -12,6 +12,16 @@ requires-python = ">=3.11"
 authors = [
     {name = "Gyengus"}
 ]
+keywords = [
+    "gitlab",
+    "ai-agent",
+    "claude",
+    "opencode",
+    "ollama",
+    "automation",
+    "merge-request",
+    "devtools",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -49,4 +59,5 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/gitlab_watcher/_version.py"
-fallback_version = "1.0.0-dev"
+fallback_version = "1.0.0.dev0"
+local_scheme = "no-local-version"

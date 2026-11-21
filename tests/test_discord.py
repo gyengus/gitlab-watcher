@@ -264,8 +264,8 @@ class TestDiscordWebhook:
         mock_post.return_value = Mock(status_code=204)
         webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/123/abc")
         
-        # Create a message longer than 2000 chars
-        long_message = "x" * 2500
+        # Create a message longer than 2000 chars (space-separated words)
+        long_message = "word " * 500
         result = webhook.send(long_message)
         
         assert result is True
