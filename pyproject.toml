@@ -59,4 +59,5 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/gitlab_watcher/_version.py"
-fallback_version = "1.0.0-dev"
+fallback_version = "1.0.0.dev0"
+local_scheme = "no-local-version"
