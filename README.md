@@ -1,3 +1,5 @@
+![GitLab Watcher — Autonomous AI Issue & Merge Request Automation](.github/assets/social-preview-1280x640.png)
+
 # GitLab Watcher — Autonomous AI Issue & Merge Request Automation
 
 [![PyPI version](https://img.shields.io/pypi/v/gitlab-watcher)](https://pypi.org/project/gitlab-watcher/)
@@ -9,7 +11,7 @@ Self-hosted Python daemon that monitors your GitLab projects and autonomously re
 ## Key Benefits
 
 - **Multi-Tool & Model Agnostic:** Works with Claude CLI (direct or launched via Ollama), OpenCode, or custom CLI wrappers.
-- **Built-in Failover:** Automatically switches to backup or free models (e.g., OpenRouter Gemma/DeepSeek) on 524, timeout, or rate-limit errors.
+- **Built-in Failover:** Automatically switches to your configured backup model on 524, timeout, or rate-limit errors.
 - **Label-Driven Agent Routing:** Assign specialized AI agents per issue or merge request using GitLab labels (`agent:...`).
 - **Security-First Design:** Never extracts tokens from git remotes, masks secrets in logs and Discord messages, enforces prompt sanitization, and isolates execution timeouts.
 - **Zero-Touch Cleanup:** Automatically updates your default branch and deletes merged feature branches.
@@ -28,6 +30,28 @@ Self-hosted Python daemon that monitors your GitLab projects and autonomously re
 - [Support & Donations](#support--donations)
 
 ## How It Works
+
+```mermaid
+flowchart TD
+    Poll(["Poll GitLab Projects"]) --> IssueCheck{"New assigned issue without workflow labels?"}
+    Poll --> MRCheck{"New non-bot comment on open MR?"}
+    Poll --> MergeCheck{"Tracked MR merged or closed?"}
+
+    IssueCheck -->|Yes| LabelProg["Add 'In progress' label"]
+    LabelProg --> Branch["Create branch {iid}-{slug}"]
+    Branch --> RunAI1["Run AI Tool (Claude / Ollama / OpenCode / Custom)"]
+    RunAI1 -->|524 or rate limit| Failover1["Automatic Failover Model"]
+    Failover1 --> PushMR
+    RunAI1 -->|Success| PushMR["Push branch and create MR"]
+    PushMR --> LabelRev["Move issue to 'Review' + Discord notify"]
+
+    MRCheck -->|Yes| Checkout["Checkout MR source branch"]
+    Checkout --> RunAI2["Run AI Tool with review feedback (respects 'agent:...' label)"]
+    RunAI2 -->|Push changes| NotifyMR["Push commits + Discord notify"]
+
+    MergeCheck -->|Yes| Cleanup["Pull default branch and delete feature branch"]
+    Cleanup --> ResetState["Reset project state + Discord notify"]
+```
 
 ### Issue Processing (Automatic)
 
@@ -172,7 +196,7 @@ Add the failover model to your `config.conf`:
 AI_TOOL_MODE="opencode"
 
 # Optional: Failover model for service issues
-AI_TOOL_FAILOVER_MODEL="openrouter/google/gemma-3-12b-it:free"
+AI_TOOL_FAILOVER_MODEL="provider/backup-model-name"
 
 # Custom command with model placeholder support
 AI_TOOL_CUSTOM_COMMAND="opencode run --model {model} --thinking --log-level debug {prompt}"
@@ -185,17 +209,6 @@ AI_TOOL_CUSTOM_COMMAND="opencode run --model {model} --thinking --log-level debu
 3. **Failover Trigger**: On service errors, switches to the configured failover model
 4. **Success Handling**: If failover succeeds, logs the success and continues processing
 5. **Failure Handling**: If both models fail, sends Discord notification and waits for next cycle
-
-#### Recommended Models for Hobby Projects
-
-**Free Models (for failover):**
-- `openrouter/google/gemma-3-12b-it:free` - Good coding model
-- `openrouter/google/gemma-3-27b-it:free` - More capable, still free
-- `openrouter/meta-llama/llama-3.2-3b-instruct:free` - Small but capable
-
-**Affordable Models (for primary use):**
-- `openrouter/deepseek/deepseek-chat-v3.1` - Very capable, low cost
-- `openrouter/anthropic/claude-3.5-haiku` - Fast and capable, moderate cost
 
 #### Failover Support by Mode
 
@@ -232,7 +245,7 @@ Create `~/.config/opencode/AGENTS.md` or `~/.claude/CLAUDE.md` with general codi
 ```
 
 #### Project-specific Rules
-Add `CLAUDE.md` or `AGENTS.md` to your project directory for project-specific guidelines:
+Add `PROJECT.md`, `AGENTS.md`, or `CLAUDE.md` to your project directory for project-specific guidelines and project discovery (`Project ID`):
 
 ```markdown
 # Project ID: 31
@@ -329,10 +342,10 @@ If the failover feature isn't working as expected:
 To test failover manually:
 ```bash
 # Test with opencode mode
-opencode run --model openrouter/google/gemma-3-12b-it:free --thinking "test prompt"
+opencode run --model "<your-failover-model>" --thinking "test prompt"
 
 # Test with custom command
-opencode run --model openrouter/google/gemma-3-12b-it:free --thinking --log-level debug {prompt}
+opencode run --model "<your-failover-model>" --thinking --log-level debug {prompt}
 ```
 
 ## Development & Contributing

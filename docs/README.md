@@ -23,7 +23,7 @@ This documentation contains a comprehensive technical description of the GitLab 
 
 ### 1.1 Objective
 
-**GitLab Watcher** is a Python-based daemon that automates software development workflows in a GitLab environment. The system uses Claude CLI for AI-assisted coding, allowing automatic processing of issues and responding to merge request comments.
+**GitLab Watcher** is a Python-based daemon that automates software development workflows in a GitLab environment. The system supports multiple AI coding tools—including Claude CLI (direct or via Ollama), OpenCode, and custom CLI wrappers—with automatic model failover, enabling autonomous issue resolution, merge request review handling, and post-merge branch cleanup.
 
 ### 1.2 Key Features
 
