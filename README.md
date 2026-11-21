@@ -3,6 +3,9 @@
 # GitLab Watcher — Autonomous AI Issue & Merge Request Automation
 
 [![PyPI version](https://img.shields.io/pypi/v/gitlab-watcher)](https://pypi.org/project/gitlab-watcher/)
+[![Tests](https://github.com/gyengus/gitlab-watcher/actions/workflows/tests.yml/badge.svg)](https://github.com/gyengus/gitlab-watcher/actions/workflows/tests.yml)
+[![Codecov](https://codecov.io/gh/gyengus/gitlab-watcher/branch/master/graph/badge.svg)](https://codecov.io/gh/gyengus/gitlab-watcher)
+[![CodeQL](https://github.com/gyengus/gitlab-watcher/actions/workflows/codeql.yml/badge.svg)](https://github.com/gyengus/gitlab-watcher/actions/workflows/codeql.yml)
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/gitlab-watcher)](https://pypi.org/project/gitlab-watcher/)
 [![License: MIT](https://img.shields.io/pypi/l/gitlab-watcher)](LICENSE)
 
